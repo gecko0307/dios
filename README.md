@@ -1,6 +1,6 @@
 <img align="left" alt="dios logo" src="https://github.com/gecko0307/mathom/raw/master/dios/logo_128.png" height="80" />
 
-DIOS is a minimal i386 operating system kernel written in D with some parts in assembly. It is tested on a real hardware and emulators like VirtualBox and QEMU. The main purpose of this project is demonstrating D's fitness for system development. I've written it initially in D1/GDC and recently ported to D2/LDC.
+DIOS is a minimal i386 OS kernel written in D with some parts in assembly. It is tested on a real hardware and emulators like VirtualBox and QEMU. The main purpose of this project is demonstrating D's fitness for system development. I've written it initially in D1/GDC and recently ported to D2/LDC.
 
 I don't have any big plans for this code - you are free to use it to create your own kernel. PRs implementing real-world OS features are welcome.
 
@@ -8,7 +8,10 @@ DIOS is an ELF kernel that requires a bootloader to run. Default setup in this r
 
 Features
 --------
-DIOS 0.0.2 boots up in 640x480 VESA graphics mode, gets Multiboot info from GRUB, draws bitmaps on the screen, supports keyboard and mouse.
+- Multiboot
+- 640x480 VESA graphics mode
+- PIT timer
+- Keyboard and mouse.
 
 Building
 --------
