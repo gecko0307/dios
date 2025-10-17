@@ -1,8 +1,8 @@
 module main;
 
+import bootloader.multiboot;
 import core.stdio;
 import core.error;
-import core.multiboot;
 import core.port;
 import core.gdt;
 import core.vga;

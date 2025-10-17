@@ -1,4 +1,4 @@
-module core.multiboot;
+module bootloader.multiboot;
 
 extern(C):
 
