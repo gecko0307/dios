@@ -6,6 +6,8 @@ I don't have any big plans for this code - you are free to use it to create your
 
 DIOS is an ELF kernel that requires a bootloader to run. Default setup in this repo uses GRUB2 eltorito.img for booting from the CD-ROM. You can also make a bootable USB stick with the DIOS ISO image using [Ventoy](https://www.ventoy.net/en/index.html).
 
+x86_64 version is WIP.
+
 Features
 --------
 - Multiboot startup protocol
