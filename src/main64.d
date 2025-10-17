@@ -45,17 +45,18 @@ struct Framebuffer
     uint width;
     uint height;
     uint pitch;
+    uint bytesPerPixel;
 }
 
 void fillScreen(
     Framebuffer* fb,
     uint color) @nogc nothrow
 {
-    for (ulong y = 0; y < fb.height; y++)
+    for (uint y = 0; y < fb.height; y++)
     {
-        for (ulong x = 0; x < fb.width; x++)
+        for (uint x = 0; x < fb.width; x++)
         {
-            ulong offset = y * fb.width + x;
+            uint offset = y * (fb.pitch / fb.bytesPerPixel) + x;
             fb.ptr[offset] = color;
         }
     }
@@ -65,7 +66,7 @@ void drawBitmap(
     Framebuffer* fb,
     uint x0, uint y0,
     const uint[] bitmap,
-    uint w, uint h) @nogc nothrow
+    ushort w, ushort h) @nogc nothrow
 {
     for (uint y = 0; y < h; y++)
     {
@@ -75,7 +76,7 @@ void drawBitmap(
         {
             if (x0 + x >= fb.width)
                 break;
-            ulong offset = (y0 + y) * fb.width + (x0 + x);
+            uint offset = (y0 + y) * (fb.pitch / fb.bytesPerPixel) + (x0 + x);
             uint pix = bitmap[y * w + x];
             if (pix != 0x00FF00FF)
                 fb.ptr[offset] = bitmap[y * w + x];
@@ -167,7 +168,8 @@ void kmain() @nogc nothrow
     for (ulong i = 0; i < memmap.entry_count; i++)
     {
         auto entry = memmap.entries[i];
-        if (entry.type == 0x1) { // 0x1 == USABLE
+        if (entry.type == 0x1) // 0x1 == USABLE
+        {
             memBaseAddr = entry.base;
             break;
         }
@@ -185,19 +187,38 @@ void kmain() @nogc nothrow
     
     auto fb = resp.framebuffers[0];
     
+    /*
+    if (resp.framebuffer_count > 1)
+    {
+        for (ulong i = 0; i < resp.framebuffer_count; i++)
+        {
+            auto _fb = resp.framebuffers[i];
+            if (_fb.bpp == 32)
+            {
+                fb = _fb;
+            }
+        }
+    }
+    */
+    
+    if (fb.bpp != 32)
+        hcf();
+    
     ulong backBufferAddr = memBaseAddr + 1024 * 1024; // leave 1 Mb
     
     Framebuffer frontBuffer;
-    frontBuffer.ptr = cast(uint*)fb.address;;
+    frontBuffer.ptr = cast(uint*)fb.address;
     frontBuffer.width = cast(uint)fb.width;
     frontBuffer.height = cast(uint)fb.height;
     frontBuffer.pitch = cast(uint)fb.pitch;
+    frontBuffer.bytesPerPixel = cast(uint)fb.bpp / 8;
     
     Framebuffer backBuffer;
     backBuffer.ptr = cast(uint*)backBufferAddr;
     backBuffer.width = cast(uint)fb.width;
     backBuffer.height = cast(uint)fb.height;
     backBuffer.pitch = cast(uint)fb.pitch;
+    backBuffer.bytesPerPixel = cast(uint)fb.bpp / 8;
     
     ulong numPixels = fb.height * fb.width;
     ulong framebufferSize = fb.height * fb.pitch;
