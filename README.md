@@ -18,7 +18,7 @@ Building
 Prerequisites:
 * Recent LDC compiler
 * [NASM](http://www.nasm.us)
-* mkisofs to generate Live CD
+* mkisofs to generate bootable CD image
 
 1. Run `./build.bat`
 2. You're done! Newly generated CD image is `dios.iso`. If you have QEMU installed, you can run it with `run.bat`.
