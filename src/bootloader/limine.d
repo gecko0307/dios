@@ -48,6 +48,20 @@ struct LimineFramebufferResponse
     LimineFramebuffer** framebuffers;
 }
 
+struct LimineMemmapEntry
+{
+    ulong base;
+    ulong length;
+    ulong type;
+};
+
+struct LimineMemmapResponse
+{
+    ulong revision;
+    ulong entry_count;
+    LimineMemmapEntry** entries;
+}
+
 struct LimineFramebufferRequest
 {
     ulong[4] id;
@@ -55,18 +69,38 @@ struct LimineFramebufferRequest
     LimineFramebufferResponse* response;
 }
 
-@(section(".limine_requests"))
-__gshared ulong[3] limine_base_revision;
+struct LimineMemmapRequest
+{
+    ulong[4] id;
+    ulong revision;
+    LimineMemmapResponse* response;
+}
+
+enum LIMINE_COMMON_MAGIC1 = 0xc7b1dd30df4c8b88;
+enum LIMINE_COMMON_MAGIC2 = 0x0a82e883a194f07b;
+
+enum ulong[4] LIMINE_MEMMAP_REQUEST = [
+    LIMINE_COMMON_MAGIC1,
+    LIMINE_COMMON_MAGIC2,
+    0x67cf3d9d378a806f,
+    0xe304acdfc50c3c62
+];
 
 enum ulong[4] LIMINE_FRAMEBUFFER_REQUEST = [
-    0xc7b1dd30df4c8b88,
-    0x0a82e883a194f07b,
+    LIMINE_COMMON_MAGIC1,
+    LIMINE_COMMON_MAGIC2,
     0x9d5827dcd881dd75,
     0xa3148604f6fab11b
 ];
 
 @(section(".limine_requests"))
+__gshared ulong[3] limine_base_revision;
+
+@(section(".limine_requests"))
 __gshared LimineFramebufferRequest framebufferRequest = LimineFramebufferRequest(LIMINE_FRAMEBUFFER_REQUEST, 0, null);
+
+@(section(".limine_requests"))
+__gshared LimineMemmapRequest memmapRequest = LimineMemmapRequest(LIMINE_MEMMAP_REQUEST, 0, null);
 
 @(section(".limine_requests_start"))
 __gshared ulong[4] limineRequestsStart;

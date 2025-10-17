@@ -82,37 +82,6 @@ enum: ubyte
     PS2_ENABLE_MOUSE = 0xF4
 };
 
-void mouse_handle_byte(uint val) @nogc nothrow
-{
-    packet[packetIndex] = cast(ubyte)val;
-    packetIndex++;
-
-    if (packetIndex == 3)
-    {
-        ubyte b0 = packet[0];
-        ubyte b1 = packet[1];
-        ubyte b2 = packet[2];
-
-        int dx = cast(int)b1;
-        int dy = cast(int)b2;
-
-        if (b0 & 0x10) dx -= 256; // X sign
-        if (b0 & 0x20) dy -= 256; // Y sign
-
-        mouseState.x += dx;
-        mouseState.y -= dy;
-
-        if (mouseState.x < 0) mouseState.x = 0;
-        if (mouseState.x > 639) mouseState.x = 639;
-        if (mouseState.y < 0) mouseState.y = 0;
-        if (mouseState.y > 479) mouseState.y = 479;
-
-        mouseState.buttons = b0 & 0x07; 
-
-        packetIndex = 0;
-    }
-}
-
 void pollMouse() @nogc nothrow
 {
     if (kPortReadByte(PS2_STATUS_PORT) & 0x01)

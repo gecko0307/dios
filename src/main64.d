@@ -18,6 +18,18 @@ void* memcpy(void* dest, const void* src, size_t n) @nogc nothrow
     return dest;
 }
 
+void* memset(void *s, int c, size_t n) @nogc nothrow
+{
+    ubyte* p = cast(ubyte*)s;
+
+    for (size_t i = 0; i < n; i++)
+    {
+        p[i] = cast(ubyte)c;
+    }
+
+    return s;
+}
+
 // Halt and catch fire
 void hcf() @nogc nothrow
 {
@@ -27,28 +39,34 @@ void hcf() @nogc nothrow
     }
 }
 
+struct Framebuffer
+{
+    uint* ptr;
+    uint width;
+    uint height;
+    uint pitch;
+}
+
 void fillScreen(
-    LimineFramebuffer* fb,
+    Framebuffer* fb,
     uint color) @nogc nothrow
 {
-    uint* fb_ptr = cast(uint*)fb.address;
     for (ulong y = 0; y < fb.height; y++)
     {
         for (ulong x = 0; x < fb.width; x++)
         {
             ulong offset = y * fb.width + x;
-            fb_ptr[offset] = color;
+            fb.ptr[offset] = color;
         }
     }
 }
 
 void drawBitmap(
-    LimineFramebuffer* fb,
+    Framebuffer* fb,
     uint x0, uint y0,
     const uint[] bitmap,
     uint w, uint h) @nogc nothrow
 {
-    uint* fb_ptr = cast(uint*)fb.address;
     for (uint y = 0; y < h; y++)
     {
         if (y0 + y >= fb.height)
@@ -60,7 +78,7 @@ void drawBitmap(
             ulong offset = (y0 + y) * fb.width + (x0 + x);
             uint pix = bitmap[y * w + x];
             if (pix != 0x00FF00FF)
-                fb_ptr[offset] = bitmap[y * w + x];
+                fb.ptr[offset] = bitmap[y * w + x];
         }
     }
 }
@@ -75,6 +93,8 @@ struct MouseState
 __gshared MouseState mouseState;
 __gshared ubyte[3] packet;
 __gshared ubyte packetIndex = 0;
+__gshared uint mouseBoundH = 0;
+__gshared uint mouseBoundV = 0;
 
 enum: ubyte
 {
@@ -83,37 +103,6 @@ enum: ubyte
     PS2_CMD_MOUSE = 0xD4,
     PS2_ENABLE_MOUSE = 0xF4
 };
-
-void mouse_handle_byte(uint val) @nogc nothrow
-{
-    packet[packetIndex] = cast(ubyte)val;
-    packetIndex++;
-
-    if (packetIndex == 3)
-    {
-        ubyte b0 = packet[0];
-        ubyte b1 = packet[1];
-        ubyte b2 = packet[2];
-
-        int dx = cast(int)b1;
-        int dy = cast(int)b2;
-
-        if (b0 & 0x10) dx -= 256; // X sign
-        if (b0 & 0x20) dy -= 256; // Y sign
-
-        mouseState.x += dx;
-        mouseState.y -= dy;
-
-        if (mouseState.x < 0) mouseState.x = 0;
-        if (mouseState.x > 639) mouseState.x = 639;
-        if (mouseState.y < 0) mouseState.y = 0;
-        if (mouseState.y > 479) mouseState.y = 479;
-
-        mouseState.buttons = b0 & 0x07; 
-
-        packetIndex = 0;
-    }
-}
 
 void pollMouse() @nogc nothrow
 {
@@ -136,9 +125,9 @@ void pollMouse() @nogc nothrow
             mouseState.y -= dy;
             
             if (mouseState.x < 0) mouseState.x = 0;
-            if (mouseState.x > 639) mouseState.x = 639;
+            if (mouseState.x > mouseBoundH) mouseState.x = mouseBoundH;
             if (mouseState.y < 0) mouseState.y = 0;
-            if (mouseState.y > 479) mouseState.y = 479;
+            if (mouseState.y > mouseBoundV) mouseState.y = mouseBoundV;
             
             mouseState.buttons = b0 & 0x07;
             
@@ -173,6 +162,20 @@ uint pitTimeTicks() @nogc nothrow
 
 void kmain() @nogc nothrow
 {
+    ulong memBaseAddr = 0;
+    auto memmap = memmapRequest.response;
+    for (ulong i = 0; i < memmap.entry_count; i++)
+    {
+        auto entry = memmap.entries[i];
+        if (entry.type == 0x1) { // 0x1 == USABLE
+            memBaseAddr = entry.base;
+            break;
+        }
+    }
+    
+    if (memBaseAddr == 0)
+        hcf();
+    
     auto resp = framebufferRequest.response;
     while (resp is null || resp.framebuffer_count < 1)
     {
@@ -181,6 +184,26 @@ void kmain() @nogc nothrow
     }
     
     auto fb = resp.framebuffers[0];
+    
+    ulong backBufferAddr = memBaseAddr + 1024 * 1024; // leave 1 Mb
+    
+    Framebuffer frontBuffer;
+    frontBuffer.ptr = cast(uint*)fb.address;;
+    frontBuffer.width = cast(uint)fb.width;
+    frontBuffer.height = cast(uint)fb.height;
+    frontBuffer.pitch = cast(uint)fb.pitch;
+    
+    Framebuffer backBuffer;
+    backBuffer.ptr = cast(uint*)backBufferAddr;
+    backBuffer.width = cast(uint)fb.width;
+    backBuffer.height = cast(uint)fb.height;
+    backBuffer.pitch = cast(uint)fb.pitch;
+    
+    ulong numPixels = fb.height * fb.width;
+    ulong framebufferSize = fb.height * fb.pitch;
+    
+    mouseBoundH = cast(uint)fb.width - 1;
+    mouseBoundV = cast(uint)fb.height - 1;
     
     packetIndex = 0;
     mouseState.x = 0;
@@ -193,8 +216,7 @@ void kmain() @nogc nothrow
     while (kPortReadByte(PS2_STATUS_PORT) & 0x02) {}
     kPortWriteByte(PS2_DATA_PORT, PS2_ENABLE_MOUSE);
     
-    fillScreen(fb, 0x000000AA);
-    drawBitmap(fb, 16, 16, DIOS_LOGO, DIOS_LOGO_WIDTH, DIOS_LOGO_HEIGHT);
+    fillScreen(&frontBuffer, 0x000000AA);
     
     uint time1 = pitTimeTicks();
     uint renderTimer = 0;
@@ -215,17 +237,18 @@ void kmain() @nogc nothrow
             mouseTimer = 0;
         }
         
-        /*
         if (renderTimer >= 16666) // 16.7 millisecs
         {
             // Render
-            fillScreen(fb, 0x000000AA);
-            drawBitmap(fb, 16, 16, DIOS_LOGO, DIOS_LOGO_WIDTH, DIOS_LOGO_HEIGHT);
-            drawBitmap(fb, mouseState.x, mouseState.y, CURSOR, CURSOR_WIDTH, CURSOR_HEIGHT);
+            fillScreen(&backBuffer, 0x000000AA);
+            drawBitmap(&backBuffer, 16, 16, DIOS_LOGO, DIOS_LOGO_WIDTH, DIOS_LOGO_HEIGHT);
+            drawBitmap(&backBuffer, mouseState.x, mouseState.y, CURSOR, CURSOR_WIDTH, CURSOR_HEIGHT);
             
-            // TODO: double buffering
+            for (uint i = 0; i < numPixels; i++)
+            {
+                frontBuffer.ptr[i] = backBuffer.ptr[i];
+            }
             renderTimer = 0;
         }
-        */
     }
 }
