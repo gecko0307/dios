@@ -2,7 +2,7 @@
 
 DIOS is a minimal i386 OS kernel written in D with some parts in assembly. It is tested on a real hardware and emulators like VirtualBox and QEMU. The main purpose of this project is demonstrating D's fitness for system development. I've written it initially in D1/GDC and recently ported to D2/LDC.
 
-I don't have any big plans for this code - you are free to use it to create your own kernel. PRs implementing real-world OS features are welcome.
+I don't have any big plans for this code - you are free to use it to create your own kernel. PRs implementing real-world OS features are welcome. The code is a bit messy but readable.
 
 DIOS is an ELF kernel that requires a bootloader to run. Default setup in this repo uses GRUB2 eltorito.img for booting from the CD-ROM. You can also make a bootable USB stick with the DIOS ISO image using [Ventoy](https://www.ventoy.net/en/index.html).
 
