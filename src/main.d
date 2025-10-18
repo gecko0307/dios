@@ -21,9 +21,16 @@ struct BootInfo
     const(char)* arguments;
     
     // TODO: generic mmap structure
-    uint ramTotal;
-    uint ramStartAddress;
-    uint ramLength;
+    version(X86)
+    {
+        uint ramStartAddress;
+        uint ramLength;
+    }
+    else version(X86_64)
+    {
+        ulong ramStartAddress;
+        ulong ramLength;
+    }
     
     Framebuffer videoBuffer;
 }
@@ -57,7 +64,7 @@ version(X86)
         bootInfo.arguments = cast(char*)mbi.cmdline;
         
         // Memory map
-        bootInfo.ramTotal = (1024 + mbi.mem_upper) / 1024 + 1;
+        //bootInfo.ramTotal = (1024 + mbi.mem_upper) / 1024 + 1;
         bootInfo.ramStartAddress = 0;
         bootInfo.ramLength = 0;
         if (checkFlag(mbi.flags, 6))
@@ -102,28 +109,6 @@ else version(X86_64)
         bootInfo.bootloaderName = BOOTLOADER_LIMINE.ptr;
         bootInfo.arguments = EMPTY_STR.ptr;
         
-        // Memory map
-        bootInfo.ramTotal = 0;
-        bootInfo.ramStartAddress = 0;
-        bootInfo.ramLength = 0;
-        auto memmap = memmapRequest.response;
-        for (ulong i = 0; i < memmap.entry_count; i++)
-        {
-            auto entry = memmap.entries[i];
-            if (entry.type == 0x1) // 0x1 == USABLE
-            {
-                bootInfo.ramStartAddress = cast(uint)entry.base;
-                bootInfo.ramLength = cast(uint)entry.length;
-                break;
-            }
-            bootInfo.ramTotal += entry.length;
-        }
-        
-        bootInfo.ramTotal = bootInfo.ramTotal / (1024 * 1024);
-        
-        if (bootInfo.ramStartAddress == 0)
-            hcf();
-        
         // Framebuffer
         auto resp = framebufferRequest.response;
         while (resp is null || resp.framebuffer_count < 1)
@@ -145,6 +130,31 @@ else version(X86_64)
         
         stdioMode = StdioMode.Framebuffer;
         
+        // Memory map
+        //bootInfo.ramTotal = 0;
+        ulong ramStartAddress = 0;
+        ulong ramLength = 0;
+        auto memmap = memmapRequest.response;
+        for (ulong i = 0; i < memmap.entry_count; i++)
+        {
+            auto entry = memmap.entries[i];
+            if (entry.type == 0x1 && entry.base < 0x100000000) // 0x1 == USABLE, low memory
+            {
+                if (entry.length > ramLength)
+                {
+                    ramStartAddress = entry.base;
+                    ramLength = entry.length;
+                }
+            }
+            //bootInfo.ramTotal += entry.length;
+        }
+        
+        bootInfo.ramStartAddress = ramStartAddress;
+        bootInfo.ramLength = ramLength;
+        
+        if (bootInfo.ramStartAddress == 0)
+            hcf();
+        
         run();
     }
 }
@@ -154,8 +164,8 @@ void run() @nogc nothrow
     uint numPixels = bootInfo.videoBuffer.height * bootInfo.videoBuffer.width;
     uint framebufferSize = bootInfo.videoBuffer.height * bootInfo.videoBuffer.pitch;
     
-    uint backBufferAddr = bootInfo.ramStartAddress + 1024 * 1024; // leave 1 Mb
-    uint consoleBufferAddr = backBufferAddr + framebufferSize;
+    size_t backBufferAddr = bootInfo.ramStartAddress + 5 * 1024 * 1024; // leave 5 Mb
+    size_t consoleBufferAddr = backBufferAddr + framebufferSize;
     
     Framebuffer* frontBuffer = &bootInfo.videoBuffer;
     
@@ -201,8 +211,16 @@ void run() @nogc nothrow
     kprintf("DIOS 0.0.2\n");
     kprintf("---------------\n");
     kprintf("Bootloader: %s\n", bootInfo.bootloaderName);
-    kprintf("RAM: %u MB\n", bootInfo.ramTotal);
-    kprintf("RAM start address: %x\n", bootInfo.ramStartAddress);
+    version(X86)
+    {
+        kprintf("Avail. memory start addr: %x\n", bootInfo.ramStartAddress);
+        kprintf("Avail. memory size: %u MB\n", bootInfo.ramLength / (1024 * 1024));
+    }
+    else version(X86_64)
+    {
+        kprintf("Avail. memory start addr: %llx\n", bootInfo.ramStartAddress);
+        kprintf("Avail. memory size: %llu MB\n", bootInfo.ramLength / (1024 * 1024));
+    }
     kprintf("Framebuffer: %ux%u %ubpp\n",
         frontBuffer.width, frontBuffer.height, frontBuffer.bytesPerPixel * 8);
     
@@ -261,5 +279,9 @@ void run() @nogc nothrow
             }
             renderTimer = 0;
         }
+    }
+    
+    while(1)
+    {
     }
 }

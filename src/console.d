@@ -165,6 +165,44 @@ void consolePrintStringFmt(string fmt, va_list ap) @nogc nothrow
             if (++i >= fmt.length)
                 break;
             
+            // %llx
+            if (fmt[i] == 'l' && i + 1 < fmt.length && fmt[i + 1] == 'l')
+            {
+                i++;
+                if (++i >= fmt.length)
+                    break;
+
+                if (fmt[i] == 'x')
+                {
+                    ulong u = va_arg!(ulong)(ap);
+                    consolePrintString("0x");
+                    char[16] digits;
+                    for (int j = 15; j >= 0; j--)
+                    {
+                        digits[j] = HEXMAP[u & 0x0F];
+                        u >>= 4;
+                    }
+                    foreach (char d; digits)
+                        consolePrintChar(d);
+                    continue;
+                }
+                else if (fmt[i] == 'u')
+                {
+                    ulong u = va_arg!(ulong)(ap);
+                    char[20] d;
+                    int k = 19;
+                    do
+                    {
+                        d[k] = cast(char)((u % 10) + '0');
+                        u /= 10;
+                        k--;
+                    }
+                    while (u && k >= 0);
+                    while (++k < 20)
+                        consolePrintChar(d[k]);
+                    continue;
+                }
+            }
             if (fmt[i] == 's')
             {
                 char* t = va_arg!(char*)(ap);
