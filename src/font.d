@@ -4,6 +4,8 @@ enum FONT_ATLAS_WIDTH = 160;
 enum FONT_ATLAS_HEIGHT = 192;
 enum CHAR_WIDTH = 10;
 enum CHAR_HEIGHT = 12;
+enum NUM_CHARS_H = 16;
+enum NUM_CHARS_V = 16;
 enum NUM_CHARS = 256;
 
 immutable uint[] FONT = [

@@ -5,10 +5,12 @@ import core.port;
 import core.ps2;
 import core.keyboard;
 import core.pit;
+import core.stdarg;
 import core.framebuffer;
 import logo;
 import cursor;
 import font;
+import console;
 
 extern(C):
 
@@ -19,6 +21,14 @@ void hcf() @nogc nothrow
     {
         hlt;
     }
+}
+
+void printf(string fmt, ...) @nogc nothrow
+{
+    va_list args;
+    va_start(args, fmt);
+    consolePrintStringFmt(fmt, args);
+    va_end(args);
 }
 
 void kmain() @nogc nothrow
@@ -77,12 +87,9 @@ void kmain() @nogc nothrow
     consoleBuffer.pitch = cast(uint)fb.pitch;
     consoleBuffer.bytesPerPixel = cast(uint)fb.bpp / 8;
     
-    uint consoleBufferX0 = 16;
-    uint consoleBufferY0 = 64;
-    uint consoleBufferW = cast(uint)fb.width - 32;
-    uint consoleBufferH = CHAR_HEIGHT;
-    uint printX = 0;
-    uint printY = 0;
+    ConsoleState* consoleState = consoleInit(&consoleBuffer, 16, 64);
+    uint consoleCursorBlinkTimer = 0;
+    bool consoleCursorVisible = true;
     
     PS2State* ps2State = ps2Init(cast(uint)fb.width - 1, cast(uint)fb.height - 1);
     
@@ -103,18 +110,20 @@ void kmain() @nogc nothrow
     
     drawBitmap(&backBuffer, 16, 16, DIOS_LOGO, DIOS_LOGO_WIDTH, DIOS_LOGO_HEIGHT);
     
-    printStr(&consoleBuffer, consoleBufferX0 + printX, consoleBufferY0 + printY, FONT, 16, CHAR_WIDTH, CHAR_HEIGHT, "Hello, World!");
-    printY += CHAR_HEIGHT;
-    consoleBufferH += CHAR_HEIGHT;
+    // Print info
+    printf("DIOS 0.0.2\n");
+    printf("---------------\n");
+    printf("test %u\n", 100);
     
     while(1)
     {
         uint time2 = pitTimeTicks();
         uint delta = time2 - time1;
         time1 = time2;
-        uint deltaMs = (delta * 1000000) / PIT_FREQUENCY; // microseconds
-        renderTimer += deltaMs;
-        inputTimer += deltaMs;
+        uint deltaMicroSec = (delta * 1000000) / PIT_FREQUENCY;
+        renderTimer += deltaMicroSec;
+        inputTimer += deltaMicroSec;
+        consoleCursorBlinkTimer += deltaMicroSec;
         
         if (inputTimer >= 1000) // 1 millisec
         {
@@ -126,28 +135,21 @@ void kmain() @nogc nothrow
         {
             ps2State.keyPressed = 0;
             if (ps2State.lastScancode == 0x0e)
-            {
-                if (printX > 0)
-                {
-                    printX -= CHAR_WIDTH - 2;
-                    clearChar(&consoleBuffer, consoleBufferX0 + printX, consoleBufferY0 + printY, CHAR_WIDTH, CHAR_HEIGHT, clearColor);
-                }
-            }
+                consoleBack();
+            else if (ps2State.lastScancode == 0x1C)
+                consoleNewline();
             else
             {
                 char c = scancodeToChar(ps2State.lastScancode);
                 if (c)
-                {
-                    printChar(&consoleBuffer, consoleBufferX0 + printX, consoleBufferY0 + printY, FONT, 16, CHAR_WIDTH, CHAR_HEIGHT, c);
-                    printX += CHAR_WIDTH - 2;
-                    if (printX >= consoleBuffer.width - 16)
-                    {
-                        printX = 0;
-                        printY += CHAR_HEIGHT;
-                        consoleBufferH += CHAR_HEIGHT;
-                    }
-                }
+                    consolePrintChar(c);
             }
+        }
+        
+        if (consoleCursorBlinkTimer >= 100000)
+        {
+            consoleCursorVisible = !consoleCursorVisible;
+            consoleCursorBlinkTimer = 0;
         }
         
         if (renderTimer >= 16666) // 16.7 millisecs
@@ -155,19 +157,14 @@ void kmain() @nogc nothrow
             // Render
             fillScreen(&backBuffer, 0x000000AA);
             drawBitmap(&backBuffer, 16, 16, DIOS_LOGO, DIOS_LOGO_WIDTH, DIOS_LOGO_HEIGHT);
-            
-            // Blit consoleBuffer to backBuffer
-            for (uint y = 0; y < consoleBufferH; y++)
+            consoleBlitTo(&backBuffer);
+            if (consoleCursorVisible)
             {
-                if (consoleBufferY0 + y >= backBuffer.height)
-                    break;
-                for (uint x = 0; x < consoleBufferW; x++)
-                {
-                    if (consoleBufferX0 + x >= backBuffer.width)
-                        break;
-                    uint offset = (consoleBufferY0 + y) * (backBuffer.pitch / backBuffer.bytesPerPixel) + (consoleBufferX0 + x);
-                    backBuffer.ptr[offset] = consoleBuffer.ptr[offset];
-                }
+                drawRect(&backBuffer,
+                    consoleState.x + consoleState.print_x + 2,
+                    consoleState.y + consoleState.print_y + consoleState.v_stride - 6,
+                    0x00FFFFFF,
+                    consoleState.h_stride, 3);
             }
             
             drawBitmap(&backBuffer, ps2State.mx, ps2State.my, CURSOR, CURSOR_WIDTH, CURSOR_HEIGHT);

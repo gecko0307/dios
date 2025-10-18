@@ -29,7 +29,7 @@ void drawRect(
     Framebuffer* fb,
     uint x0, uint y0,
     uint color,
-    ushort w, ushort h) @nogc nothrow
+    uint w, uint h) @nogc nothrow
 {
     for (uint y = 0; y < h; y++)
     {

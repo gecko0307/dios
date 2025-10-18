@@ -150,4 +150,3 @@ struct Console
         }
     }
 }
-
