@@ -15,6 +15,7 @@ import core.framebuffer;
 import core.pit;
 import logo;
 import cursor;
+import font;
 
 extern(C):
 

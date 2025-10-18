@@ -8,6 +8,7 @@ import core.pit;
 import core.framebuffer;
 import logo;
 import cursor;
+import font;
 
 extern(C):
 
@@ -68,7 +69,8 @@ void kmain() @nogc nothrow
     ulong numPixels = fb.height * fb.width;
     ulong framebufferSize = fb.height * fb.pitch;
     
-    fillScreen(&frontBuffer, 0x000000AA);
+    uint printX = 16;
+    uint printY = 64;
     
     kKbdEnable();
     kKbdFlushBuffer();
@@ -81,6 +83,23 @@ void kmain() @nogc nothrow
     uint drawX = 0;
     uint drawY = 64;
     
+    uint clearColor = 0x000000AA;
+    
+    for (uint i = 0; i < numPixels; i++)
+    {
+        frontBuffer.ptr[i] = clearColor;
+    }
+    
+    for (uint i = 0; i < numPixels; i++)
+    {
+        backBuffer.ptr[i] = clearColor;
+    }
+    
+    drawBitmap(&backBuffer, 16, 16, DIOS_LOGO, DIOS_LOGO_WIDTH, DIOS_LOGO_HEIGHT);
+    
+    printStr(&backBuffer, printX, printY, FONT, 16, CHAR_WIDTH, CHAR_HEIGHT, "Hello, World!");
+    printY += CHAR_HEIGHT;
+    
     while(1)
     {
         uint time2 = pitTimeTicks();
@@ -90,17 +109,48 @@ void kmain() @nogc nothrow
         renderTimer += deltaMs;
         mouseTimer += deltaMs;
         
+        /*
         if (mouseTimer >= 1000) // 1 millisec
         {
             ps2MousePoll();
             mouseTimer = 0;
         }
+        */
+        
+        if ((kPortReadByte(0x64) & 0x01) != 0)
+        {
+            ubyte code = kPortReadByte(0x60);
+            if (code == 0x0e)
+            {
+                if (printX > 16)
+                {
+                    printX -= CHAR_WIDTH - 2;
+                    clearChar(&backBuffer, printX, printY, CHAR_WIDTH, CHAR_HEIGHT, clearColor);
+                }
+            }
+            else
+            {
+                char c = scancodeToChar(code);
+                if (c)
+                {
+                    printChar(&backBuffer, printX, printY, FONT, 16, CHAR_WIDTH, CHAR_HEIGHT, c);
+                    printX += CHAR_WIDTH - 2;
+                    if (printX >= fb.width - 16)
+                    {
+                        printX = 16;
+                        printY += CHAR_HEIGHT;
+                    }
+                }
+            }
+        }
         
         if (renderTimer >= 16666) // 16.7 millisecs
         {
             // Render
+            /*
             fillScreen(&backBuffer, 0x000000AA);
             drawBitmap(&backBuffer, 16, 16, DIOS_LOGO, DIOS_LOGO_WIDTH, DIOS_LOGO_HEIGHT);
+            drawBitmap(&backBuffer, 16, 64, FONT, FONT_ATLAS_WIDTH, FONT_ATLAS_HEIGHT);
             
             // Draw moving rectangle
             if (drawX < backBuffer.width - 1)
@@ -109,7 +159,8 @@ void kmain() @nogc nothrow
                 drawX = 0;
             drawRect(&backBuffer, drawX, drawY, 0x00FFFFFF, 32, 32);
             
-            drawBitmap(&backBuffer, mouseState.x, mouseState.y, CURSOR, CURSOR_WIDTH, CURSOR_HEIGHT);
+            //drawBitmap(&backBuffer, mouseState.x, mouseState.y, CURSOR, CURSOR_WIDTH, CURSOR_HEIGHT);
+            */
             
             for (uint i = 0; i < numPixels; i++)
             {
