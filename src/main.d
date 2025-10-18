@@ -1,6 +1,5 @@
 module main;
 
-import bootloader.multiboot;
 import core.port;
 import core.gdt;
 import core.vga;
@@ -16,85 +15,171 @@ import console;
 import stdio;
 import error;
 
+struct BootInfo
+{
+    const(char)* bootloaderName;
+    const(char)* arguments;
+    
+    // TODO: generic mmap structure
+    uint ramTotal;
+    uint ramStartAddress;
+    uint ramLength;
+    
+    Framebuffer videoBuffer;
+}
+
+__gshared string EMPTY_STR = "\0";
+__gshared string BOOTLOADER_LIMINE = "Limine\0";
+
+__gshared BootInfo bootInfo;
+
 extern(C):
 
-__gshared string MemAvailable = "Available";
-__gshared string MemReserved = "Reserved";
-
-void kmain(uint magic, uint addr) @nogc nothrow
+version(X86)
 {
-    initGDT();
-    VGAConsole.init();
+    import bootloader.multiboot;
     
-    byte status = kPortReadByte(0x64);
-    if (status == 0x02)
-        kPanic("Problem with GDT/CS!");
-    
-    if (magic != MULTIBOOT_BOOTLOADER_MAGIC)
-        kPanic("Invalid Multiboot magic number");
-
-    multiboot_info* mbi = cast(multiboot_info*)addr;
-
-    uint lowerMemory = mbi.mem_lower; // between 0 and 640KB
-    uint upperMemory = mbi.mem_upper; // from 1MB
-    uint totalMemory = (1024 + mbi.mem_upper) / 1024 + 1;
-
-    uint upperMemAdr = 0;
-    uint upperMemLen = 0;
-
-    if (checkFlag(mbi.flags, 6))
+    void kmain(uint magic, uint addr) @nogc nothrow
     {
-        multiboot_memory_map_t* mmap = cast(multiboot_memory_map_t*)(mbi.mmap_addr);
-        for (mmap = cast(multiboot_memory_map_t*) mbi.mmap_addr;
-             cast(ulong)mmap < mbi.mmap_addr + mbi.mmap_length;
-             mmap = cast(multiboot_memory_map_t*)(cast(ulong)mmap + mmap.size + mmap.size.sizeof))
+        initGDT();
+        VGAConsole.init();
+        
+        byte status = kPortReadByte(0x64);
+        if (status == 0x02)
+            kPanic("Problem with GDT/CS!");
+        
+        if (magic != MULTIBOOT_BOOTLOADER_MAGIC)
+            kPanic("Invalid Multiboot magic number");
+        
+        multiboot_info* mbi = cast(multiboot_info*)addr;
+        
+        bootInfo.bootloaderName = cast(char*)mbi.boot_loader_name;
+        bootInfo.arguments = cast(char*)mbi.cmdline;
+        
+        // Memory map
+        bootInfo.ramTotal = (1024 + mbi.mem_upper) / 1024 + 1;
+        bootInfo.ramStartAddress = 0;
+        bootInfo.ramLength = 0;
+        if (checkFlag(mbi.flags, 6))
         {
-            if ((mmap.type == 1) && (mmap.length_low > upperMemLen))
+            multiboot_memory_map_t* mmap = cast(multiboot_memory_map_t*)(mbi.mmap_addr);
+            for (mmap = cast(multiboot_memory_map_t*) mbi.mmap_addr;
+                 cast(ulong)mmap < mbi.mmap_addr + mbi.mmap_length;
+                 mmap = cast(multiboot_memory_map_t*)(cast(ulong)mmap + mmap.size + mmap.size.sizeof))
             {
-                upperMemAdr = mmap.addr_low;
-                upperMemLen = mmap.length_low;
+                if ((mmap.type == 1) && (mmap.length_low > bootInfo.ramLength))
+                {
+                    bootInfo.ramStartAddress = mmap.addr_low;
+                    bootInfo.ramLength = mmap.length_low;
+                }
             }
         }
+        
+        // Framebuffer
+        vbeInfo* vbe;
+        if ((mbi.flags & MULTIBOOT_INFO_VIDEO_INFO) != 0)
+            vbe = cast(vbeInfo*)mbi.vbe_mode_info;
+        else
+            kPanic("No framebuffer info!");
+        
+        bootInfo.videoBuffer.ptr = cast(uint*)vbe.framebuffer;
+        bootInfo.videoBuffer.width = vbe.width;
+        bootInfo.videoBuffer.height = vbe.height;
+        bootInfo.videoBuffer.pitch = vbe.pitch;
+        bootInfo.videoBuffer.bytesPerPixel = vbe.bpp / 8;
+        
+        stdioMode = StdioMode.Framebuffer;
+        
+        run();
     }
+}
+else version(X86_64)
+{
+    import bootloader.limine;
+    
+    void kmain() @nogc nothrow
+    {
+        bootInfo.bootloaderName = BOOTLOADER_LIMINE.ptr;
+        bootInfo.arguments = EMPTY_STR.ptr;
+        
+        // Memory map
+        bootInfo.ramTotal = 0;
+        bootInfo.ramStartAddress = 0;
+        bootInfo.ramLength = 0;
+        auto memmap = memmapRequest.response;
+        for (ulong i = 0; i < memmap.entry_count; i++)
+        {
+            auto entry = memmap.entries[i];
+            if (entry.type == 0x1) // 0x1 == USABLE
+            {
+                bootInfo.ramStartAddress = cast(uint)entry.base;
+                bootInfo.ramLength = cast(uint)entry.length;
+                break;
+            }
+            bootInfo.ramTotal += entry.length;
+        }
+        
+        bootInfo.ramTotal = bootInfo.ramTotal / (1024 * 1024);
+        
+        if (bootInfo.ramStartAddress == 0)
+            hcf();
+        
+        // Framebuffer
+        auto resp = framebufferRequest.response;
+        while (resp is null || resp.framebuffer_count < 1)
+        {
+            asm @nogc nothrow { hlt; }
+            resp = framebufferRequest.response;
+        }
+        
+        auto fb = resp.framebuffers[0];
+        
+        if (fb.bpp != 32)
+            hcf();
+        
+        bootInfo.videoBuffer.ptr = cast(uint*)fb.address;
+        bootInfo.videoBuffer.width = cast(uint)fb.width;
+        bootInfo.videoBuffer.height = cast(uint)fb.height;
+        bootInfo.videoBuffer.pitch = cast(uint)fb.pitch;
+        bootInfo.videoBuffer.bytesPerPixel = cast(uint)fb.bpp / 8;
+        
+        stdioMode = StdioMode.Framebuffer;
+        
+        run();
+    }
+}
 
-    vbeInfo* vbe;
-    if ((mbi.flags & MULTIBOOT_INFO_VIDEO_INFO) != 0)
-        vbe = cast(vbeInfo*)mbi.vbe_mode_info;
-    else
-        kPanic("No framebuffer info!");
+void run() @nogc nothrow
+{
+    uint numPixels = bootInfo.videoBuffer.height * bootInfo.videoBuffer.width;
+    uint framebufferSize = bootInfo.videoBuffer.height * bootInfo.videoBuffer.pitch;
     
-    uint numPixels = vbe.height * vbe.width;
-    uint framebufferSize = vbe.height * vbe.pitch;
-    
-    uint backBufferAddr = upperMemAdr + 1024 * 1024; // leave 1 Mb
+    uint backBufferAddr = bootInfo.ramStartAddress + 1024 * 1024; // leave 1 Mb
     uint consoleBufferAddr = backBufferAddr + framebufferSize;
     
-    Framebuffer frontBuffer;
-    frontBuffer.ptr = cast(uint*)vbe.framebuffer;
-    frontBuffer.width = vbe.width;
-    frontBuffer.height = vbe.height;
-    frontBuffer.pitch = vbe.pitch;
-    frontBuffer.bytesPerPixel = vbe.bpp / 8;
+    Framebuffer* frontBuffer = &bootInfo.videoBuffer;
     
     Framebuffer backBuffer;
     backBuffer.ptr = cast(uint*)backBufferAddr;
-    backBuffer.width = vbe.width;
-    backBuffer.height = vbe.height;
-    backBuffer.pitch = vbe.pitch;
-    backBuffer.bytesPerPixel = vbe.bpp / 8;
+    backBuffer.width = frontBuffer.width;
+    backBuffer.height = frontBuffer.height;
+    backBuffer.pitch = frontBuffer.pitch;
+    backBuffer.bytesPerPixel = frontBuffer.bytesPerPixel;
     
     Framebuffer consoleBuffer;
     consoleBuffer.ptr = cast(uint*)consoleBufferAddr;
-    consoleBuffer.width = vbe.width;
-    consoleBuffer.height = vbe.height;
-    consoleBuffer.pitch = vbe.pitch;
-    consoleBuffer.bytesPerPixel = vbe.bpp / 8;
+    consoleBuffer.width = frontBuffer.width;
+    consoleBuffer.height = frontBuffer.height;
+    consoleBuffer.pitch = frontBuffer.pitch;
+    consoleBuffer.bytesPerPixel = frontBuffer.bytesPerPixel;
     
     ConsoleState* consoleState = consoleInit(&consoleBuffer, 16, 64);
     uint consoleCursorBlinkTimer = 0;
     bool consoleCursorVisible = true;
     
-    PS2State* ps2State = ps2Init(cast(uint)vbe.width - 1, cast(uint)vbe.height - 1);
+    PS2State* ps2State = ps2Init(
+        cast(uint)frontBuffer.width - 1,
+        cast(uint)frontBuffer.height - 1);
     
     uint time1 = pitTimeTicks();
     uint renderTimer = 0;
@@ -115,34 +200,11 @@ void kmain(uint magic, uint addr) @nogc nothrow
     // Print info
     kprintf("DIOS 0.0.2\n");
     kprintf("---------------\n");
-    kprintf("Multiboot magic: %x\n", magic);
-    kprintf("Multiboot info:\n");
-    if (checkFlag(mbi.flags, 2))
-        kprintf("Arguments: %s\n", cast(char*)mbi.cmdline);
-    kprintf("Boot loader: %s\n", cast(char*)mbi.boot_loader_name);
-    kprintf("RAM: %u MB\n", totalMemory);
-    kprintf("Memory map:\n");
-    uint mmapEntryNum = 0;
-    if (checkFlag(mbi.flags, 6))
-    {
-        multiboot_memory_map_t* mmap = cast(multiboot_memory_map_t*)(mbi.mmap_addr);
-        for (mmap = cast(multiboot_memory_map_t*)mbi.mmap_addr;
-             cast(ulong)mmap < mbi.mmap_addr + mbi.mmap_length;
-             mmap = cast(multiboot_memory_map_t*)(cast(ulong)mmap + mmap.size + mmap.size.sizeof))
-        {
-            kprintf("Entry %u: ", mmapEntryNum);
-            kprintf("address: %x, ", mmap.addr_low);
-            if (mmap.length_low >= 1024 * 1024)
-                kprintf("length: %u MB, ", (mmap.length_low / 1024) / 1024);
-            else if (mmap.length_low >= 1024)
-                kprintf("length: %u KB, ", mmap.length_low / 1024);
-            else
-                kprintf("length: %u B, ", mmap.length_low);
-            kprintf("type: %s\n", (mmap.type == 1)? cast(char*)MemAvailable : cast(char*)MemReserved);
-            mmapEntryNum++;
-        }
-    }
-    kprintf("VBE framebuffer: %ux%u %ubpp\n", vbe.width, vbe.height, vbe.bpp);
+    kprintf("Bootloader: %s\n", bootInfo.bootloaderName);
+    kprintf("RAM: %u MB\n", bootInfo.ramTotal);
+    kprintf("RAM start address: %x\n", bootInfo.ramStartAddress);
+    kprintf("Framebuffer: %ux%u %ubpp\n",
+        frontBuffer.width, frontBuffer.height, frontBuffer.bytesPerPixel * 8);
     
     while(1)
     {
