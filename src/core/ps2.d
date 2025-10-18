@@ -8,6 +8,7 @@ enum PS2: ubyte
     StatusPort = 0x64,
     CommandPort = 0x64,
     
+    CmdEnableAuxiliaryDevice = 0xA8,
     CmdMouse = 0xD4,
     CmdEnableMouse = 0xF4
 };
@@ -36,8 +37,8 @@ PS2MouseState* ps2MouseInit(uint xBound, uint yBound) @nogc nothrow
     ps2MouseState.yBound = yBound;
     ps2MouseState.buttons = 0;
     
-    //while (kPortReadByte(PS2.StatusPort) & 0x02) {}
-    //kPortWriteByte(PS2.CommandPort, 0xA8); // Enable auxiliary device
+    while (kPortReadByte(PS2.StatusPort) & 0x02) {}
+    kPortWriteByte(PS2.CommandPort, PS2.CmdEnableAuxiliaryDevice);
     
     while (kPortReadByte(PS2.StatusPort) & 0x02) {}
     kPortWriteByte(PS2.CommandPort, PS2.CmdMouse);
@@ -50,10 +51,11 @@ PS2MouseState* ps2MouseInit(uint xBound, uint yBound) @nogc nothrow
 
 void ps2MousePoll() @nogc nothrow
 {
-    if (kPortReadByte(PS2.StatusPort) & 0x01)
+    if (kPortReadByte(PS2.StatusPort) & 0x20)
     {
         ubyte val = kPortReadByte(PS2.DataPort);
-        if (ps2MouseState.packetIndex == 0) {
+        if (ps2MouseState.packetIndex == 0)
+        {
             if ((val & 0x08) == 0) return;
         }
         

@@ -3,6 +3,7 @@ module main64;
 import bootloader.limine;
 import core.port;
 import core.ps2;
+import core.keyboard;
 import core.pit;
 import core.framebuffer;
 import logo;
@@ -67,9 +68,12 @@ void kmain() @nogc nothrow
     ulong numPixels = fb.height * fb.width;
     ulong framebufferSize = fb.height * fb.pitch;
     
-    PS2MouseState* mouseState = ps2MouseInit(cast(uint)fb.width - 1, cast(uint)fb.height - 1);
-    
     fillScreen(&frontBuffer, 0x000000AA);
+    
+    kKbdEnable();
+    kKbdFlushBuffer();
+    
+    PS2MouseState* mouseState = ps2MouseInit(cast(uint)fb.width - 1, cast(uint)fb.height - 1);
     
     uint time1 = pitTimeTicks();
     uint renderTimer = 0;
