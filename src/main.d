@@ -277,8 +277,4 @@ void run() @nogc nothrow
             renderTimer = 0;
         }
     }
-    
-    while(1)
-    {
-    }
 }
