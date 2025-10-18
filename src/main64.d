@@ -72,14 +72,11 @@ void kmain() @nogc nothrow
     uint printX = 16;
     uint printY = 64;
     
-    kKbdEnable();
-    kKbdFlushBuffer();
-    
-    PS2MouseState* mouseState = ps2MouseInit(cast(uint)fb.width - 1, cast(uint)fb.height - 1);
+    PS2State* ps2State = ps2Init(cast(uint)fb.width - 1, cast(uint)fb.height - 1);
     
     uint time1 = pitTimeTicks();
     uint renderTimer = 0;
-    uint mouseTimer = 0;
+    uint inputTimer = 0;
     uint drawX = 0;
     uint drawY = 64;
     
@@ -107,20 +104,18 @@ void kmain() @nogc nothrow
         time1 = time2;
         uint deltaMs = (delta * 1000000) / PIT_FREQUENCY; // microseconds
         renderTimer += deltaMs;
-        mouseTimer += deltaMs;
+        inputTimer += deltaMs;
         
-        /*
-        if (mouseTimer >= 1000) // 1 millisec
+        if (inputTimer >= 1000) // 1 millisec
         {
-            ps2MousePoll();
-            mouseTimer = 0;
+            ps2Poll();
+            inputTimer = 0;
         }
-        */
         
-        if ((kPortReadByte(0x64) & 0x01) != 0)
+        if (ps2State.keyPressed)
         {
-            ubyte code = kPortReadByte(0x60);
-            if (code == 0x0e)
+            ps2State.keyPressed = 0;
+            if (ps2State.lastScancode == 0x0e)
             {
                 if (printX > 16)
                 {
@@ -130,12 +125,12 @@ void kmain() @nogc nothrow
             }
             else
             {
-                char c = scancodeToChar(code);
+                char c = scancodeToChar(ps2State.lastScancode);
                 if (c)
                 {
                     printChar(&backBuffer, printX, printY, FONT, 16, CHAR_WIDTH, CHAR_HEIGHT, c);
                     printX += CHAR_WIDTH - 2;
-                    if (printX >= fb.width - 16)
+                    if (printX >= backBuffer.width - 16)
                     {
                         printX = 16;
                         printY += CHAR_HEIGHT;
@@ -159,7 +154,7 @@ void kmain() @nogc nothrow
                 drawX = 0;
             drawRect(&backBuffer, drawX, drawY, 0x00FFFFFF, 32, 32);
             
-            //drawBitmap(&backBuffer, mouseState.x, mouseState.y, CURSOR, CURSOR_WIDTH, CURSOR_HEIGHT);
+            //drawBitmap(&backBuffer, ps2State.mx, ps2State.my, CURSOR, CURSOR_WIDTH, CURSOR_HEIGHT);
             */
             
             for (uint i = 0; i < numPixels; i++)

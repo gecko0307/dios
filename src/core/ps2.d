@@ -8,34 +8,53 @@ enum PS2: ubyte
     StatusPort = 0x64,
     CommandPort = 0x64,
     
+    CmdEnableKeyboard = 0xAE,
     CmdEnableAuxiliaryDevice = 0xA8,
     CmdMouse = 0xD4,
     CmdEnableMouse = 0xF4
 };
 
-struct PS2MouseState
+struct PS2State
 {
     ubyte[3] packet;
+    ubyte keyPressed;
+    ubyte lastScancode;
+    ubyte extended;
     ubyte packetIndex;
-    int x;
-    int y;
+    ubyte mbuttons;  // 0x1=left, 0x2=right, 0x4=middle
+    int mx;
+    int my;
     uint xBound = 0; // Maximum x-coordinate
     uint yBound = 0; // Maximum y-coordinate
-    ubyte buttons;  // 0x1=left, 0x2=right, 0x4=middle
 }
 
-__gshared PS2MouseState ps2MouseState;
+__gshared PS2State ps2State;
 
 extern(C):
 
-PS2MouseState* ps2MouseInit(uint xBound, uint yBound) @nogc nothrow
+PS2State* ps2Init(uint xBound, uint yBound) @nogc nothrow
 {
-    ps2MouseState.packetIndex = 0;
-    ps2MouseState.x = 0;
-    ps2MouseState.y = 0;
-    ps2MouseState.xBound = xBound;
-    ps2MouseState.yBound = yBound;
-    ps2MouseState.buttons = 0;
+    ps2State.keyPressed = 0;
+    ps2State.lastScancode = 0;
+    ps2State.extended = 0;
+    ps2State.packetIndex = 0;
+    ps2State.mbuttons = 0;
+    ps2State.mx = 0;
+    ps2State.my = 0;
+    ps2State.xBound = xBound;
+    ps2State.yBound = yBound;
+    
+    while (kPortReadByte(PS2.StatusPort) & 0x02) {}
+    kPortWriteByte(PS2.CommandPort, 0xFF);
+    
+    while (kPortReadByte(PS2.StatusPort) & 0x02) {}
+    kPortWriteByte(PS2.CommandPort, PS2.CmdEnableKeyboard);
+    
+    // Flush the keyboard
+    while ((kPortReadByte(PS2.StatusPort) & 0x01) != 0)
+    {
+        ubyte tmp = kPortReadByte(PS2.DataPort);
+    }
     
     while (kPortReadByte(PS2.StatusPort) & 0x02) {}
     kPortWriteByte(PS2.CommandPort, PS2.CmdEnableAuxiliaryDevice);
@@ -46,38 +65,56 @@ PS2MouseState* ps2MouseInit(uint xBound, uint yBound) @nogc nothrow
     while (kPortReadByte(PS2.StatusPort) & 0x02) {}
     kPortWriteByte(PS2.DataPort, PS2.CmdEnableMouse);
     
-    return &ps2MouseState;
+    return &ps2State;
 }
 
-void ps2MousePoll() @nogc nothrow
+void ps2Poll() @nogc nothrow
 {
-    if (kPortReadByte(PS2.StatusPort) & 0x20)
+    ubyte status = kPortReadByte(PS2.StatusPort);
+    if (status & 0x20)
     {
+        // Mouse
         ubyte val = kPortReadByte(PS2.DataPort);
-        if (ps2MouseState.packetIndex == 0)
+        if (ps2State.packetIndex == 0)
         {
             if ((val & 0x08) == 0) return;
         }
         
-        ps2MouseState.packet[ps2MouseState.packetIndex] = val;
-        ps2MouseState.packetIndex++;
-        if (ps2MouseState.packetIndex == 3)
+        ps2State.packet[ps2State.packetIndex] = val;
+        ps2State.packetIndex++;
+        if (ps2State.packetIndex == 3)
         {
-            ubyte b0 = ps2MouseState.packet[0];
-            byte dx = ps2MouseState.packet[1];
-            byte dy = ps2MouseState.packet[2];
+            ubyte b0 = ps2State.packet[0];
+            byte dx = ps2State.packet[1];
+            byte dy = ps2State.packet[2];
             
-            ps2MouseState.x += dx;
-            ps2MouseState.y -= dy;
+            ps2State.mx += dx;
+            ps2State.my -= dy;
             
-            if (ps2MouseState.x < 0) ps2MouseState.x = 0;
-            if (ps2MouseState.x > ps2MouseState.xBound) ps2MouseState.x = ps2MouseState.xBound;
-            if (ps2MouseState.y < 0) ps2MouseState.y = 0;
-            if (ps2MouseState.y > ps2MouseState.yBound) ps2MouseState.y = ps2MouseState.yBound;
+            if (ps2State.mx < 0) ps2State.mx = 0;
+            if (ps2State.mx > ps2State.xBound) ps2State.mx = ps2State.xBound;
+            if (ps2State.my < 0) ps2State.my = 0;
+            if (ps2State.my > ps2State.yBound) ps2State.my = ps2State.yBound;
             
-            ps2MouseState.buttons = b0 & 0x07;
+            ps2State.mbuttons = b0 & 0x07;
             
-            ps2MouseState.packetIndex = 0;
+            ps2State.packetIndex = 0;
+        }
+    }
+    else if (status & 0x01)
+    {
+        ubyte sc = kPortReadByte(PS2.DataPort);
+
+        if (sc == 0xE0)
+        {
+            ps2State.extended = 1;
+        }
+        else
+        {
+            ps2State.keyPressed = true;
+            ps2State.lastScancode = sc;
+            ubyte ext = ps2State.extended;
+            ps2State.extended = 0;
         }
     }
 }

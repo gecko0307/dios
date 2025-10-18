@@ -116,7 +116,11 @@ void kmain(uint magic, uint addr) @nogc nothrow
         {}
     }
     
+    uint numPixels = vbe.height * vbe.width;
+    uint framebufferSize = vbe.height * vbe.pitch;
+    
     uint backBufferAddr = upperMemAdr + 1024 * 1024; // leave 1 Mb
+    uint consoleBufferAddr = backBufferAddr + framebufferSize;
     
     Framebuffer frontBuffer;
     frontBuffer.ptr = cast(uint*)vbe.framebuffer;
@@ -132,21 +136,42 @@ void kmain(uint magic, uint addr) @nogc nothrow
     backBuffer.pitch = vbe.pitch;
     backBuffer.bytesPerPixel = vbe.bpp / 8;
     
-    uint numPixels = vbe.height * vbe.width;
-    uint framebufferSize = vbe.height * vbe.pitch;
+    Framebuffer consoleBuffer;
+    consoleBuffer.ptr = cast(uint*)consoleBufferAddr;
+    consoleBuffer.width = vbe.width;
+    consoleBuffer.height = vbe.height;
+    consoleBuffer.pitch = vbe.pitch;
+    consoleBuffer.bytesPerPixel = vbe.bpp / 8;
     
-    fillScreen(&frontBuffer, 0x000000AA);
+    uint consoleBufferX0 = 16;
+    uint consoleBufferY0 = 64;
+    uint consoleBufferW = vbe.width - 32;
+    uint consoleBufferH = CHAR_HEIGHT;
+    uint printX = 0;
+    uint printY = 0;
     
-    kKbdEnable();
-    kKbdFlushBuffer();
-    
-    PS2MouseState* mouseState = ps2MouseInit(cast(uint)vbe.width - 1, cast(uint)vbe.height - 1);
+    PS2State* ps2State = ps2Init(cast(uint)vbe.width - 1, cast(uint)vbe.height - 1);
     
     uint time1 = pitTimeTicks();
     uint renderTimer = 0;
-    uint mouseTimer = 0;
-    uint drawX = 0;
-    uint drawY = 64;
+    uint inputTimer = 0;
+    
+    uint clearColor = 0x000000AA;
+    
+    for (uint i = 0; i < numPixels; i++)
+        frontBuffer.ptr[i] = clearColor;
+
+    for (uint i = 0; i < numPixels; i++)
+        backBuffer.ptr[i] = clearColor;
+    
+    for (uint i = 0; i < numPixels; i++)
+        consoleBuffer.ptr[i] = clearColor;
+    
+    drawBitmap(&backBuffer, 16, 16, DIOS_LOGO, DIOS_LOGO_WIDTH, DIOS_LOGO_HEIGHT);
+    
+    printStr(&consoleBuffer, consoleBufferX0 + printX, consoleBufferY0 + printY, FONT, 16, CHAR_WIDTH, CHAR_HEIGHT, "Hello, World!");
+    printY += CHAR_HEIGHT;
+    consoleBufferH += CHAR_HEIGHT;
     
     while(1)
     {
@@ -155,12 +180,40 @@ void kmain(uint magic, uint addr) @nogc nothrow
         time1 = time2;
         uint deltaMs = (delta * 1000000) / PIT_FREQUENCY; // microseconds
         renderTimer += deltaMs;
-        mouseTimer += deltaMs;
+        inputTimer += deltaMs;
         
-        if (mouseTimer >= 1000) // 1 millisec
+        if (inputTimer >= 1000) // 1 millisec
         {
-            ps2MousePoll();
-            mouseTimer = 0;
+            ps2Poll();
+            inputTimer = 0;
+        }
+        
+        if (ps2State.keyPressed)
+        {
+            ps2State.keyPressed = 0;
+            if (ps2State.lastScancode == 0x0e)
+            {
+                if (printX > 0)
+                {
+                    printX -= CHAR_WIDTH - 2;
+                    clearChar(&consoleBuffer, consoleBufferX0 + printX, consoleBufferY0 + printY, CHAR_WIDTH, CHAR_HEIGHT, clearColor);
+                }
+            }
+            else
+            {
+                char c = scancodeToChar(ps2State.lastScancode);
+                if (c)
+                {
+                    printChar(&consoleBuffer, consoleBufferX0 + printX, consoleBufferY0 + printY, FONT, 16, CHAR_WIDTH, CHAR_HEIGHT, c);
+                    printX += CHAR_WIDTH - 2;
+                    if (printX >= consoleBuffer.width - 16)
+                    {
+                        printX = 0;
+                        printY += CHAR_HEIGHT;
+                        consoleBufferH += CHAR_HEIGHT;
+                    }
+                }
+            }
         }
         
         if (renderTimer >= 16666) // 16.7 millisecs
@@ -168,7 +221,22 @@ void kmain(uint magic, uint addr) @nogc nothrow
             // Render
             fillScreen(&backBuffer, 0x000000AA);
             drawBitmap(&backBuffer, 16, 16, DIOS_LOGO, DIOS_LOGO_WIDTH, DIOS_LOGO_HEIGHT);
-            drawBitmap(&backBuffer, mouseState.x, mouseState.y, CURSOR, CURSOR_WIDTH, CURSOR_HEIGHT);
+            
+            // Blit consoleBuffer to backBuffer
+            for (uint y = 0; y < consoleBufferH; y++)
+            {
+                if (consoleBufferY0 + y >= backBuffer.height)
+                    break;
+                for (uint x = 0; x < consoleBufferW; x++)
+                {
+                    if (consoleBufferX0 + x >= backBuffer.width)
+                        break;
+                    uint offset = (consoleBufferY0 + y) * (backBuffer.pitch / backBuffer.bytesPerPixel) + (consoleBufferX0 + x);
+                    backBuffer.ptr[offset] = consoleBuffer.ptr[offset];
+                }
+            }
+            
+            drawBitmap(&backBuffer, ps2State.mx, ps2State.my, CURSOR, CURSOR_WIDTH, CURSOR_HEIGHT);
             
             for (uint i = 0; i < numPixels; i++)
             {
@@ -176,23 +244,5 @@ void kmain(uint magic, uint addr) @nogc nothrow
             }
             renderTimer = 0;
         }
-        
-        /*
-        while ((kPortReadByte(0x64) & 1) == 0)
-        { }
-        ubyte code = kPortReadByte(0x60);
-        if (code == 0x0e)
-        {
-            VGAText.back();
-        }
-        else
-        {
-            char c = scancodeToChar(code);
-            if (c)
-            {
-                VGAText.putChar(c);
-            }
-        }
-        */
     }
 }
