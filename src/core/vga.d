@@ -1,7 +1,29 @@
 module core.vga;
 
 import core.port;
-import core.console;
+
+enum VGAColor
+{
+    // Background and Foreground
+    Black = 0,
+    Navy = 1,
+    Green = 2,
+    Teal = 3,
+    Maroon = 4,
+    Purple = 5,
+    Brown = 6,
+    Silver = 7,
+
+    // Foreground Only
+    Grey = 8,
+    Blue = 9,
+    Lime = 10,
+    Aqua = 11,
+    Red = 12,
+    Pink = 13,
+    Yellow = 14,
+    White = 15
+}
 
 extern(C):
 
@@ -15,7 +37,7 @@ __gshared struct VGAText
     const uint LINES = 24;
 
     // The default color.
-    const ubyte DEFAULTCOLORS = ConsoleColor.Silver;
+    const ubyte DEFAULTCOLORS = VGAColor.Silver;
 
     ubyte* videoMemoryLocation = cast(ubyte*)0xFFFF8000000B8000;
 
@@ -134,19 +156,19 @@ __gshared struct VGAText
     }
 
     // This function will set the text foreground to a new color.
-    void setForeColor(ConsoleColor newColor) @nogc nothrow
+    void setForeColor(VGAColor newColor) @nogc nothrow
     {
         colorAttribute = cast(ubyte)((colorAttribute & 0xf0) | newColor);
     }
 
     // This function will set the text background to a new color.
-    void setBackColor(ConsoleColor newColor) @nogc nothrow
+    void setBackColor(VGAColor newColor) @nogc nothrow
     {
         colorAttribute = cast(ubyte)((colorAttribute & 0x0f) | (newColor << 4));
     }
 
     // This function will set both the foreground and background colors.
-    void setColors(ConsoleColor foreColor, ConsoleColor backColor) @nogc nothrow
+    void setColors(VGAColor foreColor, VGAColor backColor) @nogc nothrow
     {
         colorAttribute = cast(ubyte)((foreColor & 0x0f) | (backColor << 4));
     }

@@ -1,13 +1,9 @@
 module main;
 
 import bootloader.multiboot;
-import core.stdio;
-import core.error;
 import core.port;
 import core.gdt;
 import core.vga;
-import core.console;
-import core.stdarg;
 import core.keyboard;
 import core.ps2;
 import core.vbe;
@@ -17,24 +13,18 @@ import logo;
 import cursor;
 import font;
 import console;
+import stdio;
+import error;
 
 extern(C):
 
 __gshared string MemAvailable = "Available";
 __gshared string MemReserved = "Reserved";
 
-void printf(string fmt, ...) @nogc nothrow
-{
-    va_list ap;
-    va_start!(string)(ap, fmt);
-    consolePrintStringFmt(fmt, ap);
-    va_end(ap);
-}
-
 void kmain(uint magic, uint addr) @nogc nothrow
 {
     initGDT();
-    Console.init();
+    VGAConsole.init();
     
     byte status = kPortReadByte(0x64);
     if (status == 0x02)
@@ -108,7 +98,6 @@ void kmain(uint magic, uint addr) @nogc nothrow
     
     uint time1 = pitTimeTicks();
     uint renderTimer = 0;
-    uint inputTimer = 0;
     
     uint clearColor = 0x000000AA;
     
@@ -124,15 +113,15 @@ void kmain(uint magic, uint addr) @nogc nothrow
     drawBitmap(&backBuffer, 16, 16, DIOS_LOGO, DIOS_LOGO_WIDTH, DIOS_LOGO_HEIGHT);
     
     // Print info
-    printf("DIOS 0.0.2\n");
-    printf("---------------\n");
-    printf("Multiboot magic: %x\n", magic);
-    printf("Multiboot info:\n");
+    kprintf("DIOS 0.0.2\n");
+    kprintf("---------------\n");
+    kprintf("Multiboot magic: %x\n", magic);
+    kprintf("Multiboot info:\n");
     if (checkFlag(mbi.flags, 2))
-        printf("Arguments: %s\n", cast(char*)mbi.cmdline);
-    printf("Boot loader: %s\n", cast(char*)mbi.boot_loader_name);
-    printf("RAM: %u MB\n", totalMemory);
-    printf("Memory map:\n");
+        kprintf("Arguments: %s\n", cast(char*)mbi.cmdline);
+    kprintf("Boot loader: %s\n", cast(char*)mbi.boot_loader_name);
+    kprintf("RAM: %u MB\n", totalMemory);
+    kprintf("Memory map:\n");
     uint mmapEntryNum = 0;
     if (checkFlag(mbi.flags, 6))
     {
@@ -141,19 +130,19 @@ void kmain(uint magic, uint addr) @nogc nothrow
              cast(ulong)mmap < mbi.mmap_addr + mbi.mmap_length;
              mmap = cast(multiboot_memory_map_t*)(cast(ulong)mmap + mmap.size + mmap.size.sizeof))
         {
-            printf("Entry %u: ", mmapEntryNum);
-            printf("address: %x, ", mmap.addr_low);
+            kprintf("Entry %u: ", mmapEntryNum);
+            kprintf("address: %x, ", mmap.addr_low);
             if (mmap.length_low >= 1024 * 1024)
-                printf("length: %u MB, ", (mmap.length_low / 1024) / 1024);
+                kprintf("length: %u MB, ", (mmap.length_low / 1024) / 1024);
             else if (mmap.length_low >= 1024)
-                printf("length: %u KB, ", mmap.length_low / 1024);
+                kprintf("length: %u KB, ", mmap.length_low / 1024);
             else
-                printf("length: %u B, ", mmap.length_low);
-            printf("type: %s\n", (mmap.type == 1)? cast(char*)MemAvailable : cast(char*)MemReserved);
+                kprintf("length: %u B, ", mmap.length_low);
+            kprintf("type: %s\n", (mmap.type == 1)? cast(char*)MemAvailable : cast(char*)MemReserved);
             mmapEntryNum++;
         }
     }
-    printf("VBE framebuffer: %ux%u %ubpp\n", vbe.width, vbe.height, vbe.bpp);
+    kprintf("VBE framebuffer: %ux%u %ubpp\n", vbe.width, vbe.height, vbe.bpp);
     
     while(1)
     {
@@ -162,14 +151,9 @@ void kmain(uint magic, uint addr) @nogc nothrow
         time1 = time2;
         uint deltaMicroSec = (delta * 1000000) / PIT_FREQUENCY;
         renderTimer += deltaMicroSec;
-        inputTimer += deltaMicroSec;
         consoleCursorBlinkTimer += deltaMicroSec;
         
-        if (inputTimer >= 1000) // 1 millisec
-        {
-            ps2Poll();
-            inputTimer = 0;
-        }
+        ps2Poll();
         
         if (ps2State.keyPressed)
         {

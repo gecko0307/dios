@@ -5,31 +5,15 @@ import core.port;
 import core.ps2;
 import core.keyboard;
 import core.pit;
-import core.stdarg;
 import core.framebuffer;
 import logo;
 import cursor;
 import font;
 import console;
+import stdio;
+import error;
 
 extern(C):
-
-// Halt and catch fire
-void hcf() @nogc nothrow
-{
-    for (;;) asm @nogc nothrow
-    {
-        hlt;
-    }
-}
-
-void printf(string fmt, ...) @nogc nothrow
-{
-    va_list args;
-    va_start(args, fmt);
-    consolePrintStringFmt(fmt, args);
-    va_end(args);
-}
 
 void kmain() @nogc nothrow
 {
@@ -95,7 +79,6 @@ void kmain() @nogc nothrow
     
     uint time1 = pitTimeTicks();
     uint renderTimer = 0;
-    uint inputTimer = 0;
     
     uint clearColor = 0x000000AA;
     
@@ -111,9 +94,9 @@ void kmain() @nogc nothrow
     drawBitmap(&backBuffer, 16, 16, DIOS_LOGO, DIOS_LOGO_WIDTH, DIOS_LOGO_HEIGHT);
     
     // Print info
-    printf("DIOS 0.0.2\n");
-    printf("---------------\n");
-    printf("test %u\n", 100);
+    kprintf("DIOS 0.0.2\n");
+    kprintf("---------------\n");
+    kprintf("test %u\n", 100);
     
     while(1)
     {
@@ -122,14 +105,9 @@ void kmain() @nogc nothrow
         time1 = time2;
         uint deltaMicroSec = (delta * 1000000) / PIT_FREQUENCY;
         renderTimer += deltaMicroSec;
-        inputTimer += deltaMicroSec;
         consoleCursorBlinkTimer += deltaMicroSec;
         
-        if (inputTimer >= 1000) // 1 millisec
-        {
-            ps2Poll();
-            inputTimer = 0;
-        }
+        ps2Poll();
         
         if (ps2State.keyPressed)
         {
