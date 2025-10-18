@@ -50,7 +50,11 @@ void kmain() @nogc nothrow
     if (fb.bpp != 32)
         hcf();
     
+    ulong numPixels = fb.height * fb.width;
+    ulong framebufferSize = fb.height * fb.pitch;
+    
     ulong backBufferAddr = memBaseAddr + 1024 * 1024; // leave 1 Mb
+    ulong consoleBufferAddr = backBufferAddr + framebufferSize;
     
     Framebuffer frontBuffer;
     frontBuffer.ptr = cast(uint*)fb.address;
@@ -66,36 +70,42 @@ void kmain() @nogc nothrow
     backBuffer.pitch = cast(uint)fb.pitch;
     backBuffer.bytesPerPixel = cast(uint)fb.bpp / 8;
     
-    ulong numPixels = fb.height * fb.width;
-    ulong framebufferSize = fb.height * fb.pitch;
+    Framebuffer consoleBuffer;
+    consoleBuffer.ptr = cast(uint*)consoleBufferAddr;
+    consoleBuffer.width = cast(uint)fb.width;
+    consoleBuffer.height = cast(uint)fb.height;
+    consoleBuffer.pitch = cast(uint)fb.pitch;
+    consoleBuffer.bytesPerPixel = cast(uint)fb.bpp / 8;
     
-    uint printX = 16;
-    uint printY = 64;
+    uint consoleBufferX0 = 16;
+    uint consoleBufferY0 = 64;
+    uint consoleBufferW = cast(uint)fb.width - 32;
+    uint consoleBufferH = CHAR_HEIGHT;
+    uint printX = 0;
+    uint printY = 0;
     
     PS2State* ps2State = ps2Init(cast(uint)fb.width - 1, cast(uint)fb.height - 1);
     
     uint time1 = pitTimeTicks();
     uint renderTimer = 0;
     uint inputTimer = 0;
-    uint drawX = 0;
-    uint drawY = 64;
     
     uint clearColor = 0x000000AA;
     
     for (uint i = 0; i < numPixels; i++)
-    {
         frontBuffer.ptr[i] = clearColor;
-    }
+
+    for (uint i = 0; i < numPixels; i++)
+        backBuffer.ptr[i] = clearColor;
     
     for (uint i = 0; i < numPixels; i++)
-    {
-        backBuffer.ptr[i] = clearColor;
-    }
+        consoleBuffer.ptr[i] = clearColor;
     
     drawBitmap(&backBuffer, 16, 16, DIOS_LOGO, DIOS_LOGO_WIDTH, DIOS_LOGO_HEIGHT);
     
-    printStr(&backBuffer, printX, printY, FONT, 16, CHAR_WIDTH, CHAR_HEIGHT, "Hello, World!");
+    printStr(&consoleBuffer, consoleBufferX0 + printX, consoleBufferY0 + printY, FONT, 16, CHAR_WIDTH, CHAR_HEIGHT, "Hello, World!");
     printY += CHAR_HEIGHT;
+    consoleBufferH += CHAR_HEIGHT;
     
     while(1)
     {
@@ -117,10 +127,10 @@ void kmain() @nogc nothrow
             ps2State.keyPressed = 0;
             if (ps2State.lastScancode == 0x0e)
             {
-                if (printX > 16)
+                if (printX > 0)
                 {
                     printX -= CHAR_WIDTH - 2;
-                    clearChar(&backBuffer, printX, printY, CHAR_WIDTH, CHAR_HEIGHT, clearColor);
+                    clearChar(&consoleBuffer, consoleBufferX0 + printX, consoleBufferY0 + printY, CHAR_WIDTH, CHAR_HEIGHT, clearColor);
                 }
             }
             else
@@ -128,12 +138,13 @@ void kmain() @nogc nothrow
                 char c = scancodeToChar(ps2State.lastScancode);
                 if (c)
                 {
-                    printChar(&backBuffer, printX, printY, FONT, 16, CHAR_WIDTH, CHAR_HEIGHT, c);
+                    printChar(&consoleBuffer, consoleBufferX0 + printX, consoleBufferY0 + printY, FONT, 16, CHAR_WIDTH, CHAR_HEIGHT, c);
                     printX += CHAR_WIDTH - 2;
-                    if (printX >= backBuffer.width - 16)
+                    if (printX >= consoleBuffer.width - 16)
                     {
-                        printX = 16;
+                        printX = 0;
                         printY += CHAR_HEIGHT;
+                        consoleBufferH += CHAR_HEIGHT;
                     }
                 }
             }
@@ -142,20 +153,24 @@ void kmain() @nogc nothrow
         if (renderTimer >= 16666) // 16.7 millisecs
         {
             // Render
-            /*
             fillScreen(&backBuffer, 0x000000AA);
             drawBitmap(&backBuffer, 16, 16, DIOS_LOGO, DIOS_LOGO_WIDTH, DIOS_LOGO_HEIGHT);
-            drawBitmap(&backBuffer, 16, 64, FONT, FONT_ATLAS_WIDTH, FONT_ATLAS_HEIGHT);
             
-            // Draw moving rectangle
-            if (drawX < backBuffer.width - 1)
-                drawX++;
-            else
-                drawX = 0;
-            drawRect(&backBuffer, drawX, drawY, 0x00FFFFFF, 32, 32);
+            // Blit consoleBuffer to backBuffer
+            for (uint y = 0; y < consoleBufferH; y++)
+            {
+                if (consoleBufferY0 + y >= backBuffer.height)
+                    break;
+                for (uint x = 0; x < consoleBufferW; x++)
+                {
+                    if (consoleBufferX0 + x >= backBuffer.width)
+                        break;
+                    uint offset = (consoleBufferY0 + y) * (backBuffer.pitch / backBuffer.bytesPerPixel) + (consoleBufferX0 + x);
+                    backBuffer.ptr[offset] = consoleBuffer.ptr[offset];
+                }
+            }
             
-            //drawBitmap(&backBuffer, ps2State.mx, ps2State.my, CURSOR, CURSOR_WIDTH, CURSOR_HEIGHT);
-            */
+            drawBitmap(&backBuffer, ps2State.mx, ps2State.my, CURSOR, CURSOR_WIDTH, CURSOR_HEIGHT);
             
             for (uint i = 0; i < numPixels; i++)
             {
