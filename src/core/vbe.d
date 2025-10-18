@@ -1,6 +1,6 @@
 module core.vbe;
 
-struct vbe_info
+struct vbeInfo
 {
     ushort attributes;
     ubyte  window_a, window_b;
