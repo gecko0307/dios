@@ -12,7 +12,8 @@ Features
 - GOP framebuffer via Limine / VESA 640x480 via Multiboot
 - Double buffering
 - PIT timer
-- PS/2 keyboard and mouse.
+- PS/2 keyboard and mouse
+- Simple console.
 
 Building (i386)
 --------------

@@ -44,8 +44,8 @@ PS2State* ps2Init(uint xBound, uint yBound) @nogc nothrow
     ps2State.xBound = xBound;
     ps2State.yBound = yBound;
     
-    while (kPortReadByte(PS2.StatusPort) & 0x02) {}
-    kPortWriteByte(PS2.CommandPort, 0xFF);
+    //while (kPortReadByte(PS2.StatusPort) & 0x02) {}
+    //kPortWriteByte(PS2.CommandPort, 0xFF);
     
     while (kPortReadByte(PS2.StatusPort) & 0x02) {}
     kPortWriteByte(PS2.CommandPort, PS2.CmdEnableKeyboard);
@@ -56,8 +56,8 @@ PS2State* ps2Init(uint xBound, uint yBound) @nogc nothrow
         ubyte tmp = kPortReadByte(PS2.DataPort);
     }
     
-    while (kPortReadByte(PS2.StatusPort) & 0x02) {}
-    kPortWriteByte(PS2.CommandPort, PS2.CmdEnableAuxiliaryDevice);
+    //while (kPortReadByte(PS2.StatusPort) & 0x02) {}
+    //kPortWriteByte(PS2.CommandPort, PS2.CmdEnableAuxiliaryDevice);
     
     while (kPortReadByte(PS2.StatusPort) & 0x02) {}
     kPortWriteByte(PS2.CommandPort, PS2.CmdMouse);
@@ -71,14 +71,16 @@ PS2State* ps2Init(uint xBound, uint yBound) @nogc nothrow
 void ps2Poll() @nogc nothrow
 {
     ubyte status = kPortReadByte(PS2.StatusPort);
+    if (!(status & 0x01))
+        return; // no data
+    
+    ubyte val = kPortReadByte(PS2.DataPort);
+    
     if (status & 0x20)
     {
         // Mouse
-        ubyte val = kPortReadByte(PS2.DataPort);
-        if (ps2State.packetIndex == 0)
-        {
-            if ((val & 0x08) == 0) return;
-        }
+        if (ps2State.packetIndex == 0 && (val & 0x08) == 0)
+            return;
         
         ps2State.packet[ps2State.packetIndex] = val;
         ps2State.packetIndex++;
@@ -101,10 +103,10 @@ void ps2Poll() @nogc nothrow
             ps2State.packetIndex = 0;
         }
     }
-    else if (status & 0x01)
+    else
     {
-        ubyte sc = kPortReadByte(PS2.DataPort);
-
+        // Keyboard
+        ubyte sc = val;
         if (sc == 0xE0)
         {
             ps2State.extended = 1;
