@@ -48,6 +48,15 @@ struct LimineFramebufferResponse
     LimineFramebuffer** framebuffers;
 }
 
+enum LIMINE_MEMMAP_USABLE = 0;
+enum LIMINE_MEMMAP_RESERVED = 1;
+enum LIMINE_MEMMAP_ACPI_RECLAIMABLE = 2;
+enum LIMINE_MEMMAP_ACPI_NVS = 3;
+enum LIMINE_MEMMAP_BAD_MEMORY = 4;
+enum LIMINE_MEMMAP_BOOTLOADER_RECLAIMABLE = 5;
+enum LIMINE_MEMMAP_KERNEL_AND_MODULES = 6;
+enum LIMINE_MEMMAP_FRAMEBUFFER = 7;
+
 struct LimineMemmapEntry
 {
     ulong base;

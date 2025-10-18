@@ -64,7 +64,6 @@ version(X86)
         bootInfo.arguments = cast(char*)mbi.cmdline;
         
         // Memory map
-        //bootInfo.ramTotal = (1024 + mbi.mem_upper) / 1024 + 1;
         bootInfo.ramStartAddress = 0;
         bootInfo.ramLength = 0;
         if (checkFlag(mbi.flags, 6))
@@ -131,14 +130,13 @@ else version(X86_64)
         stdioMode = StdioMode.Framebuffer;
         
         // Memory map
-        //bootInfo.ramTotal = 0;
         ulong ramStartAddress = 0;
         ulong ramLength = 0;
         auto memmap = memmapRequest.response;
         for (ulong i = 0; i < memmap.entry_count; i++)
         {
             auto entry = memmap.entries[i];
-            if (entry.type == 0x1 && entry.base < 0x100000000) // 0x1 == USABLE, low memory
+            if (entry.type == LIMINE_MEMMAP_USABLE)
             {
                 if (entry.length > ramLength)
                 {
@@ -146,7 +144,6 @@ else version(X86_64)
                     ramLength = entry.length;
                 }
             }
-            //bootInfo.ramTotal += entry.length;
         }
         
         bootInfo.ramStartAddress = ramStartAddress;
