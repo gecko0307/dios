@@ -20,9 +20,9 @@ import error;
 
 struct BootInfo
 {
-    ulong hhdmOffset;
     const(char)* bootloaderName;
     const(char)* arguments;
+    size_t hhdmOffset;
     size_t kernelLoadAddress;
     size_t availMemBase;
     size_t availMemSize;
@@ -61,6 +61,7 @@ version(X86)
         
         // TODO: MULTIBOOT_AOUT_KLUDGE
         //bootInfo.kernelLoadAddress = mbi.load_addr;
+        bootInfo.hhdmOffset = 0;
         bootInfo.bootloaderName = cast(char*)mbi.boot_loader_name;
         bootInfo.arguments = cast(char*)mbi.cmdline;
         
@@ -176,7 +177,7 @@ extern(C) void cpuFlushCache() @nogc nothrow
 
 void run() @nogc nothrow
 {
-    ulong hhdmOffset = bootInfo.hhdmOffset;
+    size_t hhdmOffset = bootInfo.hhdmOffset;
     size_t availMemBase = bootInfo.availMemBase;
     size_t availMemSize = bootInfo.availMemSize;
     
