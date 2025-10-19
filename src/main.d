@@ -7,6 +7,7 @@ import core.keyboard;
 import core.ps2;
 import core.vbe;
 import core.framebuffer;
+import core.paging;
 import core.pit;
 import core.pci;
 import core.mem;
@@ -21,19 +22,8 @@ struct BootInfo
 {
     const(char)* bootloaderName;
     const(char)* arguments;
-    
-    // TODO: generic mmap structure
-    version(X86)
-    {
-        uint ramStartAddress;
-        uint ramLength;
-    }
-    else version(X86_64)
-    {
-        ulong ramStartAddress;
-        ulong ramLength;
-    }
-    
+    size_t ramStartAddress;
+    size_t ramLength;
     Framebuffer videoBuffer;
 }
 
@@ -43,6 +33,11 @@ __gshared string BOOTLOADER_LIMINE = "Limine\0";
 __gshared BootInfo bootInfo;
 
 extern(C):
+
+size_t alignUp(size_t value, size_t alignment) @nogc nothrow
+{
+    return (value + alignment - 1) & ~(alignment - 1);
+}
 
 version(X86)
 {
@@ -123,7 +118,9 @@ else version(X86_64)
         if (fb.bpp != 32)
             hcf();
         
-        bootInfo.videoBuffer.ptr = cast(uint*)fb.address;
+        ulong fbAddr = cast(ulong)fb.address;
+        
+        bootInfo.videoBuffer.ptr = cast(uint*)fbAddr;
         bootInfo.videoBuffer.width = cast(uint)fb.width;
         bootInfo.videoBuffer.height = cast(uint)fb.height;
         bootInfo.videoBuffer.pitch = cast(uint)fb.pitch;
@@ -158,16 +155,32 @@ else version(X86_64)
     }
 }
 
+extern(C) void cpuFlushCache() @nogc nothrow
+{
+    asm @nogc nothrow
+    {
+        wbinvd;
+    }
+}
+
 void run() @nogc nothrow
 {
-    uint numPixels = bootInfo.videoBuffer.height * bootInfo.videoBuffer.width;
-    uint framebufferSize = bootInfo.videoBuffer.height * bootInfo.videoBuffer.pitch;
-    
-    size_t backBufferAddr = bootInfo.ramStartAddress + 5 * 1024 * 1024; // leave 5 Mb
-    size_t consoleBufferAddr = backBufferAddr + framebufferSize;
-    
+    size_t ramLength = bootInfo.ramLength;
+    size_t ramStartAddress = bootInfo.ramStartAddress + 1024 * 1024; // leave 1 Mb for now
     Framebuffer* frontBuffer = &bootInfo.videoBuffer;
     
+    // Page allocator
+    size_t pageAllocBase = alignUp(ramStartAddress, MEM_PAGE_SIZE);
+    MemPageAlloc* mem = initPages(pageAllocBase, ramLength - pageAllocBase);
+    
+    size_t numPixels = frontBuffer.height * frontBuffer.width;
+    size_t framebufferSize = frontBuffer.height * frontBuffer.pitch;
+    size_t numPagesForBuffer = alignUp(framebufferSize, MEM_PAGE_SIZE) / MEM_PAGE_SIZE;
+    
+    void* backBufferAddr = pagesAlloc(numPagesForBuffer, 0);
+    void* consoleBufferAddr = pagesAlloc(numPagesForBuffer, 0);
+    
+    // Buffers for drawing kernel graphics
     Framebuffer backBuffer;
     backBuffer.ptr = cast(uint*)backBufferAddr;
     backBuffer.width = frontBuffer.width;
@@ -183,17 +196,13 @@ void run() @nogc nothrow
     consoleBuffer.bytesPerPixel = frontBuffer.bytesPerPixel;
     
     ConsoleState* consoleState = consoleInit(&consoleBuffer, 16, 64);
-    uint consoleCursorBlinkTimer = 0;
-    bool consoleCursorVisible = true;
     
+    // PS/2
     PS2State* ps2State = ps2Init(
         cast(uint)frontBuffer.width - 1,
         cast(uint)frontBuffer.height - 1);
     
-    uint time1 = pitTimeTicks();
-    uint inputTimer = 0;
-    uint renderTimer = 0;
-    
+    // Clear buffers
     uint clearColor = 0x000000AA;
     
     for (uint i = 0; i < numPixels; i++)
@@ -221,8 +230,20 @@ void run() @nogc nothrow
         kprintf("Avail. memory start addr: %llx\n", bootInfo.ramStartAddress);
         kprintf("Avail. memory size: %llu MB\n", bootInfo.ramLength / (1024 * 1024));
     }
-    kprintf("Framebuffer: %ux%u %ubpp\n",
-        frontBuffer.width, frontBuffer.height, frontBuffer.bytesPerPixel * 8);
+    kprintf("Framebuffer: %llx %ux%u %ubpp\n",
+        cast(size_t)frontBuffer.ptr, frontBuffer.width, frontBuffer.height, frontBuffer.bytesPerPixel * 8);
+    
+    kprintf("RAM page size: %x\n", MEM_PAGE_SIZE);
+    version(X86)
+    {
+        kprintf("RAM pages: %u\n", mem.pages.length);
+        kprintf("RAM pages base addr: %x\n", cast(size_t)mem.ramBase);
+    }
+    else version(X86_64)
+    {
+        kprintf("RAM pages: %llu\n", mem.pages.length);
+        kprintf("RAM pages base addr: %llx\n", cast(size_t)mem.ramBase);
+    }
     
     version(X86)
     {
@@ -231,15 +252,24 @@ void run() @nogc nothrow
     else
     version(X86_64)
     {
+        // Enumerate PCI configuration space
         pciScan();
     }
     
+    uint inputTimer = 0;
+    uint renderTimer = 0;
+    uint consoleCursorBlinkTimer = 0;
+    bool consoleCursorVisible = true;
+    
+    uint prevTime = pitTimeTicks();
+    
     while(1)
     {
-        uint time2 = pitTimeTicks();
-        uint delta = time2 - time1;
-        time1 = time2;
+        uint currTime = pitTimeTicks();
+        uint delta = currTime - prevTime;
+        prevTime = currTime;
         uint deltaMicroSec = (delta * 1000000) / PIT_FREQUENCY;
+        
         renderTimer += deltaMicroSec;
         inputTimer += deltaMicroSec;
         consoleCursorBlinkTimer += deltaMicroSec;

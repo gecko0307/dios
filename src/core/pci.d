@@ -93,10 +93,7 @@ void pciScan() @nogc nothrow
             ubyte dClass = pciReadClass(bus, device, 0);
             ubyte dSubclass = pciReadSubclass(bus, device, 0);
             
-            kprintf("Bus %u, Device %u\n", bus, device);
-            kprintf("  VendorID: %x DeviceID: %x\n", vendorID, deviceID);
-            kprintf("  Class: %x Subclass: %x HeaderType: %x\n", dClass, dSubclass, headerType);
-            
+            /*
             if ((headerType & 0x80) != 0)
             {
                 for (uint func = 1; func < 8; func++)
@@ -113,7 +110,9 @@ void pciScan() @nogc nothrow
                         func, vendorIDf, deviceIDf, classf, subclassf);
                 }
             }
-            else if (dClass == 0x0C && dSubclass == 0x03)
+            */
+            
+            if (dClass == 0x0C && dSubclass == 0x03)
             {
                 ubyte progIf = pciReadProgIF(bus, device, 0);
                 string progIfStr;
@@ -122,7 +121,8 @@ void pciScan() @nogc nothrow
                 else if (progIf == 0x20) progIfStr = "EHCI (USB 2.0)";
                 else if (progIf == 0x30) progIfStr = "XHCI (USB 3.0)";
                 else progIfStr = "undefined";
-                kprintf("  USB controller %s\n", progIfStr.ptr);
+                kprintf("USB controller %s @ bus %u, device %u\n", progIfStr.ptr, bus, device);
+                kprintf("  vendorID: %x, deviceID: %x\n", vendorID, deviceID);
                 
                 if (progIf == 0x30)
                 {
