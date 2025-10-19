@@ -8,6 +8,8 @@ import core.ps2;
 import core.vbe;
 import core.framebuffer;
 import core.pit;
+import core.pci;
+import core.mem;
 import logo;
 import cursor;
 import font;
@@ -189,6 +191,7 @@ void run() @nogc nothrow
         cast(uint)frontBuffer.height - 1);
     
     uint time1 = pitTimeTicks();
+    uint inputTimer = 0;
     uint renderTimer = 0;
     
     uint clearColor = 0x000000AA;
@@ -221,6 +224,16 @@ void run() @nogc nothrow
     kprintf("Framebuffer: %ux%u %ubpp\n",
         frontBuffer.width, frontBuffer.height, frontBuffer.bytesPerPixel * 8);
     
+    version(X86)
+    {
+        // not implemented yet
+    }
+    else
+    version(X86_64)
+    {
+        pciScan();
+    }
+    
     while(1)
     {
         uint time2 = pitTimeTicks();
@@ -228,9 +241,14 @@ void run() @nogc nothrow
         time1 = time2;
         uint deltaMicroSec = (delta * 1000000) / PIT_FREQUENCY;
         renderTimer += deltaMicroSec;
+        inputTimer += deltaMicroSec;
         consoleCursorBlinkTimer += deltaMicroSec;
         
-        ps2Poll();
+        if (inputTimer >= 1000) // 1 millisec
+        {
+            ps2Poll();
+            inputTimer = 0;
+        }
         
         if (ps2State.keyPressed)
         {
@@ -270,10 +288,16 @@ void run() @nogc nothrow
             
             drawBitmap(&backBuffer, ps2State.mx, ps2State.my, CURSOR, CURSOR_WIDTH, CURSOR_HEIGHT);
             
-            for (uint i = 0; i < numPixels; i++)
+            version(X86_64)
             {
-                frontBuffer.ptr[i] = backBuffer.ptr[i];
+                fastMemcpyNT(frontBuffer.ptr, backBuffer.ptr, framebufferSize);
             }
+            else version(X86)
+            {
+                for (uint i = 0; i < numPixels; i++)
+                    frontBuffer.ptr[i] = backBuffer.ptr[i];
+            }
+           
             renderTimer = 0;
         }
     }

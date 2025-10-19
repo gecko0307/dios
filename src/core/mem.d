@@ -24,3 +24,9 @@ void* memset(void *s, int c, size_t n) @nogc nothrow
 
     return s;
 }
+
+version(X86_64)
+{
+    // from mem.s
+    void* fastMemcpyNT(void* dest, const void* src, size_t size)  @nogc nothrow;
+}
