@@ -121,7 +121,7 @@ void pciScan() @nogc nothrow
                 else if (progIf == 0x20) progIfStr = "EHCI (USB 2.0)";
                 else if (progIf == 0x30) progIfStr = "XHCI (USB 3.0)";
                 else progIfStr = "undefined";
-                kprintf("USB controller %s @ bus %u, device %u\n", progIfStr.ptr, bus, device);
+                kprintf("USB controller %s @ bus %u / device %u\n", progIfStr.ptr, bus, device);
                 kprintf("  vendorID: %x, deviceID: %x\n", vendorID, deviceID);
                 
                 if (progIf == 0x30)

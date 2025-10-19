@@ -20,10 +20,12 @@ import error;
 
 struct BootInfo
 {
+    ulong hhdmOffset;
     const(char)* bootloaderName;
     const(char)* arguments;
-    size_t ramStartAddress;
-    size_t ramLength;
+    size_t kernelLoadAddress;
+    size_t availMemBase;
+    size_t availMemSize;
     Framebuffer videoBuffer;
 }
 
@@ -57,12 +59,14 @@ version(X86)
         
         multiboot_info* mbi = cast(multiboot_info*)addr;
         
+        // TODO: MULTIBOOT_AOUT_KLUDGE
+        //bootInfo.kernelLoadAddress = mbi.load_addr;
         bootInfo.bootloaderName = cast(char*)mbi.boot_loader_name;
         bootInfo.arguments = cast(char*)mbi.cmdline;
         
         // Memory map
-        bootInfo.ramStartAddress = 0;
-        bootInfo.ramLength = 0;
+        bootInfo.availMemBase = 0;
+        bootInfo.availMemSize = 0;
         if (checkFlag(mbi.flags, 6))
         {
             multiboot_memory_map_t* mmap = cast(multiboot_memory_map_t*)(mbi.mmap_addr);
@@ -70,13 +74,15 @@ version(X86)
                  cast(ulong)mmap < mbi.mmap_addr + mbi.mmap_length;
                  mmap = cast(multiboot_memory_map_t*)(cast(ulong)mmap + mmap.size + mmap.size.sizeof))
             {
-                if ((mmap.type == 1) && (mmap.length_low > bootInfo.ramLength))
+                if ((mmap.type == 1) && (mmap.length_low > bootInfo.availMemSize))
                 {
-                    bootInfo.ramStartAddress = mmap.addr_low;
-                    bootInfo.ramLength = mmap.length_low;
+                    bootInfo.availMemBase = mmap.addr_low;
+                    bootInfo.availMemSize = mmap.length_low;
                 }
             }
         }
+        
+        bootInfo.availMemBase += 1024 * 1024;
         
         // Framebuffer
         vbeInfo* vbe;
@@ -102,18 +108,23 @@ else version(X86_64)
     
     void kmain() @nogc nothrow
     {
+        auto kernelFileResp = kernelFileRequest.response;
+        bootInfo.kernelLoadAddress = cast(size_t)kernelFileResp.kernel_file.address;
+        
         bootInfo.bootloaderName = BOOTLOADER_LIMINE.ptr;
-        bootInfo.arguments = EMPTY_STR.ptr;
+        bootInfo.arguments = kernelFileResp.kernel_file.cmdline;
+        
+        bootInfo.hhdmOffset = hhdmRequest.response.offset;
         
         // Framebuffer
-        auto resp = framebufferRequest.response;
-        while (resp is null || resp.framebuffer_count < 1)
+        auto fbResp = framebufferRequest.response;
+        while (fbResp is null || fbResp.framebuffer_count < 1)
         {
             asm @nogc nothrow { hlt; }
-            resp = framebufferRequest.response;
+            fbResp = framebufferRequest.response;
         }
         
-        auto fb = resp.framebuffers[0];
+        auto fb = fbResp.framebuffers[0];
         
         if (fb.bpp != 32)
             hcf();
@@ -129,27 +140,27 @@ else version(X86_64)
         stdioMode = StdioMode.Framebuffer;
         
         // Memory map
-        ulong ramStartAddress = 0;
-        ulong ramLength = 0;
+        ulong availMemBase = 0;
+        ulong availMemSize = 0;
         auto memmap = memmapRequest.response;
         for (ulong i = 0; i < memmap.entry_count; i++)
         {
             auto entry = memmap.entries[i];
             if (entry.type == LIMINE_MEMMAP_USABLE)
             {
-                if (entry.length > ramLength)
+                if (entry.length > availMemSize)
                 {
-                    ramStartAddress = entry.base;
-                    ramLength = entry.length;
+                    availMemBase = entry.base;
+                    availMemSize = entry.length;
                 }
             }
         }
         
-        bootInfo.ramStartAddress = ramStartAddress;
-        bootInfo.ramLength = ramLength;
-        
-        if (bootInfo.ramStartAddress == 0)
+        if (availMemBase == 0 || availMemSize <= 1024 * 1024)
             hcf();
+        
+        bootInfo.availMemBase = availMemBase;
+        bootInfo.availMemSize = availMemSize - 1024 * 1024;
         
         run();
     }
@@ -165,13 +176,15 @@ extern(C) void cpuFlushCache() @nogc nothrow
 
 void run() @nogc nothrow
 {
-    size_t ramLength = bootInfo.ramLength;
-    size_t ramStartAddress = bootInfo.ramStartAddress + 1024 * 1024; // leave 1 Mb for now
+    ulong hhdmOffset = bootInfo.hhdmOffset;
+    size_t availMemBase = bootInfo.availMemBase;
+    size_t availMemSize = bootInfo.availMemSize;
+    
     Framebuffer* frontBuffer = &bootInfo.videoBuffer;
     
     // Page allocator
-    size_t pageAllocBase = alignUp(ramStartAddress, MEM_PAGE_SIZE);
-    MemPageAlloc* mem = initPages(pageAllocBase, ramLength - pageAllocBase);
+    size_t pageAllocBase = alignUp(availMemBase, MEM_PAGE_SIZE);
+    MemPageAlloc* mem = initPages(pageAllocBase, availMemSize - pageAllocBase);
     
     size_t numPixels = frontBuffer.height * frontBuffer.width;
     size_t framebufferSize = frontBuffer.height * frontBuffer.pitch;
@@ -220,29 +233,34 @@ void run() @nogc nothrow
     kprintf("DIOS 0.0.2\n");
     kprintf("---------------\n");
     kprintf("Bootloader: %s\n", bootInfo.bootloaderName);
+    kprintf("Kernel arguments: %s\n", bootInfo.arguments);
     version(X86)
     {
-        kprintf("Avail. memory start addr: %x\n", bootInfo.ramStartAddress);
-        kprintf("Avail. memory size: %u MB\n", bootInfo.ramLength / (1024 * 1024));
+        kprintf("Avail. memory base: %x\n", availMemBase);
+        kprintf("Avail. memory size: %u B (%u MiB)\n", availMemSize, availMemSize / (1024 * 1024));
+        kprintf("Framebuffer: %ux%u %ubpp @ %x\n",
+            frontBuffer.width, frontBuffer.height, frontBuffer.bytesPerPixel * 8, cast(size_t)frontBuffer.ptr);
     }
     else version(X86_64)
     {
-        kprintf("Avail. memory start addr: %llx\n", bootInfo.ramStartAddress);
-        kprintf("Avail. memory size: %llu MB\n", bootInfo.ramLength / (1024 * 1024));
+        kprintf("HHDM offset: %llx\n", hhdmOffset);
+        kprintf("Phys. kernel load addr: %llx\n", bootInfo.kernelLoadAddress - hhdmOffset);
+        kprintf("Avail. memory base: %llx\n", availMemBase);
+        kprintf("Avail. memory size: %llu B (%u MiB)\n", availMemSize, availMemSize / (1024 * 1024));
+        kprintf("Framebuffer: %ux%u %ubpp @ %llx\n",
+            frontBuffer.width, frontBuffer.height, frontBuffer.bytesPerPixel * 8, cast(size_t)frontBuffer.ptr);
     }
-    kprintf("Framebuffer: %llx %ux%u %ubpp\n",
-        cast(size_t)frontBuffer.ptr, frontBuffer.width, frontBuffer.height, frontBuffer.bytesPerPixel * 8);
     
-    kprintf("RAM page size: %x\n", MEM_PAGE_SIZE);
+    kprintf("RAM page size: %x B\n", MEM_PAGE_SIZE);
     version(X86)
     {
         kprintf("RAM pages: %u\n", mem.pages.length);
-        kprintf("RAM pages base addr: %x\n", cast(size_t)mem.ramBase);
+        kprintf("RAM pages base: %x\n", cast(size_t)mem.ramBase);
     }
     else version(X86_64)
     {
         kprintf("RAM pages: %llu\n", mem.pages.length);
-        kprintf("RAM pages base addr: %llx\n", cast(size_t)mem.ramBase);
+        kprintf("RAM pages base: %llx\n", cast(size_t)mem.ramBase);
     }
     
     version(X86)

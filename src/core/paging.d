@@ -84,25 +84,3 @@ void pageFree(void* paddr) @nogc nothrow
     memPageAlloc.pages[index].used = false;
     memPageAlloc.pages[index].flags = 0;
 }
-
-/*
-struct PageTable
-{
-    align(0x1000)
-    ulong[512] entries;
-}
-
-__gshared PageTable PML4;
-__gshared PageTable PDPT;
-__gshared PageTable PD;
-__gshared PageTable PT;
-
-void initPages()
-{
-    // Identity mapping:
-    PT.entries[0] = 0x00000000 | PRESENT | WRITABLE;
-    PD.entries[0] = cast(ulong)&pt | PRESENT | WRITABLE;
-    PDPT.entries[0] = cast(ulong)&pd | PRESENT | WRITABLE;
-    PML4.entries[0] = cast(ulong)&pdpt | PRESENT | WRITABLE;
-}
-*/
