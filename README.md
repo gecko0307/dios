@@ -11,6 +11,7 @@ Features
 - Boots using Multiboot or Limine startup protocols
 - GOP framebuffer via Limine / VESA 640x480 via Multiboot
 - Double buffering
+- Page allocator
 - PIT timer
 - PS/2 keyboard and mouse
 - Simple console.
