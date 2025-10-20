@@ -11,6 +11,7 @@ import core.paging;
 import core.pit;
 import core.pci;
 import core.mem;
+import core.vmem;
 import logo;
 import cursor;
 import font;
@@ -23,7 +24,8 @@ struct BootInfo
     const(char)* bootloaderName;
     const(char)* arguments;
     size_t hhdmOffset;
-    size_t kernelLoadAddress;
+    size_t kernelLoadAddressPhysical;
+    size_t kernelLoadAddressVirtual;
     size_t availMemBase;
     size_t availMemSize;
     Framebuffer videoBuffer;
@@ -35,6 +37,8 @@ __gshared string BOOTLOADER_LIMINE = "Limine\0";
 __gshared BootInfo bootInfo;
 
 extern(C):
+
+__gshared size_t _end;
 
 size_t alignUp(size_t value, size_t alignment) @nogc nothrow
 {
@@ -60,7 +64,9 @@ version(X86)
         multiboot_info* mbi = cast(multiboot_info*)addr;
         
         // TODO: MULTIBOOT_AOUT_KLUDGE
-        //bootInfo.kernelLoadAddress = mbi.load_addr;
+        //bootInfo.kernelLoadAddressPhysical = mbi.load_addr;
+        bootInfo.kernelLoadAddressPhysical = 0;
+        bootInfo.kernelLoadAddressVirtual = 0;
         bootInfo.hhdmOffset = 0;
         bootInfo.bootloaderName = cast(char*)mbi.boot_loader_name;
         bootInfo.arguments = cast(char*)mbi.cmdline;
@@ -109,38 +115,16 @@ else version(X86_64)
     
     void kmain() @nogc nothrow
     {
-        auto kernelFileResp = kernelFileRequest.response;
-        bootInfo.kernelLoadAddress = cast(size_t)kernelFileResp.kernel_file.address;
+        // Kernel info
+        bootInfo.kernelLoadAddressPhysical = cast(size_t)kernelAddressRequest.response.physical_base;
+        bootInfo.kernelLoadAddressVirtual = cast(size_t)kernelAddressRequest.response.virtual_base;
         
         bootInfo.bootloaderName = BOOTLOADER_LIMINE.ptr;
-        bootInfo.arguments = kernelFileResp.kernel_file.cmdline;
-        
-        bootInfo.hhdmOffset = hhdmRequest.response.offset;
-        
-        // Framebuffer
-        auto fbResp = framebufferRequest.response;
-        while (fbResp is null || fbResp.framebuffer_count < 1)
-        {
-            asm @nogc nothrow { hlt; }
-            fbResp = framebufferRequest.response;
-        }
-        
-        auto fb = fbResp.framebuffers[0];
-        
-        if (fb.bpp != 32)
-            hcf();
-        
-        ulong fbAddr = cast(ulong)fb.address;
-        
-        bootInfo.videoBuffer.ptr = cast(uint*)fbAddr;
-        bootInfo.videoBuffer.width = cast(uint)fb.width;
-        bootInfo.videoBuffer.height = cast(uint)fb.height;
-        bootInfo.videoBuffer.pitch = cast(uint)fb.pitch;
-        bootInfo.videoBuffer.bytesPerPixel = cast(uint)fb.bpp / 8;
-        
-        stdioMode = StdioMode.Framebuffer;
+        bootInfo.arguments = kernelFileRequest.response.kernel_file.cmdline;
         
         // Memory map
+        bootInfo.hhdmOffset = hhdmRequest.response.offset;
+        
         ulong availMemBase = 0;
         ulong availMemSize = 0;
         auto memmap = memmapRequest.response;
@@ -157,11 +141,31 @@ else version(X86_64)
             }
         }
         
-        if (availMemBase == 0 || availMemSize <= 1024 * 1024)
+        if (availMemBase == 0)
             hcf();
         
         bootInfo.availMemBase = availMemBase;
-        bootInfo.availMemSize = availMemSize - 1024 * 1024;
+        bootInfo.availMemSize = availMemSize;
+        
+        // Framebuffer
+        auto fbResp = framebufferRequest.response;
+        while (fbResp is null || fbResp.framebuffer_count < 1)
+        {
+            asm @nogc nothrow { hlt; }
+            fbResp = framebufferRequest.response;
+        }
+        
+        auto fb = fbResp.framebuffers[0];
+        
+        if (fb.bpp != 32)
+            hcf();
+        
+        bootInfo.videoBuffer.ptr = cast(uint*)fb.address;
+        bootInfo.videoBuffer.width = cast(uint)fb.width;
+        bootInfo.videoBuffer.height = cast(uint)fb.height;
+        bootInfo.videoBuffer.pitch = cast(uint)fb.pitch;
+        bootInfo.videoBuffer.bytesPerPixel = cast(uint)fb.bpp / 8;
+        stdioMode = StdioMode.Framebuffer;
         
         run();
     }
@@ -178,6 +182,8 @@ extern(C) void cpuFlushCache() @nogc nothrow
 void run() @nogc nothrow
 {
     size_t hhdmOffset = bootInfo.hhdmOffset;
+    size_t kernelLoadAddressPhysical = bootInfo.kernelLoadAddressPhysical;
+    size_t kernelLoadAddressVirtual = bootInfo.kernelLoadAddressVirtual;
     size_t availMemBase = bootInfo.availMemBase;
     size_t availMemSize = bootInfo.availMemSize;
     
@@ -185,7 +191,7 @@ void run() @nogc nothrow
     
     // Page allocator
     size_t pageAllocBase = alignUp(availMemBase, MEM_PAGE_SIZE);
-    MemPageAlloc* mem = initPages(pageAllocBase, availMemSize - pageAllocBase);
+    MemPageAlloc* mem = initPages(pageAllocBase, availMemSize - (pageAllocBase - availMemBase));
     
     size_t numPixels = frontBuffer.height * frontBuffer.width;
     size_t framebufferSize = frontBuffer.height * frontBuffer.pitch;
@@ -239,15 +245,18 @@ void run() @nogc nothrow
     {
         kprintf("Avail. memory base: %x\n", availMemBase);
         kprintf("Avail. memory size: %u B (%u MiB)\n", availMemSize, availMemSize / (1024 * 1024));
+        kprintf("Avail. memory end: %x\n", availMemBase + availMemSize);
         kprintf("Framebuffer: %ux%u %ubpp @ %x\n",
             frontBuffer.width, frontBuffer.height, frontBuffer.bytesPerPixel * 8, cast(size_t)frontBuffer.ptr);
     }
     else version(X86_64)
     {
         kprintf("HHDM offset: %llx\n", hhdmOffset);
-        kprintf("Phys. kernel load addr: %llx\n", bootInfo.kernelLoadAddress - hhdmOffset);
+        kprintf("Kernel load addr phys: %llx\n", kernelLoadAddressPhysical);
+        kprintf("Kernel load addr virt: %llx\n", kernelLoadAddressVirtual);
         kprintf("Avail. memory base: %llx\n", availMemBase);
         kprintf("Avail. memory size: %llu B (%u MiB)\n", availMemSize, availMemSize / (1024 * 1024));
+        kprintf("Avail. memory end: %llx\n", availMemBase + availMemSize);
         kprintf("Framebuffer: %ux%u %ubpp @ %llx\n",
             frontBuffer.width, frontBuffer.height, frontBuffer.bytesPerPixel * 8, cast(size_t)frontBuffer.ptr);
     }
@@ -268,8 +277,7 @@ void run() @nogc nothrow
     {
         // not implemented yet
     }
-    else
-    version(X86_64)
+    else version(X86_64)
     {
         // Enumerate PCI configuration space
         pciScan();

@@ -1,4 +1,11 @@
+bits 64
+
+global getCR3
 global fastMemcpyNT
+
+getCR3:
+    db 0x0f, 0x20, 0xc0  ; mov rax, cr3
+    ret
 
 fastMemcpyNT:
     mov rcx, rdx

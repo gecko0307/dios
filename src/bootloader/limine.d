@@ -172,6 +172,27 @@ struct LimineHHDMRequest
     LimineHHDMResponse* response;
 };
 
+enum LIMINE_KERNEL_ADDRESS_REQUEST = [
+    LIMINE_COMMON_MAGIC1,
+    LIMINE_COMMON_MAGIC2,
+    0x71ba76863cc55f63,
+    0xb2644a48c516a487
+];
+
+struct LimineKernelAddressResponse
+{
+    ulong revision;
+    ulong physical_base;
+    ulong virtual_base;
+};
+
+struct LimineKernelAddressRequest
+{
+    ulong[4] id;
+    ulong revision;
+    LimineKernelAddressResponse* response;
+};
+
 @(section(".limine_requests"))
 __gshared ulong[3] limine_base_revision;
 
@@ -186,6 +207,9 @@ __gshared LimineMemmapRequest memmapRequest = LimineMemmapRequest(LIMINE_MEMMAP_
 
 @(section(".limine_requests"))
 __gshared LimineHHDMRequest hhdmRequest = LimineHHDMRequest(LIMINE_HHDM_REQUEST, 0, null);
+
+@(section(".limine_requests"))
+__gshared LimineKernelAddressRequest kernelAddressRequest = LimineKernelAddressRequest(LIMINE_KERNEL_ADDRESS_REQUEST, 0, null);
 
 @(section(".limine_requests_start"))
 __gshared ulong[4] limineRequestsStart;

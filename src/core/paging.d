@@ -19,6 +19,11 @@ __gshared MemPageAlloc memPageAlloc;
 
 extern(C):
 
+bool isPageAligned(size_t addr) @nogc nothrow
+{
+    return (addr % MEM_PAGE_SIZE) == 0;
+}
+
 MemPageAlloc* initPages(size_t basePhysAdr, size_t availableRamSize) @nogc nothrow
 {
     size_t maxNumPages = availableRamSize / MEM_PAGE_SIZE;
