@@ -12,7 +12,7 @@ PHDRS
 SECTIONS {
     . = 0xffffffff80000000;
     
-    .limine_requests : ALIGN(0x1000) {
+    .limine_requests : {
         KEEP(*(.limine_requests_start))
         KEEP(*(.limine_requests))
         KEEP(*(.limine_requests_end))
@@ -48,4 +48,9 @@ SECTIONS {
         ebss = .;
     }
     end = .; _end = .; __end = .;
+    
+    /DISCARD/ : {
+        *(.eh_frame*)
+        *(.note .note.*)
+    }
 }

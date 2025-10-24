@@ -1,6 +1,26 @@
 module core.mem;
 
+struct RAMInfo
+{
+    size_t availMemBase;
+    size_t availMemSize;
+    size_t hhdmOffset;
+    size_t kernelBasePhysical;
+    size_t kernelBaseVirtual;
+    size_t kernelSize;
+}
+
 extern(C):
+
+size_t alignDown(size_t a, size_t alignment) @nogc nothrow
+{
+    return a & ~(alignment - 1);
+}
+
+size_t alignUp(size_t value, size_t alignment) @nogc nothrow
+{
+    return (value + alignment - 1) & ~(alignment - 1);
+}
 
 void* memcpy(void* dest, const void* src, size_t n) @nogc nothrow
 {

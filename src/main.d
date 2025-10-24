@@ -23,11 +23,7 @@ struct BootInfo
 {
     const(char)* bootloaderName;
     const(char)* arguments;
-    size_t hhdmOffset;
-    size_t kernelLoadAddressPhysical;
-    size_t kernelLoadAddressVirtual;
-    size_t availMemBase;
-    size_t availMemSize;
+    RAMInfo ramInfo;
     Framebuffer videoBuffer;
 }
 
@@ -39,11 +35,6 @@ __gshared BootInfo bootInfo;
 extern(C):
 
 __gshared size_t _end;
-
-size_t alignUp(size_t value, size_t alignment) @nogc nothrow
-{
-    return (value + alignment - 1) & ~(alignment - 1);
-}
 
 version(X86)
 {
@@ -63,17 +54,19 @@ version(X86)
         
         multiboot_info* mbi = cast(multiboot_info*)addr;
         
-        // TODO: MULTIBOOT_AOUT_KLUDGE
-        //bootInfo.kernelLoadAddressPhysical = mbi.load_addr;
-        bootInfo.kernelLoadAddressPhysical = 0;
-        bootInfo.kernelLoadAddressVirtual = 0;
-        bootInfo.hhdmOffset = 0;
         bootInfo.bootloaderName = cast(char*)mbi.boot_loader_name;
         bootInfo.arguments = cast(char*)mbi.cmdline;
         
+        bootInfo.ramInfo.availMemBase = 0;
+        bootInfo.ramInfo.availMemSize = 0;
+        bootInfo.ramInfo.hhdmOffset = 0;
+        // TODO: MULTIBOOT_AOUT_KLUDGE
+        //bootInfo.kernelBasePhysical = mbi.load_addr;
+        bootInfo.ramInfo.kernelBasePhysical = 0;
+        bootInfo.ramInfo.kernelBaseVirtual = 0;
+        bootInfo.ramInfo.kernelSize = 0;
+        
         // Memory map
-        bootInfo.availMemBase = 0;
-        bootInfo.availMemSize = 0;
         if (checkFlag(mbi.flags, 6))
         {
             multiboot_memory_map_t* mmap = cast(multiboot_memory_map_t*)(mbi.mmap_addr);
@@ -81,15 +74,15 @@ version(X86)
                  cast(ulong)mmap < mbi.mmap_addr + mbi.mmap_length;
                  mmap = cast(multiboot_memory_map_t*)(cast(ulong)mmap + mmap.size + mmap.size.sizeof))
             {
-                if ((mmap.type == 1) && (mmap.length_low > bootInfo.availMemSize))
+                if ((mmap.type == 1) && (mmap.length_low > bootInfo.ramInfo.availMemSize))
                 {
-                    bootInfo.availMemBase = mmap.addr_low;
-                    bootInfo.availMemSize = mmap.length_low;
+                    bootInfo.ramInfo.availMemBase = mmap.addr_low;
+                    bootInfo.ramInfo.availMemSize = mmap.length_low;
                 }
             }
         }
         
-        bootInfo.availMemBase += 1024 * 1024;
+        bootInfo.ramInfo.availMemBase += 1024 * 1024; // reserve 1 MB for safety
         
         // Framebuffer
         vbeInfo* vbe;
@@ -115,37 +108,41 @@ else version(X86_64)
     
     void kmain() @nogc nothrow
     {
-        // Kernel info
-        bootInfo.kernelLoadAddressPhysical = cast(size_t)kernelAddressRequest.response.physical_base;
-        bootInfo.kernelLoadAddressVirtual = cast(size_t)kernelAddressRequest.response.virtual_base;
-        
+        // Bootloader info
         bootInfo.bootloaderName = BOOTLOADER_LIMINE.ptr;
         bootInfo.arguments = kernelFileRequest.response.kernel_file.cmdline;
         
-        // Memory map
-        bootInfo.hhdmOffset = hhdmRequest.response.offset;
+        // Memory info
+        bootInfo.ramInfo.availMemBase = 0;
+        bootInfo.ramInfo.availMemSize = 0;
+        bootInfo.ramInfo.hhdmOffset = hhdmRequest.response.offset;
+        bootInfo.ramInfo.kernelBasePhysical = cast(size_t)kernelAddressRequest.response.physical_base;
+        bootInfo.ramInfo.kernelBaseVirtual = cast(size_t)kernelAddressRequest.response.virtual_base;
+        bootInfo.ramInfo.kernelSize = 0;
         
-        ulong availMemBase = 0;
-        ulong availMemSize = 0;
+        ulong maxAddr = 0;
+        
         auto memmap = memmapRequest.response;
         for (ulong i = 0; i < memmap.entry_count; i++)
         {
             auto entry = memmap.entries[i];
+            
             if (entry.type == LIMINE_MEMMAP_USABLE)
             {
-                if (entry.length > availMemSize)
+                if (entry.length > bootInfo.ramInfo.availMemSize)
                 {
-                    availMemBase = entry.base;
-                    availMemSize = entry.length;
+                    bootInfo.ramInfo.availMemBase = entry.base;
+                    bootInfo.ramInfo.availMemSize = entry.length;
                 }
+            }
+            else if (entry.type == LIMINE_MEMMAP_KERNEL_AND_MODULES)
+            {
+                bootInfo.ramInfo.kernelSize += entry.length;
             }
         }
         
-        if (availMemBase == 0)
+        if (bootInfo.ramInfo.availMemBase == 0)
             hcf();
-        
-        bootInfo.availMemBase = availMemBase;
-        bootInfo.availMemSize = availMemSize;
         
         // Framebuffer
         auto fbResp = framebufferRequest.response;
@@ -179,18 +176,20 @@ extern(C) void cpuFlushCache() @nogc nothrow
     }
 }
 
+enum MEM_2M_PAGE_SIZE = 0x200000UL;
+
 void run() @nogc nothrow
 {
-    size_t hhdmOffset = bootInfo.hhdmOffset;
-    size_t kernelLoadAddressPhysical = bootInfo.kernelLoadAddressPhysical;
-    size_t kernelLoadAddressVirtual = bootInfo.kernelLoadAddressVirtual;
-    size_t availMemBase = bootInfo.availMemBase;
-    size_t availMemSize = bootInfo.availMemSize;
+    size_t hhdmOffset = bootInfo.ramInfo.hhdmOffset;
+    size_t kernelBasePhysical = bootInfo.ramInfo.kernelBasePhysical;
+    size_t kernelBaseVirtual = bootInfo.ramInfo.kernelBaseVirtual;
+    size_t availMemBase = alignUp(bootInfo.ramInfo.availMemBase, MEM_2M_PAGE_SIZE);
+    size_t availMemSize = bootInfo.ramInfo.availMemSize - (availMemBase - bootInfo.ramInfo.availMemBase);
     
     Framebuffer* frontBuffer = &bootInfo.videoBuffer;
     
     // Page allocator
-    size_t pageAllocBase = alignUp(availMemBase, MEM_PAGE_SIZE);
+    size_t pageAllocBase = availMemBase;
     MemPageAlloc* mem = initPages(pageAllocBase, availMemSize - (pageAllocBase - availMemBase));
     
     size_t numPixels = frontBuffer.height * frontBuffer.width;
@@ -252,8 +251,8 @@ void run() @nogc nothrow
     else version(X86_64)
     {
         kprintf("HHDM offset: %llx\n", hhdmOffset);
-        kprintf("Kernel load addr phys: %llx\n", kernelLoadAddressPhysical);
-        kprintf("Kernel load addr virt: %llx\n", kernelLoadAddressVirtual);
+        kprintf("Kernel base phys: %llx\n", kernelBasePhysical);
+        kprintf("Kernel base virt: %llx\n", kernelBaseVirtual);
         kprintf("Avail. memory base: %llx\n", availMemBase);
         kprintf("Avail. memory size: %llu B (%u MiB)\n", availMemSize, availMemSize / (1024 * 1024));
         kprintf("Avail. memory end: %llx\n", availMemBase + availMemSize);
@@ -279,8 +278,13 @@ void run() @nogc nothrow
     }
     else version(X86_64)
     {
+        bootInfo.ramInfo.availMemBase = availMemBase;
+        bootInfo.ramInfo.availMemSize = availMemSize;
+        vmemInit(&bootInfo.ramInfo);
+        kprintf("PML4: %llx\n", PML4_PHYS);
+        
         // Enumerate PCI configuration space
-        pciScan();
+        pciScan(hhdmOffset);
     }
     
     uint inputTimer = 0;

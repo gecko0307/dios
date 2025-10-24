@@ -1,5 +1,7 @@
 module core.xhci;
 
+import core.volatile;
+
 enum XHCICapReg
 {
     CAPLENGTH = 0x00,
@@ -31,6 +33,43 @@ enum XHCIPort
     PORTPMSC = 0x04,
     PORTLI = 0x08,
     RSVD = 0x0C
+}
+
+struct XHCIDevice
+{
+    void* capRegBase;
+    ubyte capRegLength;
+    ushort hciVersion;
+    uint structParams1;
+    uint structParams2;
+    uint structParams3;
+    uint capParams;
+    uint doorbellOffset;
+    uint rtsOffset;
+    uint capParams2;
+    void* opRegBase;
+}
+
+extern(C):
+
+void xhciDeviceInit(XHCIDevice* xhciDev, void* capRegs) @nogc nothrow
+{
+    xhciDev.capRegBase = capRegs;
+    xhciDev.capRegLength = volatileLoad(cast(ubyte*)(capRegs + XHCICapReg.CAPLENGTH));
+    xhciDev.hciVersion = volatileLoad(cast(ushort*)(capRegs + XHCICapReg.HCIVERSION));
+    xhciDev.structParams1 = volatileLoad(cast(uint*)(capRegs + XHCICapReg.HCSPARAMS1));
+    xhciDev.structParams2 = volatileLoad(cast(uint*)(capRegs + XHCICapReg.HCSPARAMS2));
+    xhciDev.structParams3 = volatileLoad(cast(uint*)(capRegs + XHCICapReg.HCSPARAMS3));
+    xhciDev.capParams = volatileLoad(cast(uint*)(capRegs + XHCICapReg.HCCPARAMS1));
+    xhciDev.doorbellOffset = volatileLoad(cast(uint*)(capRegs + XHCICapReg.DBOFF));
+    xhciDev.rtsOffset = volatileLoad(cast(uint*)(capRegs + XHCICapReg.RTSOFF));
+    xhciDev.capParams2 = volatileLoad(cast(uint*)(capRegs + XHCICapReg.HCCPARMS2));
+    xhciDev.opRegBase = capRegs + xhciDev.capRegLength;
+}
+
+ushort xhciUsbStatus(XHCIDevice* xhciDev) @nogc nothrow
+{
+    return volatileLoad(cast(ushort*)(xhciDev.opRegBase + XHCIOpReg.USBSTS));
 }
 
 // TODO

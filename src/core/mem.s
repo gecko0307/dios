@@ -1,10 +1,19 @@
-bits 64
+BITS 64
 
 global getCR3
+global setCR3
 global fastMemcpyNT
 
 getCR3:
-    db 0x0f, 0x20, 0xc0  ; mov rax, cr3
+    mov rax, cr3
+    ret
+
+setCR3:
+    ; CR3 writer for UEFI/x86_64 (SysV ABI):
+    ; Caller provides physical PML4 in RDI. Mask low 12 bits and write CR3.
+    mov rax, rdi
+    and rax, 0xFFFFFFFFFFFFF000
+    mov cr3, rax
     ret
 
 fastMemcpyNT:
