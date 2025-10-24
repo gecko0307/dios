@@ -99,19 +99,7 @@ void pciWriteCommand(uint bus, uint device, uint func, ushort value) @nogc nothr
     pciConfigWrite32(bus, device, func, PCI_CONFIG_COMMAND, value);
 }
 
-struct xhci_cap_regs
-{
-    uint cap_caplen_version;
-    uint cap_hcsparams1;
-    uint cap_hcsparams2;
-    uint cap_hcsparams3;
-    uint cap_hccparams1;
-    uint cap_dboff;
-    uint cap_rtsoff;
-    uint cap_hccparams2;
-}
-
-void pciScan(size_t hhdmOffset) @nogc nothrow
+void pciScan() @nogc nothrow
 {
     for (uint bus = 0; bus < 256; bus++)
     {
@@ -204,8 +192,6 @@ void pciScan(size_t hhdmOffset) @nogc nothrow
                         kprintf("  USBSTS: %x\n", usbStatus);
                         
                         //ctrlRegs[0x00] |= 1 << 24; // OS Owned
-
-                        //kprintf("  CAPLENGTH: %u\n", capLength);
                     }
                 }
             }

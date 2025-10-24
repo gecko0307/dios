@@ -281,10 +281,9 @@ void run() @nogc nothrow
         bootInfo.ramInfo.availMemBase = availMemBase;
         bootInfo.ramInfo.availMemSize = availMemSize;
         vmemInit(&bootInfo.ramInfo);
-        kprintf("PML4: %llx\n", PML4_PHYS);
         
         // Enumerate PCI configuration space
-        pciScan(hhdmOffset);
+        pciScan();
     }
     
     uint inputTimer = 0;

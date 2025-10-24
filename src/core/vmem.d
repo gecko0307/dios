@@ -60,70 +60,9 @@ int vmemInit(RAMInfo* ramInfo) @nogc nothrow
         fastMemcpyNT(pml4_virt, old_pml4_virt, 4096);
     }
     
-    /*
-    // TODO
-    // Map user memory by 2 MiB pages
-    size_t mem_pages_2m = ramInfo.availMemSize / 0x200000UL;
-    ulong base = ramInfo.availMemBase;
-    kprintf("Mapping %u x 2MiB pages of user memory (%u MiB total)\n", mem_pages_2m, mem_pages_2m * 2);
-    kprintf("RAM base: phys=%llx, virt=%llx\n", base, vmemPhysToVirt(base));
-    for (size_t i = 0; i < mem_pages_2m; ++i)
-    {
-        ulong phys = base + i * 0x200000UL;
-        ulong virt = vmemPhysToVirt(phys);
-        //kprintf("Mapping page %u: phys=%llx -> virt=%llx\n", i, phys, virt);
-        
-        // Verify alignment
-        if ((phys & 0x1FFFFF) != 0)
-        {
-            kprintf("Physical address not 2MB aligned!\n");
-            return -1;
-        }
-        if ((virt & 0x1FFFFF) != 0)
-        {
-            kprintf("Virtual address not 2MB aligned!\n");
-            return -1;
-        }
-        
-        if (mapPage2M(pml4_phys, virt, phys, PTE_RW | PTE_PRESENT) != 0)
-        {
-            kprintf("Failed to map available RAM at page %u!\n", i);
-            return -1;
-        }
-    }
-    */
-    
-    /*
-    // TODO
-    // Map the kernel at its virtual address
-    kprintf("Mapping kernel at virtual address %llx...\n", ramInfo.kernelBaseVirtual);
-    for (size_t i = 0; i < kernel_pages_4k; ++i)
-    {
-        ulong vaddr = ramInfo.kernelBaseVirtual + i * 0x1000;
-        ulong paddr = ramInfo.kernelBasePhysical + i * 0x1000;
-        if (mapPage4k(pml4_phys, vaddr, paddr, PTE_RW | PTE_PRESENT) != 0)
-        {
-            kprintf("Failed to map the kernel!\n");
-            return -1;
-        }
-    }
-    */
-    
-    /*
-    // Map 1 4KiB page for XHCI MMIO
-    size_t testPortPhys = 0x000000C000000000;
-    size_t testPortVirt = 0xffffff1fc0000000;
-    kprintf("Map %llx to %llx...\n", testPortVirt, testPortPhys);
-    if (mapPage4k(pml4_phys, testPortVirt, testPortPhys, PTE_PRESENT | PTE_RW | PTE_PCD | PTE_PWT) != 0)
-    {
-        kprintf("Failed to map memory for MMIO debug!\n");
-        return -1;
-    }
-    */
-    
     PML4_PHYS = pml4_phys;
-    kprintf("Setting up new page tables (PML4=%llx)...\n", pml4_phys);
     
+    kprintf("Setting up new page tables (PML4=%llx)...\n", pml4_phys);
     setCR3(pml4_phys);
     kprintf("Page tables switched successfully\n");
     
