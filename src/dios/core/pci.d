@@ -184,12 +184,12 @@ void pciScan() @nogc nothrow
                         kprintf("  HCSPARAMS2: %llx\n", xhciDev.structParams2);
                         kprintf("  HCSPARAMS3: %llx\n", xhciDev.structParams3);
                         kprintf("  HCCPARAMS1: %llx\n", xhciDev.capParams);
-                        kprintf("  DBOFF: %u\n", xhciDev.doorbellOffset);
-                        kprintf("  RTSOFF: %u\n", xhciDev.rtsOffset);
-                        kprintf("  HCCPARMS2: %llx\n", xhciDev.capParams2);
+                        kprintf("  DBOFF: %x\n", xhciDev.doorbellOffset);
+                        kprintf("  RTSOFF: %x\n", xhciDev.rtsOffset);
+                        kprintf("  HCCPARAMS2: %llx\n", xhciDev.capParams2);
                         kprintf("  opRegs: %llx\n", cast(ulong)xhciDev.opRegBase);
                         
-                        ushort usbStatus = xhciUsbStatus(&xhciDev);
+                        uint usbStatus = xhciUsbStatus(&xhciDev);
                         kprintf("  USBSTS: %x\n", usbStatus);
                         
                         //ctrlRegs[0x00] |= 1 << 24; // OS Owned

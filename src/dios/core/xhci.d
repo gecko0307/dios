@@ -13,7 +13,7 @@ enum XHCICapReg
     HCCPARAMS1 = 0x10,
     DBOFF = 0x14,
     RTSOFF = 0x18,
-    HCCPARMS2 = 0x1C
+    HCCPARAMS2 = 0x1C
 }
 
 enum XHCIOpReg
@@ -38,8 +38,8 @@ enum XHCIPort
 struct XHCIDevice
 {
     void* capRegBase;
-    ubyte capRegLength;
-    ushort hciVersion;
+    uint capRegLength;
+    uint hciVersion;
     uint structParams1;
     uint structParams2;
     uint structParams3;
@@ -63,11 +63,11 @@ void xhciDeviceInit(XHCIDevice* xhciDev, void* capRegs) @nogc nothrow
     xhciDev.capParams = volatileLoad(cast(uint*)(capRegs + XHCICapReg.HCCPARAMS1));
     xhciDev.doorbellOffset = volatileLoad(cast(uint*)(capRegs + XHCICapReg.DBOFF));
     xhciDev.rtsOffset = volatileLoad(cast(uint*)(capRegs + XHCICapReg.RTSOFF));
-    xhciDev.capParams2 = volatileLoad(cast(uint*)(capRegs + XHCICapReg.HCCPARMS2));
+    xhciDev.capParams2 = volatileLoad(cast(uint*)(capRegs + XHCICapReg.HCCPARAMS2));
     xhciDev.opRegBase = capRegs + xhciDev.capRegLength;
 }
 
-ushort xhciUsbStatus(XHCIDevice* xhciDev) @nogc nothrow
+uint xhciUsbStatus(XHCIDevice* xhciDev) @nogc nothrow
 {
-    return volatileLoad(cast(ushort*)(xhciDev.opRegBase + XHCIOpReg.USBSTS));
+    return volatileLoad(cast(uint*)(xhciDev.opRegBase + XHCIOpReg.USBSTS));
 }
