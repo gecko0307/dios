@@ -1,4 +1,4 @@
-module font;
+module dios.core.font;
 
 enum FONT_ATLAS_WIDTH = 160;
 enum FONT_ATLAS_HEIGHT = 192;

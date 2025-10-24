@@ -1,4 +1,4 @@
-module core.paging;
+module dios.core.paging;
 
 enum size_t MEM_PAGE_SIZE = 0x1000;
 

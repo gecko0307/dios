@@ -1,4 +1,4 @@
-module core.xhci;
+module dios.core.xhci;
 
 import core.volatile;
 
@@ -71,5 +71,3 @@ ushort xhciUsbStatus(XHCIDevice* xhciDev) @nogc nothrow
 {
     return volatileLoad(cast(ushort*)(xhciDev.opRegBase + XHCIOpReg.USBSTS));
 }
-
-// TODO

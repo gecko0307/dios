@@ -1,4 +1,4 @@
-module core.mem;
+module dios.core.mem;
 
 struct RAMInfo
 {

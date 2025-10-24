@@ -1,4 +1,4 @@
-module core.gdt;
+module dios.core.gdt;
 
 struct GDTEntry
 {

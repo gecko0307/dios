@@ -1,4 +1,4 @@
-module core.vbe;
+module dios.core.vbe;
 
 struct vbeInfo
 {

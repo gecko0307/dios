@@ -1,23 +1,23 @@
 module main;
 
-import core.port;
-import core.gdt;
-import core.vga;
-import core.keyboard;
-import core.ps2;
-import core.vbe;
-import core.framebuffer;
-import core.paging;
-import core.pit;
-import core.pci;
-import core.mem;
-import core.vmem;
-import logo;
-import cursor;
-import font;
-import console;
-import stdio;
-import error;
+import dios.core.port;
+import dios.core.gdt;
+import dios.core.vga;
+import dios.core.keyboard;
+import dios.core.ps2;
+import dios.core.vbe;
+import dios.core.framebuffer;
+import dios.core.paging;
+import dios.core.pit;
+import dios.core.pci;
+import dios.core.mem;
+import dios.core.vmem;
+import dios.core.logo;
+import dios.core.cursor;
+import dios.core.font;
+import dios.core.console;
+import dios.core.stdio;
+import dios.core.error;
 
 struct BootInfo
 {
@@ -38,7 +38,7 @@ __gshared size_t _end;
 
 version(X86)
 {
-    import bootloader.multiboot;
+    import dios.bootloader.multiboot;
     
     void kmain(uint magic, uint addr) @nogc nothrow
     {
@@ -104,7 +104,7 @@ version(X86)
 }
 else version(X86_64)
 {
-    import bootloader.limine;
+    import dios.bootloader.limine;
     
     void kmain() @nogc nothrow
     {

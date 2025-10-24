@@ -1,6 +1,6 @@
-module core.keyboard;
+module dios.core.keyboard;
 
-import core.port;
+import dios.core.port;
 
 extern(C):
 

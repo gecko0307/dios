@@ -1,4 +1,4 @@
-module bootloader.limine;
+module dios.bootloader.limine;
 
 import ldc.attributes;
 

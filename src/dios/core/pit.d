@@ -1,6 +1,6 @@
-module core.pit;
+module dios.core.pit;
 
-import core.port;
+import dios.core.port;
 
 enum PIT: ubyte
 {

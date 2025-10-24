@@ -1,6 +1,6 @@
-module error;
+module dios.core.error;
 
-import stdio;
+import dios.core.stdio;
 
 extern(C):
 

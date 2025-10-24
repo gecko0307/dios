@@ -1,4 +1,4 @@
-module core.port;
+module dios.core.port;
 
 extern(C):
 

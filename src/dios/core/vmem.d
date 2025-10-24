@@ -1,8 +1,8 @@
-module core.vmem;
+module dios.core.vmem;
 
-import core.mem;
-import core.paging;
-import stdio;
+import dios.core.mem;
+import dios.core.paging;
+import dios.core.stdio;
 
 version(X86_64):
 

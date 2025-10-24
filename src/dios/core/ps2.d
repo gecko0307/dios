@@ -1,6 +1,6 @@
-module core.ps2;
+module dios.core.ps2;
 
-import core.port;
+import dios.core.port;
 
 enum PS2: ubyte
 {

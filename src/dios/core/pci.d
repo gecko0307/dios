@@ -1,10 +1,11 @@
-module core.pci;
+module dios.core.pci;
+
+import dios.core.port;
+import dios.core.vmem;
+import dios.core.xhci;
+import dios.core.stdio;
 
 import core.volatile;
-import core.port;
-import core.vmem;
-import core.xhci;
-import stdio;
 
 version(X86_64):
 

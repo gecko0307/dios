@@ -1,7 +1,7 @@
-module stdio;
+module dios.core.stdio;
 
+import dios.core.console;
 import core.stdc.stdarg;
-import console;
 
 enum StdioMode
 {

@@ -1,4 +1,4 @@
-module core.framebuffer;
+module dios.core.framebuffer;
 
 struct Framebuffer
 {

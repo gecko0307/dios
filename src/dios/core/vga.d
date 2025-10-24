@@ -1,6 +1,6 @@
-module core.vga;
+module dios.core.vga;
 
-import core.port;
+import dios.core.port;
 
 enum VGAColor
 {

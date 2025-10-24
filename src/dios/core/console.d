@@ -1,9 +1,10 @@
-module console;
+module dios.core.console;
 
-import core.vga;
-import core.framebuffer;
+import dios.core.vga;
+import dios.core.framebuffer;
+import dios.core.font;
+
 import core.stdc.stdarg;
-import font;
 
 struct ConsoleState
 {
