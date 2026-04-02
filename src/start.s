@@ -1,3 +1,5 @@
+BITS 32
+
 global start
 extern kmain
 extern start_ctors, end_ctors, start_dtors, end_dtors

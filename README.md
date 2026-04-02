@@ -1,6 +1,6 @@
 <img align="left" alt="dios logo" src="https://github.com/gecko0307/mathom/raw/master/dios/logo_128.png" height="80" />
 
-DIOS is a minimal x86 OS kernel written in D with some parts in assembly. It is tested on a real hardware and emulators like VirtualBox and QEMU. The main purpose of this project is demonstrating D's fitness for system development. I've written it initially in D1/GDC and recently ported to D2/LDC and added experimental 64-bit support.
+DIOS stands for D Incomplete Operating System. It is a minimal x86 OS kernel written in D with some parts in assembly. It is tested on a real hardware and emulators like VirtualBox and QEMU. The main purpose of this project is demonstrating D's fitness for system development. I've written it initially in D1/GDC and recently ported to D2/LDC and added experimental 64-bit support.
 
 I don't have any big plans for this code - you are free to use it to create your own kernel. PRs implementing real-world OS features are welcome. The code is a bit messy but readable.
 
