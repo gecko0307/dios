@@ -8,7 +8,7 @@ version(X86_64):
 
 extern(C):
 
-enum : ulong
+enum: ulong
 {
     PTE_PRESENT   = 1UL << 0,
     PTE_RW        = 1UL << 1,

@@ -36,8 +36,8 @@ extern(C):
 
 uint pciConfigRead32(uint bus, uint device, uint func, ubyte offset) @nogc nothrow
 {
-    uint address = 0x80000000 | (bus << 16) | (device << 11) | (func << 8) | (offset & 0xFC);
-    kPortWrite32(PCI_CONFIG_ADDRESS, address);
+    uint addr = 0x80000000 | (bus << 16) | (device << 11) | (func << 8) | (offset & 0xFC);
+    kPortWrite32(PCI_CONFIG_ADDRESS, addr);
     return kPortRead32(PCI_CONFIG_DATA);
 }
 
@@ -46,6 +46,13 @@ void pciConfigWrite32(uint bus, uint device, uint func, ubyte offset, uint value
     uint addr = 0x80000000 | (bus << 16) | (device << 11) | (func << 8) | (offset & 0xFC);
     kPortWrite32(PCI_CONFIG_ADDRESS, addr);
     kPortWrite32(PCI_CONFIG_DATA, value);
+}
+
+void pciConfigWrite16(uint bus, uint device, uint func, ubyte offset, ushort value) @nogc nothrow
+{
+    uint addr = 0x80000000 | (bus << 16) | (device << 11) | (func << 8) | (offset & 0xFC);
+    kPortWrite16(PCI_CONFIG_ADDRESS, cast(ushort)addr);
+    kPortWrite16(PCI_CONFIG_DATA + (offset & 2), value);
 }
 
 ushort pciConfigRead16(uint bus, uint device, uint func, ubyte offset) @nogc nothrow
@@ -97,7 +104,7 @@ ushort pciReadCommand(uint bus, uint device, uint func) @nogc nothrow
 
 void pciWriteCommand(uint bus, uint device, uint func, ushort value) @nogc nothrow
 {
-    pciConfigWrite32(bus, device, func, PCI_CONFIG_COMMAND, value);
+    pciConfigWrite16(bus, device, func, PCI_CONFIG_COMMAND, value);
 }
 
 void pciScan() @nogc nothrow
@@ -146,30 +153,39 @@ void pciScan() @nogc nothrow
                 kprintf("USB controller %s @ bus %u / device %u\n", progIfStr.ptr, bus, device);
                 kprintf("  vendorID: %x, deviceID: %x\n", vendorID, deviceID);
                 
-                if (progIf == 0x30)
+                if (progIf == 0x10)
+                {
+                    // TODO
+                }
+                else if (progIf == 0x20)
+                {
+                    // TODO
+                }
+                else if (progIf == 0x30)
                 {
                     ushort cmd = pciReadCommand(bus, device, 0);
-                    cmd |= 0x6; // Enable memory I/O and bus master
+                    cmd |= 0x6;
                     pciWriteCommand(bus, device, 0, cmd);
-                    
-                    uint bar0 = pciConfigRead32(bus, device, 0, PCI_CONFIG_BAR0) & 0xFFFFFFF0;
-                    uint bar1 = pciConfigRead32(bus, device, 0, PCI_CONFIG_BAR1);
-                    
-                    if ((bar0 & 0x1) == 0)
+
+                    uint bar0_orig = pciConfigRead32(bus, device, 0, PCI_CONFIG_BAR0);
+                    uint bar1_orig = pciConfigRead32(bus, device, 0, PCI_CONFIG_BAR1);
+
+                    if ((bar0_orig & 0x1) == 0)
                     {
-                        // MMIO
-                        ulong mmio = (cast(ulong)bar1 << 32) | (bar0 & 0xFFFFFFF0);
-                        kprintf("  MMIO capability registers phys: %llx\n", mmio);
-                        
                         pciConfigWrite32(bus, device, 0, 0x10, 0xFFFFFFFF);
                         pciConfigWrite32(bus, device, 0, 0x14, 0xFFFFFFFF);
+                        
                         uint bar0_w = pciConfigRead32(bus, device, 0, 0x10);
                         uint bar1_w = pciConfigRead32(bus, device, 0, 0x14);
+                        
                         ulong mask = (cast(ulong)bar1_w << 32) | (bar0_w & 0xFFFFFFF0);
                         ulong barSize = ~mask + 1;
-                        pciConfigWrite32(bus, device, 0, 0x10, bar0);
-                        pciConfigWrite32(bus, device, 0, 0x14, bar1);
+                        
+                        pciConfigWrite32(bus, device, 0, 0x10, bar0_orig);
+                        pciConfigWrite32(bus, device, 0, 0x14, bar1_orig);
 
+                        ulong mmio = (cast(ulong)bar1_orig << 32) | (bar0_orig & 0xFFFFFFF0);
+                        kprintf("  MMIO capability registers phys: %llx\n", mmio);
                         kprintf("  BAR size: %llu\n", barSize);
 
                         void* capsRegs = vmemMapMMIO(mmio, barSize);
@@ -191,8 +207,6 @@ void pciScan() @nogc nothrow
                         
                         uint usbStatus = xhciUsbStatus(&xhciDev);
                         kprintf("  USBSTS: %x\n", usbStatus);
-                        
-                        //ctrlRegs[0x00] |= 1 << 24; // OS Owned
                     }
                 }
             }
