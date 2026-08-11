@@ -1,7 +1,6 @@
 module main;
 
 import dios.core.port;
-import dios.core.gdt;
 import dios.core.vga;
 import dios.core.keyboard;
 import dios.core.ps2;
@@ -18,6 +17,7 @@ import dios.core.font;
 import dios.core.console;
 import dios.core.stdio;
 import dios.core.error;
+import dios.bootloader.limine;
 
 struct BootInfo
 {
@@ -29,143 +29,71 @@ struct BootInfo
 
 __gshared string EMPTY_STR = "\0";
 __gshared string BOOTLOADER_LIMINE = "Limine\0";
-
 __gshared BootInfo bootInfo;
+__gshared size_t _end;
 
 extern(C):
 
-__gshared size_t _end;
-
-version(X86)
+/// Kernal entry point.
+void kmain() @nogc nothrow
 {
-    import dios.bootloader.multiboot;
+    // Bootloader info
+    bootInfo.bootloaderName = BOOTLOADER_LIMINE.ptr;
+    bootInfo.arguments = kernelFileRequest.response.kernel_file.cmdline;
     
-    void kmain(uint magic, uint addr) @nogc nothrow
-    {
-        initGDT();
-        VGAConsole.init();
-        
-        byte status = kPortReadByte(0x64);
-        if (status == 0x02)
-            kPanic("Problem with GDT/CS!");
-        
-        if (magic != MULTIBOOT_BOOTLOADER_MAGIC)
-            kPanic("Invalid Multiboot magic number");
-        
-        multiboot_info* mbi = cast(multiboot_info*)addr;
-        
-        bootInfo.bootloaderName = cast(char*)mbi.boot_loader_name;
-        bootInfo.arguments = cast(char*)mbi.cmdline;
-        
-        bootInfo.ramInfo.availMemBase = 0;
-        bootInfo.ramInfo.availMemSize = 0;
-        bootInfo.ramInfo.hhdmOffset = 0;
-        // TODO: MULTIBOOT_AOUT_KLUDGE
-        //bootInfo.kernelBasePhysical = mbi.load_addr;
-        bootInfo.ramInfo.kernelBasePhysical = 0;
-        bootInfo.ramInfo.kernelBaseVirtual = 0;
-        bootInfo.ramInfo.kernelSize = 0;
-        
-        // Memory map
-        if (checkFlag(mbi.flags, 6))
-        {
-            multiboot_memory_map_t* mmap = cast(multiboot_memory_map_t*)(mbi.mmap_addr);
-            for (mmap = cast(multiboot_memory_map_t*) mbi.mmap_addr;
-                 cast(ulong)mmap < mbi.mmap_addr + mbi.mmap_length;
-                 mmap = cast(multiboot_memory_map_t*)(cast(ulong)mmap + mmap.size + mmap.size.sizeof))
-            {
-                if ((mmap.type == 1) && (mmap.length_low > bootInfo.ramInfo.availMemSize))
-                {
-                    bootInfo.ramInfo.availMemBase = mmap.addr_low;
-                    bootInfo.ramInfo.availMemSize = mmap.length_low;
-                }
-            }
-        }
-        
-        bootInfo.ramInfo.availMemBase += 1024 * 1024; // reserve 1 MB for safety
-        
-        // Framebuffer
-        vbeInfo* vbe;
-        if ((mbi.flags & MULTIBOOT_INFO_VIDEO_INFO) != 0)
-            vbe = cast(vbeInfo*)mbi.vbe_mode_info;
-        else
-            kPanic("No framebuffer info!");
-        
-        bootInfo.videoBuffer.ptr = cast(uint*)vbe.framebuffer;
-        bootInfo.videoBuffer.width = vbe.width;
-        bootInfo.videoBuffer.height = vbe.height;
-        bootInfo.videoBuffer.pitch = vbe.pitch;
-        bootInfo.videoBuffer.bytesPerPixel = vbe.bpp / 8;
-        
-        stdioMode = StdioMode.Framebuffer;
-        
-        run();
-    }
-}
-else version(X86_64)
-{
-    import dios.bootloader.limine;
+    // Memory info
+    bootInfo.ramInfo.availMemBase = 0;
+    bootInfo.ramInfo.availMemSize = 0;
+    bootInfo.ramInfo.hhdmOffset = hhdmRequest.response.offset;
+    bootInfo.ramInfo.kernelBasePhysical = cast(size_t)kernelAddressRequest.response.physical_base;
+    bootInfo.ramInfo.kernelBaseVirtual = cast(size_t)kernelAddressRequest.response.virtual_base;
+    bootInfo.ramInfo.kernelSize = 0;
     
-    void kmain() @nogc nothrow
+    ulong maxAddr = 0;
+    
+    auto memmap = memmapRequest.response;
+    for (ulong i = 0; i < memmap.entry_count; i++)
     {
-        // Bootloader info
-        bootInfo.bootloaderName = BOOTLOADER_LIMINE.ptr;
-        bootInfo.arguments = kernelFileRequest.response.kernel_file.cmdline;
+        auto entry = memmap.entries[i];
         
-        // Memory info
-        bootInfo.ramInfo.availMemBase = 0;
-        bootInfo.ramInfo.availMemSize = 0;
-        bootInfo.ramInfo.hhdmOffset = hhdmRequest.response.offset;
-        bootInfo.ramInfo.kernelBasePhysical = cast(size_t)kernelAddressRequest.response.physical_base;
-        bootInfo.ramInfo.kernelBaseVirtual = cast(size_t)kernelAddressRequest.response.virtual_base;
-        bootInfo.ramInfo.kernelSize = 0;
-        
-        ulong maxAddr = 0;
-        
-        auto memmap = memmapRequest.response;
-        for (ulong i = 0; i < memmap.entry_count; i++)
+        if (entry.type == LIMINE_MEMMAP_USABLE)
         {
-            auto entry = memmap.entries[i];
-            
-            if (entry.type == LIMINE_MEMMAP_USABLE)
+            if (entry.length > bootInfo.ramInfo.availMemSize)
             {
-                if (entry.length > bootInfo.ramInfo.availMemSize)
-                {
-                    bootInfo.ramInfo.availMemBase = entry.base;
-                    bootInfo.ramInfo.availMemSize = entry.length;
-                }
-            }
-            else if (entry.type == LIMINE_MEMMAP_KERNEL_AND_MODULES)
-            {
-                bootInfo.ramInfo.kernelSize += entry.length;
+                bootInfo.ramInfo.availMemBase = entry.base;
+                bootInfo.ramInfo.availMemSize = entry.length;
             }
         }
-        
-        if (bootInfo.ramInfo.availMemBase == 0)
-            hcf();
-        
-        // Framebuffer
-        auto fbResp = framebufferRequest.response;
-        while (fbResp is null || fbResp.framebuffer_count < 1)
+        else if (entry.type == LIMINE_MEMMAP_KERNEL_AND_MODULES)
         {
-            asm @nogc nothrow { hlt; }
-            fbResp = framebufferRequest.response;
+            bootInfo.ramInfo.kernelSize += entry.length;
         }
-        
-        auto fb = fbResp.framebuffers[0];
-        
-        if (fb.bpp != 32)
-            hcf();
-        
-        bootInfo.videoBuffer.ptr = cast(uint*)fb.address;
-        bootInfo.videoBuffer.width = cast(uint)fb.width;
-        bootInfo.videoBuffer.height = cast(uint)fb.height;
-        bootInfo.videoBuffer.pitch = cast(uint)fb.pitch;
-        bootInfo.videoBuffer.bytesPerPixel = cast(uint)fb.bpp / 8;
-        stdioMode = StdioMode.Framebuffer;
-        
-        run();
     }
+    
+    if (bootInfo.ramInfo.availMemBase == 0)
+        hcf();
+    
+    // Framebuffer
+    auto fbResp = framebufferRequest.response;
+    while (fbResp is null || fbResp.framebuffer_count < 1)
+    {
+        asm @nogc nothrow { hlt; }
+        fbResp = framebufferRequest.response;
+    }
+    
+    auto fb = fbResp.framebuffers[0];
+    
+    if (fb.bpp != 32)
+        hcf();
+    
+    bootInfo.videoBuffer.ptr = cast(uint*)fb.address;
+    bootInfo.videoBuffer.width = cast(uint)fb.width;
+    bootInfo.videoBuffer.height = cast(uint)fb.height;
+    bootInfo.videoBuffer.pitch = cast(uint)fb.pitch;
+    bootInfo.videoBuffer.bytesPerPixel = cast(uint)fb.bpp / 8;
+    stdioMode = StdioMode.Framebuffer;
+    
+    run();
 }
 
 extern(C) void cpuFlushCache() @nogc nothrow
@@ -240,51 +168,25 @@ void run() @nogc nothrow
     kprintf("---------------\n");
     kprintf("Bootloader: %s\n", bootInfo.bootloaderName);
     kprintf("Kernel arguments: %s\n", bootInfo.arguments);
-    version(X86)
-    {
-        kprintf("Avail. memory base: %x\n", availMemBase);
-        kprintf("Avail. memory size: %u B (%u MiB)\n", availMemSize, availMemSize / (1024 * 1024));
-        kprintf("Avail. memory end: %x\n", availMemBase + availMemSize);
-        kprintf("Framebuffer: %ux%u %ubpp @ %x\n",
-            frontBuffer.width, frontBuffer.height, frontBuffer.bytesPerPixel * 8, cast(size_t)frontBuffer.ptr);
-    }
-    else version(X86_64)
-    {
-        kprintf("HHDM offset: %llx\n", hhdmOffset);
-        kprintf("Kernel base phys: %llx\n", kernelBasePhysical);
-        kprintf("Kernel base virt: %llx\n", kernelBaseVirtual);
-        kprintf("Avail. memory base: %llx\n", availMemBase);
-        kprintf("Avail. memory size: %llu B (%u MiB)\n", availMemSize, availMemSize / (1024 * 1024));
-        kprintf("Avail. memory end: %llx\n", availMemBase + availMemSize);
-        kprintf("Framebuffer: %ux%u %ubpp @ %llx\n",
-            frontBuffer.width, frontBuffer.height, frontBuffer.bytesPerPixel * 8, cast(size_t)frontBuffer.ptr);
-    }
+    kprintf("HHDM offset: %llx\n", hhdmOffset);
+    kprintf("Kernel base phys: %llx\n", kernelBasePhysical);
+    kprintf("Kernel base virt: %llx\n", kernelBaseVirtual);
+    kprintf("Avail. memory base: %llx\n", availMemBase);
+    kprintf("Avail. memory size: %llu B (%u MiB)\n", availMemSize, availMemSize / (1024 * 1024));
+    kprintf("Avail. memory end: %llx\n", availMemBase + availMemSize);
+    kprintf("Framebuffer: %ux%u %ubpp @ %llx\n",
+        frontBuffer.width, frontBuffer.height, frontBuffer.bytesPerPixel * 8, cast(size_t)frontBuffer.ptr);
     
     kprintf("RAM page size: %x B\n", MEM_PAGE_SIZE);
-    version(X86)
-    {
-        kprintf("RAM pages: %u\n", mem.pages.length);
-        kprintf("RAM pages base: %x\n", cast(size_t)mem.ramBase);
-    }
-    else version(X86_64)
-    {
-        kprintf("RAM pages: %llu\n", mem.pages.length);
-        kprintf("RAM pages base: %llx\n", cast(size_t)mem.ramBase);
-    }
+    kprintf("RAM pages: %llu\n", mem.pages.length);
+    kprintf("RAM pages base: %llx\n", cast(size_t)mem.ramBase);
     
-    version(X86)
-    {
-        // not implemented yet
-    }
-    else version(X86_64)
-    {
-        bootInfo.ramInfo.availMemBase = availMemBase;
-        bootInfo.ramInfo.availMemSize = availMemSize;
-        vmemInit(&bootInfo.ramInfo);
-        
-        // Enumerate PCI configuration space
-        pciScan();
-    }
+    bootInfo.ramInfo.availMemBase = availMemBase;
+    bootInfo.ramInfo.availMemSize = availMemSize;
+    vmemInit(&bootInfo.ramInfo);
+    
+    // Enumerate PCI configuration space
+    pciScan();
     
     uint inputTimer = 0;
     uint renderTimer = 0;
@@ -348,16 +250,7 @@ void run() @nogc nothrow
             
             drawBitmap(&backBuffer, ps2State.mx, ps2State.my, CURSOR, CURSOR_WIDTH, CURSOR_HEIGHT);
             
-            version(X86_64)
-            {
-                fastMemcpyNT(frontBuffer.ptr, backBuffer.ptr, framebufferSize);
-            }
-            else version(X86)
-            {
-                for (uint i = 0; i < numPixels; i++)
-                    frontBuffer.ptr[i] = backBuffer.ptr[i];
-            }
-           
+            fastMemcpyNT(frontBuffer.ptr, backBuffer.ptr, framebufferSize);
             renderTimer = 0;
         }
     }

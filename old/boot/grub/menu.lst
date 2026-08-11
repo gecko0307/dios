@@ -1,9 +1,0 @@
-# boot the first entry by default
-# default 0
-# if there's a problem booting the default entry, boot the second entry
-# fallback 1
-# boot default after 30 sec
-# timeout 30
-
-title "Boot kernel.bin"menu
-kernel /kernel.bin
