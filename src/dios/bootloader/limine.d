@@ -66,7 +66,7 @@ struct LimineFramebuffer
     ubyte[7] unused;
     ulong edid_size;
     void* edid;
-    /* Response revision 1 */
+    // Response revision 1
     ulong mode_count;
     LimineVideoMode** modes;
 }
