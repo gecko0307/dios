@@ -34,7 +34,7 @@ __gshared size_t _end;
 
 extern(C):
 
-/// Kernal entry point.
+/// Kernel entry point.
 void kmain() @nogc nothrow
 {
     // Bootloader info
