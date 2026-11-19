@@ -15,13 +15,13 @@ void fillScreen(
     Framebuffer* fb,
     uint color) @nogc nothrow
 {
+    // The division used to be inside the pixel loop (3.7M divisions/frame at 1440p).
+    uint stride = fb.pitch / fb.bytesPerPixel;
     for (uint y = 0; y < fb.height; y++)
     {
+        uint* row = fb.ptr + y * stride;
         for (uint x = 0; x < fb.width; x++)
-        {
-            uint offset = y * (fb.pitch / fb.bytesPerPixel) + x;
-            fb.ptr[offset] = color;
-        }
+            row[x] = color;
     }
 }
 

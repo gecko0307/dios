@@ -152,7 +152,7 @@ struct LimineKernelFileRequest
     LimineKernelFileResponse* response;
 }
 
-enum LIMINE_HHDM_REQUEST = [
+enum ulong[4] LIMINE_HHDM_REQUEST = [
     LIMINE_COMMON_MAGIC1,
     LIMINE_COMMON_MAGIC2,
     0x48dcf1cb8ad2b852,
@@ -172,7 +172,7 @@ struct LimineHHDMRequest
     LimineHHDMResponse* response;
 };
 
-enum LIMINE_KERNEL_ADDRESS_REQUEST = [
+enum ulong[4] LIMINE_KERNEL_ADDRESS_REQUEST = [
     LIMINE_COMMON_MAGIC1,
     LIMINE_COMMON_MAGIC2,
     0x71ba76863cc55f63,
@@ -193,8 +193,17 @@ struct LimineKernelAddressRequest
     LimineKernelAddressResponse* response;
 };
 
+// Base revision tag. The bootloader looks for these exact magic values; with
+// zeros here it silently falls back to revision 0 (identity map of the first
+// 4 GiB, which hid the fact that the kernel dereferenced physical addresses).
+// The bootloader sets limine_base_revision[2] to 0 if it accepts revision 3.
 @(section(".limine_requests"))
-__gshared ulong[3] limine_base_revision;
+__gshared ulong[3] limine_base_revision = [0xf9562b2d5c95a6c8, 0x6a7b384944536bdc, 3];
+
+bool limineBaseRevisionSupported() @nogc nothrow
+{
+    return limine_base_revision[2] == 0;
+}
 
 @(section(".limine_requests"))
 __gshared LimineKernelFileRequest kernelFileRequest = LimineKernelFileRequest(LIMINE_KERNEL_FILE_REQUEST, 0, null);
@@ -212,7 +221,7 @@ __gshared LimineHHDMRequest hhdmRequest = LimineHHDMRequest(LIMINE_HHDM_REQUEST,
 __gshared LimineKernelAddressRequest kernelAddressRequest = LimineKernelAddressRequest(LIMINE_KERNEL_ADDRESS_REQUEST, 0, null);
 
 @(section(".limine_requests_start"))
-__gshared ulong[4] limineRequestsStart;
+__gshared ulong[4] limineRequestsStart = [0xf6b8f4b39de7d1ae, 0xfab91a6940fcb9cf, 0x785c6ed015d3e316, 0x181e920a7852b9d9];
 
 @(section(".limine_requests_end"))
-__gshared ulong[2] limineRequestsEnd;
+__gshared ulong[2] limineRequestsEnd = [0xadc0e0531bb10d03, 0x9572709f31764c62];

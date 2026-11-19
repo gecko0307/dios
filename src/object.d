@@ -1,5 +1,7 @@
 module object;
 
+import dios.core.error : hcf;
+
 alias size_t = typeof(int.init.sizeof);
 alias ptrdiff_t = typeof(cast(void*)0 - cast(void*)0);
 alias string = immutable(char)[];
@@ -24,8 +26,11 @@ extern(C)
     int _xopCmp(const(void)* p1, const(void)* p2) @nogc nothrow { return 0; }
 }
 
+
+// A failed assert used to return and carry on as if nothing happened.
 extern(C) void _d_assert(string file, uint line) @nogc nothrow
 {
+    hcf();
 }
 
 extern(C)

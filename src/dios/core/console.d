@@ -3,6 +3,7 @@ module dios.core.console;
 import dios.core.vga;
 import dios.core.framebuffer;
 import dios.core.font;
+import dios.core.mem;
 
 import core.stdc.stdarg;
 
@@ -48,20 +49,21 @@ void consoleBlitTo(Framebuffer* fb) @nogc nothrow
 {
     uint baseX = console.x;
     uint baseY = console.y;
-    
+    if (baseX >= fb.width || baseY >= fb.height)
+        return;
+
+    uint w = console.fb.width;
+    if (baseX + w > fb.width)
+        w = fb.width - baseX;
+    uint stride = console.fb.pitch / console.fb.bytesPerPixel;
+
+    // Row-wise copy instead of one pixel (and one division) at a time.
     for (uint y = 0; y < console.fb.height; y++)
     {
         if (baseY + y >= fb.height)
             break;
-        
-        for (uint x = 0; x < console.fb.width; x++)
-        {
-            if (baseX + x >= fb.width)
-                break;
-            
-            uint offset = (baseY + y) * (console.fb.pitch / console.fb.bytesPerPixel) + (baseX + x);
-            fb.ptr[offset] = console.fb.ptr[offset];
-        }
+        uint offset = (baseY + y) * stride + baseX;
+        memcpy(fb.ptr + offset, console.fb.ptr + offset, w * console.fb.bytesPerPixel);
     }
 }
 

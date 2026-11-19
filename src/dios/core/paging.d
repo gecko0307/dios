@@ -1,91 +1,274 @@
 module dios.core.paging;
 
-enum size_t MEM_PAGE_SIZE = 0x1000;
+// Physical memory manager (PMM): a bitmap with one bit per 4 KiB physical page.
+//   bit = 1 -> page is used / reserved / not RAM
+//   bit = 0 -> page is free
+//
+// Everything here deals in PHYSICAL ADDRESSES as plain `ulong`s - not
+// pointers. To touch the memory, add the HHDM offset (pmmPhysToVirt).
+// (The old version returned physical addresses as `void*` and the kernel
+// dereferenced them directly, which only worked thanks to Limine's
+// identity map of the first 4 GiB.)
 
-struct MemPage
+import dios.core.mem;
+import dios.core.stdio;
+import dios.core.error;
+
+enum size_t MEM_PAGE_SIZE  = 0x1000;
+enum size_t MEM_PAGE_SHIFT = 12;
+enum ulong  PMM_LIMIT_4G   = 0x1_0000_0000UL;   // for 32-bit DMA devices
+enum ulong  PMM_FIRST_USABLE = 0x100000UL;      // never hand out the first MiB
+
+struct MemRange
 {
-    bool used;
-    uint flags;
+    ulong base;
+    ulong length;
 }
 
-struct MemPageAlloc
+struct PageAllocator
 {
-    MemPage[] pages;
-    void* ramBase;
-    size_t ramSize;
+    ulong* bitmap;        // virtual address (via HHDM)
+    ulong  bitmapWords;
+    ulong  trackedPages;  // page index space: [0, trackedPages)
+    ulong  freePages;
+    ulong  totalUsable;
+    ulong  searchWord;    // next-fit hint for single page allocations
+    ulong  hhdm;
+    bool   ready;
 }
 
-__gshared MemPageAlloc memPageAlloc;
+__gshared PageAllocator pmm;
 
 extern(C):
 
 bool isPageAligned(size_t addr) @nogc nothrow
 {
-    return (addr % MEM_PAGE_SIZE) == 0;
+    return (addr & (MEM_PAGE_SIZE - 1)) == 0;
 }
 
-MemPageAlloc* initPages(size_t basePhysAdr, size_t availableRamSize) @nogc nothrow
+void* pmmPhysToVirt(ulong phys) @nogc nothrow
 {
-    size_t maxNumPages = availableRamSize / MEM_PAGE_SIZE;
-    size_t maxPagesArraySize = maxNumPages * MemPage.sizeof;
-    size_t pagesArrayNumPages = (maxPagesArraySize + MEM_PAGE_SIZE - 1) / MEM_PAGE_SIZE;
-    size_t usablePages = maxNumPages - pagesArrayNumPages;
-    
-    void* allocPagesArrayBase = cast(void*)basePhysAdr;
-    
-    size_t ramStart = basePhysAdr + pagesArrayNumPages * MEM_PAGE_SIZE;
-    
-    memPageAlloc.ramBase = cast(void*)ramStart;
-    memPageAlloc.ramSize = usablePages * MEM_PAGE_SIZE;
-    
-    MemPage* pagesPtr = cast(MemPage*)allocPagesArrayBase;
-    memPageAlloc.pages = pagesPtr[0..usablePages];
-    
-    for (size_t i = 0; i < usablePages; i++)
-    {
-        memPageAlloc.pages[i].used = false;
-        memPageAlloc.pages[i].flags = 0;
-    }
-    
-    return &memPageAlloc;
+    return cast(void*)(phys + pmm.hhdm);
 }
 
-void* pageAlloc(uint flags) @nogc nothrow
+bool pmmIsUsed(ulong idx) @nogc nothrow
 {
-    for (size_t i = 0; i < memPageAlloc.pages.length; i++)
+    return ((pmm.bitmap[idx >> 6] >> (idx & 63)) & 1) != 0;
+}
+
+void pmmSetUsedBit(ulong idx) @nogc nothrow
+{
+    pmm.bitmap[idx >> 6] |= (1UL << (idx & 63));
+}
+
+void pmmClearUsedBit(ulong idx) @nogc nothrow
+{
+    pmm.bitmap[idx >> 6] &= ~(1UL << (idx & 63));
+}
+
+// Mark [firstIdx, firstIdx+count) free; keeps the free counter right.
+void pmmMarkFree(ulong firstIdx, ulong count) @nogc nothrow
+{
+    for (ulong i = 0; i < count; i++)
     {
-        MemPage* page = &memPageAlloc.pages[i];
-        if (!page.used)
+        if (pmmIsUsed(firstIdx + i))
         {
-            page.used = true;
-            page.flags = flags;
-            return cast(void*)(cast(size_t)memPageAlloc.ramBase + i * MEM_PAGE_SIZE);
+            pmmClearUsedBit(firstIdx + i);
+            pmm.freePages++;
         }
     }
-    return null;
 }
 
-void* pagesAlloc(size_t count, uint flags) @nogc nothrow
+void pmmMarkUsed(ulong firstIdx, ulong count) @nogc nothrow
 {
-    void* first = null;
+    for (ulong i = 0; i < count; i++)
+    {
+        if (!pmmIsUsed(firstIdx + i))
+        {
+            pmmSetUsedBit(firstIdx + i);
+            pmm.freePages--;
+        }
+    }
+}
+
+// Trim a range to whole pages above PMM_FIRST_USABLE.
+bool pmmNormalize(const(MemRange)* r, ulong* start, ulong* end) @nogc nothrow
+{
+    ulong s = alignUp(r.base, MEM_PAGE_SIZE);
+    ulong e = alignDown(r.base + r.length, MEM_PAGE_SIZE);
+    if (s < PMM_FIRST_USABLE)
+        s = PMM_FIRST_USABLE;
+    if (e <= s)
+        return false;
+    *start = s;
+    *end = e;
+    return true;
+}
+
+// ranges: the USABLE regions of the memory map. Returns false on failure.
+bool pmmInit(ulong hhdm, const(MemRange)* ranges, size_t count) @nogc nothrow
+{
+    pmm = PageAllocator.init;
+
+    ulong s, e;
+    ulong maxEnd = 0;
     for (size_t i = 0; i < count; i++)
     {
-        void* page = pageAlloc(flags);
-        if (page is null) return null;
-        if (i == 0) first = page;
+        if (pmmNormalize(&ranges[i], &s, &e) && e > maxEnd)
+            maxEnd = e;
     }
-    return first;
+    if (maxEnd == 0)
+        return false;
+
+    ulong tracked = maxEnd >> MEM_PAGE_SHIFT;
+    ulong words = (tracked + 63) / 64;
+    ulong bitmapBytes = alignUp(words * 8, MEM_PAGE_SIZE);
+
+    // The bitmap lives inside the first usable range that is big enough.
+    ulong bitmapPhys = 0;
+    for (size_t i = 0; i < count; i++)
+    {
+        if (pmmNormalize(&ranges[i], &s, &e) && (e - s) >= bitmapBytes)
+        {
+            bitmapPhys = s;
+            break;
+        }
+    }
+    if (bitmapPhys == 0)
+        return false;
+
+    pmm.hhdm = hhdm;
+    pmm.bitmap = cast(ulong*)(hhdm + bitmapPhys);
+    pmm.bitmapWords = words;
+    pmm.trackedPages = tracked;
+
+    // Everything starts as used; then free the real RAM.
+    for (ulong w = 0; w < words; w++)
+        pmm.bitmap[w] = ~0UL;
+
+    for (size_t i = 0; i < count; i++)
+    {
+        if (pmmNormalize(&ranges[i], &s, &e))
+            pmmMarkFree(s >> MEM_PAGE_SHIFT, (e - s) >> MEM_PAGE_SHIFT);
+    }
+
+    pmm.totalUsable = pmm.freePages;
+    pmmMarkUsed(bitmapPhys >> MEM_PAGE_SHIFT, bitmapBytes >> MEM_PAGE_SHIFT);
+
+    pmm.searchWord = 0;
+    pmm.ready = true;
+    return true;
 }
 
-void pageFree(void* paddr) @nogc nothrow
+// Allocate one page. Returns the physical address, or 0 if out of memory.
+ulong pmmAllocPage() @nogc nothrow
 {
-    if (paddr < memPageAlloc.ramBase)
-        return;
+    if (!pmm.ready || pmm.freePages == 0)
+        return 0;
 
-    size_t index = (cast(size_t)paddr - cast(size_t)memPageAlloc.ramBase) / MEM_PAGE_SIZE;
-    if (index >= memPageAlloc.pages.length)
-        return;
-
-    memPageAlloc.pages[index].used = false;
-    memPageAlloc.pages[index].flags = 0;
+    ulong n = pmm.bitmapWords;
+    ulong w = pmm.searchWord;
+    for (ulong k = 0; k < n; k++)
+    {
+        if (w >= n)
+            w = 0;
+        ulong word = pmm.bitmap[w];
+        if (word != ~0UL)
+        {
+            uint bit = 0;
+            while (((word >> bit) & 1) != 0)
+                bit++;
+            ulong idx = (w << 6) | bit;
+            pmmSetUsedBit(idx);
+            pmm.freePages--;
+            pmm.searchWord = w;
+            return idx << MEM_PAGE_SHIFT;
+        }
+        w++;
+    }
+    return 0;
 }
+
+// Allocate `count` physically contiguous pages whose first page is aligned to
+// `alignPages` pages (a power of two). If limitPhys != 0 the whole block must
+// end at or below limitPhys (e.g. PMM_LIMIT_4G for 32-bit DMA).
+// Returns the physical address or 0.
+ulong pmmAllocContiguous(ulong count, ulong alignPages, ulong limitPhys) @nogc nothrow
+{
+    if (!pmm.ready || count == 0 || count > pmm.freePages)
+        return 0;
+    if (alignPages == 0)
+        alignPages = 1;
+    if ((alignPages & (alignPages - 1)) != 0)
+        return 0;
+
+    ulong limit = pmm.trackedPages;
+    if (limitPhys != 0 && (limitPhys >> MEM_PAGE_SHIFT) < limit)
+        limit = limitPhys >> MEM_PAGE_SHIFT;
+
+    ulong idx = 0;
+    while (idx + count <= limit)
+    {
+        idx = (idx + alignPages - 1) & ~(alignPages - 1);
+        if (idx + count > limit)
+            break;
+
+        // Skip 64 fully used pages at once.
+        if ((idx & 63) == 0 && pmm.bitmap[idx >> 6] == ~0UL)
+        {
+            idx += 64;
+            continue;
+        }
+
+        ulong run = 0;
+        while (run < count && !pmmIsUsed(idx + run))
+            run++;
+
+        if (run == count)
+        {
+            pmmMarkUsed(idx, count);
+            return idx << MEM_PAGE_SHIFT;
+        }
+        idx += run + 1;     // idx+run is a used page, restart after it
+    }
+    return 0;
+}
+
+// Same as pmmAllocContiguous but returns zeroed memory.
+ulong pmmAllocContiguousZeroed(ulong count, ulong alignPages, ulong limitPhys) @nogc nothrow
+{
+    ulong p = pmmAllocContiguous(count, alignPages, limitPhys);
+    if (p != 0)
+        memset(pmmPhysToVirt(p), 0, count * MEM_PAGE_SIZE);
+    return p;
+}
+
+// Free `count` pages starting at physical address `phys`.
+// Panics on double free (a classic, nasty bug that is better caught loudly).
+bool pmmFreePages(ulong phys, ulong count) @nogc nothrow
+{
+    if (!pmm.ready || count == 0 || (phys & (MEM_PAGE_SIZE - 1)) != 0)
+        return false;
+
+    ulong idx = phys >> MEM_PAGE_SHIFT;
+    if (idx + count > pmm.trackedPages)
+        return false;
+
+    for (ulong i = 0; i < count; i++)
+    {
+        if (!pmmIsUsed(idx + i))
+            kPanic("pmm: double free\n");
+    }
+    pmmMarkFree(idx, count);
+    if (idx >> 6 < pmm.searchWord)
+        pmm.searchWord = idx >> 6;
+    return true;
+}
+
+bool pmmFreePage(ulong phys) @nogc nothrow
+{
+    return pmmFreePages(phys, 1);
+}
+
+ulong pmmFreeCount() @nogc nothrow  { return pmm.freePages; }
+ulong pmmTotalCount() @nogc nothrow { return pmm.totalUsable; }

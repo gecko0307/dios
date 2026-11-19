@@ -22,31 +22,15 @@ size_t alignUp(size_t value, size_t alignment) @nogc nothrow
     return (value + alignment - 1) & ~(alignment - 1);
 }
 
-void* memcpy(void* dest, const void* src, size_t n) @nogc nothrow
-{
-    auto d = cast(ubyte*)dest;
-    auto s = cast(const ubyte*)src;
-    for (size_t i = 0; i < n; i++)
-    {
-        d[i] = s[i];
-    }
-    return dest;
-}
-
-void* memset(void *s, int c, size_t n) @nogc nothrow
-{
-    ubyte* p = cast(ubyte*)s;
-
-    for (size_t i = 0; i < n; i++)
-    {
-        p[i] = cast(ubyte)c;
-    }
-
-    return s;
-}
-
 version(X86_64)
 {
-    // from mem.s
-    void* fastMemcpyNT(void* dest, const void* src, size_t size)  @nogc nothrow;
+    // All implemented in mem.s (see the comment there for why).
+    void* memcpy(void* dest, const(void)* src, size_t n) @nogc nothrow;
+    void* memmove(void* dest, const(void)* src, size_t n) @nogc nothrow;
+    void* memset(void* s, int c, size_t n) @nogc nothrow;
+    int memcmp(const(void)* a, const(void)* b, size_t n) @nogc nothrow;
+
+    void enableSSE() @nogc nothrow;     // mem.s - call first thing in kmain
+
+    void* fastMemcpyNT(void* dest, const(void)* src, size_t size) @nogc nothrow;
 }

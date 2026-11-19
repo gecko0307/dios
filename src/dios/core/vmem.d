@@ -17,17 +17,28 @@ enum: ulong
     PTE_PCD       = 1UL << 4,
     PTE_ACCESSED  = 1UL << 5,
     PTE_DIRTY     = 1UL << 6,
-    PTE_PSE       = 1UL << 7, // for PDE 2MiB, PDE.PS = 1
+    PTE_PSE       = 1UL << 7, // for PDE 2MiB / PDPTE 1GiB, PS = 1
     PTE_GLOBAL    = 1UL << 8,
     // bits 9-11 are available to OS
-    PTE_NX        = 1UL << 63
+    PTE_NX        = 1UL << 63,
+
+    // Bits 12..51 hold the physical address. The old code used ~0xFFF, which
+    // also kept bit 63 (NX) and bits 52-62 and produced garbage addresses
+    // whenever a table entry had NX set.
+    PTE_ADDR_MASK = 0x000FFFFFFFFFF000UL
 }
+
+// MMIO window: PML4 slot 510. Slot 511 holds the kernel, slot 256+ the HHDM.
+enum ulong MMIO_BASE = 0xffffff0000000000UL;
+enum ulong MMIO_END  = 0xffffff8000000000UL;
 
 __gshared ulong HHDM_OFFSET;
 __gshared ulong PML4_PHYS;
+__gshared ulong MMIO_NEXT = 0xffffff1fc0000000UL;
 
 void setCR3(ulong pml4_phys) @nogc nothrow;
 ulong getCR3() @nogc nothrow;
+void vmemInvalidatePage(ulong vaddr) @nogc nothrow;   // mem.s
 
 // Extract indices from virtual address
 size_t idx_pml4(ulong v) @nogc nothrow { return (v >> 39) & 0x1FF; }
@@ -40,81 +51,74 @@ ulong vmemPhysToVirt(ulong phys) @nogc nothrow
     return phys + HHDM_OFFSET;
 }
 
+// Allocate a zeroed 4KiB page for a table; returns its virtual address and
+// stores the physical one.
+void* vmemAllocTable(ulong* out_phys) @nogc nothrow
+{
+    ulong phys = pmmAllocPage();
+    if (phys == 0) return null;
+    void* v = cast(void*)vmemPhysToVirt(phys);
+    memset(v, 0, 4096);
+    if (out_phys) *out_phys = phys;
+    return v;
+}
+
 int vmemInit(RAMInfo* ramInfo) @nogc nothrow
 {
     if (!ramInfo) return -1;
-    
+
     HHDM_OFFSET = ramInfo.hhdmOffset;
-    
+
     ulong pml4_phys;
     void* pml4_virt = vmemAllocTable(&pml4_phys);
     if (!pml4_virt) return -1;
-    
-    // Copy the current PML4 into the new PML4 so we don't lose mappings
-    // the kernel/current stack is still using. This ensures a smooth switch.
-    ulong old_pml4 = getCR3();
-    old_pml4 &= ~0xFFFUL;
-    void* old_pml4_virt = cast(void*)vmemPhysToVirt(old_pml4);
-    if (old_pml4_virt)
-    {
-        fastMemcpyNT(pml4_virt, old_pml4_virt, 4096);
-    }
-    
+
+    // Copy the current top-level table so everything the bootloader mapped
+    // (kernel, HHDM, stack, framebuffer) stays valid after the switch.
+    // NOTE: only the PML4 is copied; the lower-level tables are still the
+    // bootloader's and live in bootloader-reclaimable memory - do not
+    // reclaim that memory until you have rebuilt those tables yourself.
+    ulong old_pml4 = getCR3() & PTE_ADDR_MASK;
+    memcpy(pml4_virt, cast(void*)vmemPhysToVirt(old_pml4), 4096);
+
     PML4_PHYS = pml4_phys;
-    
-    kprintf("Setting up new page tables (PML4=%llx)...\n", pml4_phys);
     setCR3(pml4_phys);
-    kprintf("Page tables switched successfully\n");
-    
     return 0;
 }
 
-// Allocate a zeroed 4KiB page for a table, return both physical and virtual addresses.
-void* vmemAllocTable(ulong* out_phys) @nogc nothrow
-{
-    ulong phys = cast(ulong)pageAlloc(0);
-    if (phys == 0) return null;
-    ulong v = vmemPhysToVirt(phys);
-    memset(cast(void*)v, 0, 4096);
-    if (out_phys) *out_phys = phys;
-    return cast(void*)v;
-}
-
-// internal: read physical entry value at table (table_ptr is kernel virtual pointer to page table)
 ulong vmemReadEntry(void* table_ptr, size_t idx) @nogc nothrow
 {
-    ulong *arr = cast(ulong*)table_ptr;
-    return arr[idx];
+    return (cast(ulong*)table_ptr)[idx];
 }
 
 void vmemWriteEntry(void* table_ptr, size_t idx, ulong val) @nogc nothrow
 {
-    ulong* arr = cast(ulong*)table_ptr;
-    arr[idx] = val;
+    (cast(ulong*)table_ptr)[idx] = val;
 }
 
-// Ensure that at a given level there is a table present; if not, allocate one.
-// parent_table_vptr - kernel virtual ptr to parent page (PML4/PDPT/PD)
-// idx - entry index
-// returns kernel virtual ptr to child table and sets *out_child_phys
+// Ensure a child table exists below parent[idx]; allocate it if missing.
+// Returns the child's virtual address (null on failure or if the slot is a
+// huge page, which must not be treated as a table).
 void* vmemEnsureChildTable(void* parent_table_vptr, size_t idx, ulong* out_child_phys) @nogc nothrow
 {
     ulong ent = vmemReadEntry(parent_table_vptr, idx);
     if (ent & PTE_PRESENT)
     {
-        ulong child_phys = ent & (~0xFFFUL);
+        if (ent & PTE_PSE)
+        {
+            kprintf("vmem: slot is a huge page, cannot descend\n");
+            return null;
+        }
+        ulong child_phys = ent & PTE_ADDR_MASK;
         if (out_child_phys) *out_child_phys = child_phys;
         return cast(void*)vmemPhysToVirt(child_phys);
     }
 
-    ulong child_phys = cast(ulong)pageAlloc(0);
-    if (child_phys == 0) return null;
-    void* child_v = cast(void*)vmemPhysToVirt(child_phys);
+    ulong child_phys;
+    void* child_v = vmemAllocTable(&child_phys);
     if (child_v is null) return null;
-    memset(child_v, 0, 4096);
 
-    ulong newent = (child_phys & (~0xFFFUL)) | PTE_PRESENT | PTE_RW;
-    vmemWriteEntry(parent_table_vptr, idx, newent);
+    vmemWriteEntry(parent_table_vptr, idx, child_phys | PTE_PRESENT | PTE_RW);
     if (out_child_phys) *out_child_phys = child_phys;
     return child_v;
 }
@@ -123,127 +127,98 @@ void* vmemEnsureChildTable(void* parent_table_vptr, size_t idx, ulong* out_child
 int mapPage4k(ulong pml4_phys, ulong vaddr, ulong paddr, ulong flags) @nogc nothrow
 {
     void* pml4 = cast(void*)vmemPhysToVirt(pml4_phys);
-    if (pml4 is null) return -1;
 
-    size_t i4 = idx_pml4(vaddr);
-    size_t i3 = idx_pdpt(vaddr);
-    size_t i2 = idx_pd(vaddr);
-    size_t i1 = idx_pt(vaddr);
-
-    ulong pdpt_phys;
-    void* pdpt = vmemEnsureChildTable(pml4, i4, &pdpt_phys);
+    ulong pdpt_phys, pd_phys, pt_phys;
+    void* pdpt = vmemEnsureChildTable(pml4, idx_pml4(vaddr), &pdpt_phys);
     if (pdpt is null) return -1;
-
-    ulong pd_phys;
-    void* pd = vmemEnsureChildTable(pdpt, i3, &pd_phys);
+    void* pd = vmemEnsureChildTable(pdpt, idx_pdpt(vaddr), &pd_phys);
     if (pd is null) return -1;
-
-    ulong pt_phys;
-    void* pt = vmemEnsureChildTable(pd, i2, &pt_phys);
+    void* pt = vmemEnsureChildTable(pd, idx_pd(vaddr), &pt_phys);
     if (pt is null) return -1;
 
-    ulong entry = (paddr & (~0xFFFUL)) | (flags & 0xFFFUL) | PTE_PRESENT;
-    vmemWriteEntry(pt, i1, entry);
+    // In a 4K PTE bit 7 is PAT, not PSE - never let it through.
+    ulong f = flags & ~(PTE_ADDR_MASK | PTE_PSE);
+    vmemWriteEntry(pt, idx_pt(vaddr), (paddr & PTE_ADDR_MASK) | f | PTE_PRESENT);
+    vmemInvalidatePage(vaddr);
     return 0;
 }
 
-// Try to map using 2MiB page (PDE with PS bit). Returns 0 on success.
-// If the PD entry already present and is table, it will not override; it expects empty or not present.
+// Clear one 4KiB mapping. Returns 0 if it was mapped, -1 otherwise.
+int unmapPage4k(ulong pml4_phys, ulong vaddr) @nogc nothrow
+{
+    ulong e = vmemReadEntry(cast(void*)vmemPhysToVirt(pml4_phys), idx_pml4(vaddr));
+    if (!(e & PTE_PRESENT)) return -1;
+    e = vmemReadEntry(cast(void*)vmemPhysToVirt(e & PTE_ADDR_MASK), idx_pdpt(vaddr));
+    if (!(e & PTE_PRESENT) || (e & PTE_PSE)) return -1;
+    e = vmemReadEntry(cast(void*)vmemPhysToVirt(e & PTE_ADDR_MASK), idx_pd(vaddr));
+    if (!(e & PTE_PRESENT) || (e & PTE_PSE)) return -1;
+    void* pt = cast(void*)vmemPhysToVirt(e & PTE_ADDR_MASK);
+    if (!(vmemReadEntry(pt, idx_pt(vaddr)) & PTE_PRESENT)) return -1;
+    vmemWriteEntry(pt, idx_pt(vaddr), 0);
+    vmemInvalidatePage(vaddr);
+    return 0;
+}
+
+// Map a 2MiB page. Refuses to overwrite an existing mapping.
 int mapPage2M(ulong pml4_phys, ulong vaddr, ulong paddr, ulong flags) @nogc nothrow
 {
-    if ((vaddr & 0x1FFFFFUL) != 0) 
-    {
-        kprintf("mapPage2M: vaddr %llx not aligned\n", vaddr);
-        return -1; // vaddr must be 2MiB aligned
-    }
-    if ((paddr & 0x1FFFFFUL) != 0)
-    {
-        kprintf("mapPage2M: paddr %llx not aligned\n", paddr);
-        return -1; // paddr must be 2MiB aligned
-    }
+    if ((vaddr & 0x1FFFFFUL) != 0 || (paddr & 0x1FFFFFUL) != 0)
+        return -1;
 
     void* pml4 = cast(void*)vmemPhysToVirt(pml4_phys);
-    if (pml4 is null)
-    {
-        kprintf("mapPage2M: pml4 null after vmemPhysToVirt(%llx)\n", pml4_phys);
-        return -1;
-    }
-
-    size_t i4 = idx_pml4(vaddr);
-    size_t i3 = idx_pdpt(vaddr);
-    size_t i2 = idx_pd(vaddr);
-
-    ulong pdpt_phys;
-    void* pdpt = vmemEnsureChildTable(pml4, i4, &pdpt_phys);
+    ulong pdpt_phys, pd_phys;
+    void* pdpt = vmemEnsureChildTable(pml4, idx_pml4(vaddr), &pdpt_phys);
     if (pdpt is null) return -1;
-
-    ulong pd_phys;
-    void* pd = vmemEnsureChildTable(pdpt, i3, &pd_phys);
+    void* pd = vmemEnsureChildTable(pdpt, idx_pdpt(vaddr), &pd_phys);
     if (pd is null) return -1;
 
-    // At PD level write a 2MiB entry with PS bit
-    /*
-    ulong existing = vmemReadEntry(pd, i2);
-    if (existing & PTE_PRESENT)
-    {
-        kprintf("mapPage2M: PD entry already present at index %u\n", i2);
+    if (vmemReadEntry(pd, idx_pd(vaddr)) & PTE_PRESENT)
         return -1;
-    }
-    */
 
-    ulong entry = (paddr & (~0x1FFFFFUL)) | (flags & 0xFFFUL) | PTE_PRESENT | PTE_PSE;
-    //kprintf("mapPage2M: Setting PD[%u] = %llx (phys=%llx virt=%llx)\n", i2, entry, paddr, vaddr);
-    vmemWriteEntry(pd, i2, entry);
+    // PAT bit of a 2M entry is bit 12, so keep it out of the flags.
+    ulong f = flags & ~(PTE_ADDR_MASK | PTE_PSE);
+    vmemWriteEntry(pd, idx_pd(vaddr), (paddr & 0x000FFFFFFFE00000UL) | f | PTE_PRESENT | PTE_PSE);
+    vmemInvalidatePage(vaddr);
     return 0;
 }
 
-// Reserve a large, unused virtual region for MMIO (example).
-// Pick a canonical high-half range; adjust to your HHDM / kernel layout.
-__gshared ulong MMIO_NEXT = 0xffffff1fc0000000;
-
-// Invalidate one page in TLB
-/*
-void vmemInvalidatePage(void* vptr) @nogc nothrow
-{
-    asm { invlpg [vptr]; } // or proper D inline asm matching LDC
-}
-*/
-
-// Map MMIO physical -> virtual, return virtual base (or null on error)
-void* vmemMapMMIO(ulong physBase, size_t size, ulong flags = PTE_PRESENT | PTE_RW | PTE_PCD | PTE_PWT) @nogc nothrow
-{
-    ulong phys_end = alignUp(physBase + size, MEM_PAGE_SIZE);
-    size_t mappedSize = phys_end - physBase;
-
-    // allocate virtual range from MMIO_NEXT
-    // keep it aligned to page as well
-    ulong virtBase = MMIO_NEXT;
-    MMIO_NEXT = virtBase + mappedSize;
-
-    // map per 4KiB page (MMIO usually small)
-    for (ulong offset = 0; offset < mappedSize; offset += MEM_PAGE_SIZE)
-    {
-        ulong virt = virtBase + offset;
-        ulong phys = physBase + offset;
-        // Use pml4 phys var you store (PML4_PHYS) - ensure mask if needed
-        if (mapPage4k(PML4_PHYS, virt, phys, flags) != 0)
-        {
-            kprintf("Failed to map memory for MMIO!\n");
-            // on failure, unmap what we already mapped (implement vmemUnmapMMIO) and return null
-            return null;
-        }
-        // optionally invlpg for v (if replacing mapping)
-        // vmemInvalidatePage(cast(void*)v); 
-    }
-
-    return cast(void*)virtBase;
-}
-
-// Unmap (simple version: clear entries) - needs vmemWriteEntry access to page tables
+// Unmap MMIO mapped with vmemMapMMIO (virt is the pointer it returned).
 int vmemUnmapMMIO(void* virt, size_t size) @nogc nothrow
 {
-    // implement symmetric unmap: find PML4/PDPT/PD/PT and clear entries, then invlpg on pages.
-    // Return 0 on success, -1 on error.
+    ulong v = cast(ulong)virt;
+    ulong start = alignDown(v, MEM_PAGE_SIZE);
+    ulong end = alignUp(v + size, MEM_PAGE_SIZE);
+    int result = 0;
+    for (ulong a = start; a < end; a += MEM_PAGE_SIZE)
+        if (unmapPage4k(PML4_PHYS, a) != 0)
+            result = -1;
+    return result;
+}
 
-    return 0;
+// Map MMIO physical -> virtual (uncached). Returns a pointer to physBase
+// itself (including any offset inside its page), or null on error.
+// This is a bump allocator on purpose: virtual space is plentiful.
+void* vmemMapMMIO(ulong physBase, size_t size, ulong flags = PTE_PRESENT | PTE_RW | PTE_PCD | PTE_PWT) @nogc nothrow
+{
+    ulong physStart = alignDown(physBase, MEM_PAGE_SIZE);
+    ulong offset = physBase - physStart;
+    ulong mappedSize = alignUp(offset + size, MEM_PAGE_SIZE);
+
+    ulong virtBase = MMIO_NEXT;
+    if (virtBase + mappedSize > MMIO_END)
+        return null;
+
+    for (ulong o = 0; o < mappedSize; o += MEM_PAGE_SIZE)
+    {
+        if (mapPage4k(PML4_PHYS, virtBase + o, physStart + o, flags) != 0)
+        {
+            kprintf("vmem: failed to map MMIO\n");
+            for (ulong u = 0; u < o; u += MEM_PAGE_SIZE)
+                unmapPage4k(PML4_PHYS, virtBase + u);
+            return null;
+        }
+    }
+
+    MMIO_NEXT = virtBase + mappedSize;
+    return cast(void*)(virtBase + offset);
 }
