@@ -15,7 +15,6 @@ void fillScreen(
     Framebuffer* fb,
     uint color) @nogc nothrow
 {
-    // The division used to be inside the pixel loop (3.7M divisions/frame at 1440p).
     uint stride = fb.pitch / fb.bytesPerPixel;
     for (uint y = 0; y < fb.height; y++)
     {
@@ -31,6 +30,7 @@ void drawRect(
     uint color,
     uint w, uint h) @nogc nothrow
 {
+    uint stride = fb.pitch / fb.bytesPerPixel;
     for (uint y = 0; y < h; y++)
     {
         if (y0 + y >= fb.height)
@@ -39,7 +39,7 @@ void drawRect(
         {
             if (x0 + x >= fb.width)
                 break;
-            uint offset = (y0 + y) * (fb.pitch / fb.bytesPerPixel) + (x0 + x);
+            uint offset = (y0 + y) * stride + (x0 + x);
             fb.ptr[offset] = color;
         }
     }
@@ -51,6 +51,7 @@ void drawBitmap(
     const uint[] bitmap,
     ushort w, ushort h) @nogc nothrow
 {
+    uint stride = fb.pitch / fb.bytesPerPixel;
     for (uint y = 0; y < h; y++)
     {
         if (y0 + y >= fb.height)
@@ -59,7 +60,7 @@ void drawBitmap(
         {
             if (x0 + x >= fb.width)
                 break;
-            uint offset = (y0 + y) * (fb.pitch / fb.bytesPerPixel) + (x0 + x);
+            uint offset = (y0 + y) * stride + (x0 + x);
             uint pix = bitmap[y * w + x];
             if (pix != 0x00FF00FF)
                 fb.ptr[offset] = bitmap[y * w + x];
@@ -75,6 +76,7 @@ void printChar(
     uint w, uint h,
     char c) @nogc nothrow
 {
+    uint stride = fb.pitch / fb.bytesPerPixel;
     uint bmpW = numCharsH * w;
     uint charX = w * (c % 16);
     uint charY = h * (c / 16);
@@ -86,7 +88,7 @@ void printChar(
         {
             if (x0 + x >= fb.width)
                 break;
-            uint offset = (y0 + y) * (fb.pitch / fb.bytesPerPixel) + (x0 + x);
+            uint offset = (y0 + y) * stride + (x0 + x);
             uint pix = bitmapFont[(charY + y) * bmpW + (charX + x)];
             if (pix != 0x00FF00FF)
                 fb.ptr[offset] = pix;
@@ -114,6 +116,7 @@ void clearChar(Framebuffer* fb,
     uint x0, uint y0,
     uint w, uint h, uint color) @nogc nothrow
 {
+    uint stride = fb.pitch / fb.bytesPerPixel;
     for (uint y = 0; y < h; y++)
     {
         if (y0 + y >= fb.height)
@@ -122,7 +125,7 @@ void clearChar(Framebuffer* fb,
         {
             if (x0 + x >= fb.width)
                 break;
-            uint offset = (y0 + y) * (fb.pitch / fb.bytesPerPixel) + (x0 + x);
+            uint offset = (y0 + y) * stride + (x0 + x);
             fb.ptr[offset] = color;
         }
     }

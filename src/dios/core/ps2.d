@@ -94,12 +94,12 @@ bool ps2Init() @nogc nothrow
     ps2State = PS2State.init;
 
     if (kPortReadByte(PS2.StatusPort) == 0xFF)
-        return false;                       // no controller
+        return false; // no controller
     ps2State.present = true;
 
     ps2Flush();
     ps2WriteCommand(PS2.CmdEnableKeyboard);
-    ps2WriteCommand(PS2.CmdEnableAuxiliaryDevice);   // was commented out
+    ps2WriteCommand(PS2.CmdEnableAuxiliaryDevice); // was commented out
 
     // Config byte: we poll, so disable both IRQs (bits 0,1) and make sure
     // both port clocks are enabled (bits 4,5). Translation (bit 6) untouched.
@@ -140,12 +140,12 @@ void ps2HandleMouseByte(ubyte val) @nogc nothrow
 
     ubyte b0 = ps2State.packet[0];
     if (b0 & 0xC0)
-        return;                             // x/y overflow: drop the packet
+        return; // x/y overflow: drop the packet
 
     // 9-bit two's complement: sign bits live in byte 0.
     int dx = cast(int)ps2State.packet[1] - ((b0 << 4) & 0x100);
     int dy = cast(int)ps2State.packet[2] - ((b0 << 3) & 0x100);
-    mouseMove(dx, -dy, b0 & 0x07);          // PS/2: +y is up
+    mouseMove(dx, -dy, b0 & 0x07); // PS/2: +y is up
 }
 
 void ps2HandleKeyByte(ubyte sc) @nogc nothrow
@@ -157,7 +157,7 @@ void ps2HandleKeyByte(ubyte sc) @nogc nothrow
     }
     ps2State.extended = 0;
     if (sc & 0x80)
-        return;                             // key release
+        return; // key release
     ps2State.keyPressed = 1;
     ps2State.lastScancode = sc;
 }
