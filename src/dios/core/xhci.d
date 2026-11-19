@@ -22,7 +22,7 @@ import dios.core.pit;
 import dios.core.stdio;
 import dios.core.mouse;
 
-// ---------------------------------------------------------------- constants
+// constants
 
 enum uint XHCI_MAX_SLOTS = 8;       // we only enable this many device slots
 enum uint XHCI_RING_TRBS = 256;     // one 4 KiB page per ring
@@ -63,7 +63,7 @@ enum : uint
     CC_SUCCESS = 1, CC_SHORT_PACKET = 13
 }
 
-// ---------------------------------------------------------------- structures
+// structures
 
 struct XhciTrb
 {
@@ -178,7 +178,7 @@ __gshared XhciController xhci;
 
 extern(C):
 
-// ------------------------------------------------------------------ helpers
+// helpers
 
 uint xhciRd32(ubyte* base, size_t off) @nogc nothrow
 {
@@ -228,7 +228,7 @@ void* xhciDmaAlloc(ulong pages, ulong* phys) @nogc nothrow
     return pmmPhysToVirt(p);
 }
 
-// ------------------------------------------------------------------- rings
+// rings
 
 bool xhciRingInit(XhciRing* r) @nogc nothrow
 {
@@ -280,7 +280,7 @@ void xhciRingDoorbell(uint slot, uint target) @nogc nothrow
     xhciWr32(xhci.db, slot * 4, target);
 }
 
-// ------------------------------------------------------------------ events
+// events
 
 // Minimal HID report descriptor parser: finds where X, Y, wheel and the
 // buttons live inside an input report. This replaces the old assumption that
@@ -586,7 +586,7 @@ public void usbPoll() @nogc nothrow
     xhciPollEvents();
 }
 
-// ---------------------------------------------------------------- commands
+// commands
 
 // Run one command synchronously. Returns true if it completed with success.
 bool xhciCommand(ulong param, uint control, uint* outSlot) @nogc nothrow
@@ -615,7 +615,7 @@ bool xhciCommand(ulong param, uint control, uint* outSlot) @nogc nothrow
     return true;
 }
 
-// -------------------------------------------------------- control transfers
+// control transfers
 
 // EP0 control transfer. bufPhys must point to DMA memory when length != 0.
 bool xhciControl(XhciUsbDevice* d, ubyte reqType, ubyte req, ushort value,
@@ -656,7 +656,7 @@ bool xhciControl(XhciUsbDevice* d, ubyte reqType, ubyte req, ushort value,
     return true;
 }
 
-// ----------------------------------------------------------- input context
+// input context
 
 void xhciCtxW32(ubyte* ctx, uint contextIndex, uint dword, uint v) @nogc nothrow
 {
@@ -682,7 +682,7 @@ uint xhciDefaultEp0Mps(uint speed) @nogc nothrow
     return 8;                                   // Low/Full: learn it from the descriptor
 }
 
-// --------------------------------------------------------------- descriptors
+// descriptors
 
 // Walk a configuration descriptor looking for a HID boot mouse.
 void xhciParseConfig(XhciUsbDevice* d, ubyte* buf, uint len) @nogc nothrow
@@ -754,7 +754,7 @@ uint xhciEncodeInterval(uint speed, uint bInterval) @nogc nothrow
     return v > 15 ? 15 : v;
 }
 
-// -------------------------------------------------------------- enumeration
+// enumeration
 
 bool xhciSetupMouse(XhciUsbDevice* d) @nogc nothrow
 {
@@ -996,7 +996,7 @@ public void xhciShutdown() @nogc nothrow
     xhci.running = false;
 }
 
-// ------------------------------------------------------- controller bring-up
+// controller bring-up
 
 // Ask the BIOS to let go of the controller (USB Legacy Support capability).
 void xhciLegacyHandoff() @nogc nothrow

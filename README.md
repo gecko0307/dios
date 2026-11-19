@@ -11,9 +11,10 @@ Features
 - Boots using Limine startup protocol
 - UEFI/GOP framebuffer
 - Double buffering
-- Page allocator
+- Bitmap page-frame allocator
 - PIT timer
 - PS/2 keyboard and mouse
+- xHCI driver, HID mouse
 - Simple console.
 
 Building

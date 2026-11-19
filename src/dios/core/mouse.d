@@ -1,7 +1,7 @@
 module dios.core.mouse;
 
-// One cursor shared by every pointing device (PS/2 and USB both call
-// mouseMove). Coordinates are screen pixels, y grows downwards.
+// One cursor shared by every pointing device (PS/2 and USB both call mouseMove).
+// Coordinates are screen pixels, y grows downwards.
 
 struct MouseState
 {

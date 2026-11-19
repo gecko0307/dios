@@ -1,6 +1,6 @@
 module object;
 
-import dios.core.error : hcf;
+import dios.core.error: hcf;
 
 alias size_t = typeof(int.init.sizeof);
 alias ptrdiff_t = typeof(cast(void*)0 - cast(void*)0);
