@@ -31,4 +31,4 @@ Prerequisites:
 * [NASM](http://www.nasm.us)
 * [xorriso](https://github.com/Distrotech/xorriso) to generate a bootable CD image
 
-Run `./build.bat` to compile the kernel (`cdroot64/kernel64.bin`) and generate `dios64.iso`.
+Run `./build.bat` to compile the kernel (`cdroot/kernel64.bin`) and generate `dios64.iso`.
