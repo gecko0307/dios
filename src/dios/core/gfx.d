@@ -182,7 +182,7 @@ void gfxPresent() @nogc nothrow
     {
         for (uint i = 0; i < gfx.numDirty; i++)
             gfxBlitRect(gfx.dirty[i].x0, gfx.dirty[i].y0, gfx.dirty[i].x1, gfx.dirty[i].y1);
-        if (gfx.mouseDrawn && moved)        // erase the old cursor
+        if (gfx.mouseDrawn && moved) // erase the old cursor
             gfxBlitRect(gfx.mouseX, gfx.mouseY, gfx.mouseX + CURSOR_WIDTH, gfx.mouseY + CURSOR_HEIGHT);
     }
 

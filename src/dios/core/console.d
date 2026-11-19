@@ -39,8 +39,8 @@ ConsoleState* consoleInit(Framebuffer* fb, uint x, uint y) @nogc nothrow
     console.h_stride = CHAR_WIDTH - 2;
     console.v_stride = CHAR_HEIGHT;
     
-    // (no full-screen clear any more: the console draws into the scene, which
-    // main() has already filled with the background and the logo)
+    // (no full-screen clear any more: the console draws into the scene, which main()
+    // has already filled with the background and the logo)
     return &console;
 }
 

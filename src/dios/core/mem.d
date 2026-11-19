@@ -30,7 +30,7 @@ version(X86_64)
     void* memset(void* s, int c, size_t n) @nogc nothrow;
     int memcmp(const(void)* a, const(void)* b, size_t n) @nogc nothrow;
 
-    void enableSSE() @nogc nothrow;     // mem.s - call first thing in kmain
+    void enableSSE() @nogc nothrow; // mem.s - call first thing in kmain
 
     void* fastMemcpyNT(void* dest, const(void)* src, size_t size) @nogc nothrow;
 }

@@ -1,14 +1,13 @@
 module dios.core.paging;
 
-// Physical memory manager (PMM): a bitmap with one bit per 4 KiB physical page.
-//   bit = 1 -> page is used / reserved / not RAM
-//   bit = 0 -> page is free
-//
-// Everything here deals in PHYSICAL ADDRESSES as plain `ulong`s - not
-// pointers. To touch the memory, add the HHDM offset (pmmPhysToVirt).
-// (The old version returned physical addresses as `void*` and the kernel
-// dereferenced them directly, which only worked thanks to Limine's
-// identity map of the first 4 GiB.)
+/**
+ * Physical memory manager (PMM): a bitmap with one bit per 4 KiB physical page.
+ *   bit = 1 -> page is used / reserved / not RAM
+ *   bit = 0 -> page is free
+ *
+ * Everything here deals in PHYSICAL ADDRESSES as plain `ulong`s - not
+ * pointers. To touch the memory, add the HHDM offset (pmmPhysToVirt).
+ */
 
 import dios.core.mem;
 import dios.core.stdio;

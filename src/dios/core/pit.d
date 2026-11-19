@@ -18,7 +18,7 @@ extern(C):
 
 ushort pitRead() @nogc nothrow
 {
-    kPortWriteByte(PIT.CommandPort, 0x00);          // latch channel 0
+    kPortWriteByte(PIT.CommandPort, 0x00); // latch channel 0
     ubyte pitLow  = kPortReadByte(PIT.Channel0);
     ubyte pitHigh = kPortReadByte(PIT.Channel0);
     return cast(ushort)((pitHigh << 8) | pitLow);
