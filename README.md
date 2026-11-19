@@ -19,7 +19,9 @@ DIOS is an ELF kernel that requires a bootloader to run. Default setup in this r
 - xHCI driver, HID mouse
 - Simple console.
 
-DIOS is planned as a graphical OS, all rendering features are built into the kernel (but there's no full-featured GUI yet).
+DIOS is planned as a graphical OS: all rendering features are built into the kernel (but there's no full-featured GUI yet).
+
+DIOS is now 64-bit only, x86 support was dropped.
 
 ## Building
 
@@ -27,6 +29,6 @@ Prerequisites:
 
 * Recent LDC compiler
 * [NASM](http://www.nasm.us)
-* [xorriso](https://github.com/Distrotech/xorriso) to generate bootable CD image
+* [xorriso](https://github.com/Distrotech/xorriso) to generate a bootable CD image
 
-Run `./build64.bat` to compile the kernel (`cdroot64/kernel64.bin`) and generate `dios64.iso`.
+Run `./build.bat` to compile the kernel (`cdroot64/kernel64.bin`) and generate `dios64.iso`.
