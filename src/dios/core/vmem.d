@@ -76,8 +76,7 @@ int vmemInit(RAMInfo* ramInfo) @nogc nothrow
     // Copy the current top-level table so everything the bootloader mapped
     // (kernel, HHDM, stack, framebuffer) stays valid after the switch.
     // NOTE: only the PML4 is copied; the lower-level tables are still the
-    // bootloader's and live in bootloader-reclaimable memory - do not
-    // reclaim that memory until you have rebuilt those tables yourself.
+    // bootloader's and live in bootloader-reclaimable memory.
     ulong old_pml4 = getCR3() & PTE_ADDR_MASK;
     memcpy(pml4_virt, cast(void*)vmemPhysToVirt(old_pml4), 4096);
 

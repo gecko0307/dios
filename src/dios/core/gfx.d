@@ -20,7 +20,7 @@ enum uint GFX_MAX_DIRTY = 16;
 
 struct GfxRect
 {
-    int x0, y0, x1, y1;     // x1/y1 are exclusive
+    int x0, y0, x1, y1; // x1/y1 are exclusive
 }
 
 struct GfxState
@@ -31,12 +31,12 @@ struct GfxState
     uint numDirty;
     bool fullDirty;
     bool mouseDrawn;
-    int mouseX, mouseY;     // where the cursor was last drawn
+    int mouseX, mouseY; // where the cursor was last drawn
     bool ready;
 }
 
 __gshared GfxState gfx;
-__gshared uint[64] gfxRowTmp;   // one cursor row (cursor must be <= 64 px wide)
+__gshared uint[64] gfxRowTmp; // one cursor row (cursor must be <= 64 px wide)
 
 extern(C):
 
@@ -45,7 +45,7 @@ void gfxInit(Framebuffer* front, Framebuffer* scene) @nogc nothrow
     gfx = GfxState.init;
     gfx.front = front;
     gfx.scene = scene;
-    gfx.fullDirty = true;           // first present copies everything
+    gfx.fullDirty = true; // first present copies everything
     gfx.ready = true;
 }
 
