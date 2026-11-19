@@ -18,6 +18,7 @@ import dios.core.console;
 import dios.core.stdio;
 import dios.core.error;
 import dios.core.mouse;
+import dios.core.gfx;
 import dios.core.xhci;
 import dios.bootloader.limine;
 
@@ -122,50 +123,43 @@ void* allocBuffer(size_t bytes) @nogc nothrow
     return pmmPhysToVirt(phys);
 }
 
+__gshared Framebuffer sceneBuffer;
+
+// Blinking text cursor: XOR a bar into the scene; XOR-ing again removes it.
+void textCursorToggle(ConsoleState* cs) @nogc nothrow
+{
+    gfxXorRect(cast(int)(cs.x + cs.print_x + 2),
+               cast(int)(cs.y + cs.print_y + cs.v_stride - 6),
+               cast(int)cs.h_stride, 3, 0x00FFFFFF);
+}
+
 void run() @nogc nothrow
 {
     size_t hhdmOffset = bootInfo.ramInfo.hhdmOffset;
     Framebuffer* frontBuffer = &bootInfo.videoBuffer;
-
-    size_t numPixels = frontBuffer.height * frontBuffer.width;
     size_t framebufferSize = frontBuffer.height * frontBuffer.pitch;
 
-    void* backBufferAddr = allocBuffer(framebufferSize);
-    void* consoleBufferAddr = allocBuffer(framebufferSize);
-    if (backBufferAddr is null || consoleBufferAddr is null)
+    // The scene: the whole picture (minus the mouse cursor) in ordinary RAM.
+    void* sceneAddr = allocBuffer(framebufferSize);
+    if (sceneAddr is null)
         hcf();
+    sceneBuffer.ptr = cast(uint*)sceneAddr;
+    sceneBuffer.width = frontBuffer.width;
+    sceneBuffer.height = frontBuffer.height;
+    sceneBuffer.pitch = frontBuffer.pitch;
+    sceneBuffer.bytesPerPixel = frontBuffer.bytesPerPixel;
 
-    Framebuffer backBuffer;
-    backBuffer.ptr = cast(uint*)backBufferAddr;
-    backBuffer.width = frontBuffer.width;
-    backBuffer.height = frontBuffer.height;
-    backBuffer.pitch = frontBuffer.pitch;
-    backBuffer.bytesPerPixel = frontBuffer.bytesPerPixel;
+    fillScreen(&sceneBuffer, 0x000000AA);
+    drawBitmap(&sceneBuffer, 16, 16, DIOS_LOGO, DIOS_LOGO_WIDTH, DIOS_LOGO_HEIGHT);
 
-    Framebuffer consoleBuffer;
-    consoleBuffer.ptr = cast(uint*)consoleBufferAddr;
-    consoleBuffer.width = frontBuffer.width;
-    consoleBuffer.height = frontBuffer.height;
-    consoleBuffer.pitch = frontBuffer.pitch;
-    consoleBuffer.bytesPerPixel = frontBuffer.bytesPerPixel;
-
-    ConsoleState* consoleState = consoleInit(&consoleBuffer, 16, 64);
+    ConsoleState* consoleState = consoleInit(&sceneBuffer, 16, 64);
 
     pitInit();
     mouseInit(cast(uint)frontBuffer.width - 1, cast(uint)frontBuffer.height - 1);
+    gfxInit(frontBuffer, &sceneBuffer); // from here on kprintf shows up immediately
     bool havePs2 = ps2Init();
 
-    uint clearColor = 0x000000AA;
-    for (uint i = 0; i < numPixels; i++)
-        frontBuffer.ptr[i] = clearColor;
-    for (uint i = 0; i < numPixels; i++)
-        backBuffer.ptr[i] = clearColor;
-    for (uint i = 0; i < numPixels; i++)
-        consoleBuffer.ptr[i] = clearColor;
-
-    drawBitmap(&backBuffer, 16, 16, DIOS_LOGO, DIOS_LOGO_WIDTH, DIOS_LOGO_HEIGHT);
-
-    kprintf("DIOS 0.0.3\n");
+    kprintf("DIOS 0.0.4\n");
     kprintf("---------------\n");
     if (!limineBaseRevisionSupported())
         kprintf("Warning: bootloader does not support base revision 3\n");
@@ -183,22 +177,16 @@ void run() @nogc nothrow
     if (vmemInit(&bootInfo.ramInfo) != 0)
         kPanic("vmemInit failed\n");
 
-    // Enumerate PCI; this also brings up the first xHCI controller and any
-    // USB HID boot mouse behind one of its root ports.
+    // Enumerate PCI; this also brings up the xHCI controller(s) and any USB mouse.
     pciScan();
 
-    // Everything below runs off the PIT tick counter. Deadlines are in ticks;
-    // no per-iteration microsecond conversion (which overflowed a uint after
-    // 3.6 ms and also leaked rounding error every loop).
     enum ulong INPUT_TICKS = PIT_FREQUENCY / 1000;
-    enum ulong RENDER_TICKS = PIT_FREQUENCY / 60;
-    enum ulong BLINK_TICKS = PIT_FREQUENCY / 10;
+    enum ulong BLINK_TICKS = PIT_FREQUENCY / 2;
 
     ulong now = pitTimeTicks();
     ulong nextInput = now;
-    ulong nextRender = now;
     ulong nextBlink = now + BLINK_TICKS;
-    bool consoleCursorVisible = true;
+    bool textCursorDrawn = false;
 
     while (1)
     {
@@ -215,6 +203,12 @@ void run() @nogc nothrow
         if (ps2State.keyPressed)
         {
             ps2State.keyPressed = 0;
+
+            // Take the text cursor out before touching the console, put it back after.
+            bool wasDrawn = textCursorDrawn;
+            if (wasDrawn)
+                textCursorToggle(consoleState);
+
             if (ps2State.lastScancode == 0x0e)
                 consoleBack();
             else if (ps2State.lastScancode == 0x1C)
@@ -225,32 +219,20 @@ void run() @nogc nothrow
                 if (c)
                     consolePrintChar(c);
             }
+
+            if (wasDrawn)
+                textCursorToggle(consoleState);
         }
 
         if (now >= nextBlink)
         {
-            consoleCursorVisible = !consoleCursorVisible;
+            textCursorToggle(consoleState);
+            textCursorDrawn = !textCursorDrawn;
             nextBlink = now + BLINK_TICKS;
         }
 
-        if (now >= nextRender)
-        {
-            fillScreen(&backBuffer, 0x000000AA);
-            drawBitmap(&backBuffer, 16, 16, DIOS_LOGO, DIOS_LOGO_WIDTH, DIOS_LOGO_HEIGHT);
-            consoleBlitTo(&backBuffer);
-            if (consoleCursorVisible)
-            {
-                drawRect(&backBuffer,
-                    consoleState.x + consoleState.print_x + 2,
-                    consoleState.y + consoleState.print_y + consoleState.v_stride - 6,
-                    0x00FFFFFF,
-                    consoleState.h_stride, 3);
-            }
-
-            drawBitmap(&backBuffer, cast(uint)mouse.x, cast(uint)mouse.y, CURSOR, CURSOR_WIDTH, CURSOR_HEIGHT);
-
-            fastMemcpyNT(frontBuffer.ptr, backBuffer.ptr, framebufferSize);
-            nextRender = now + RENDER_TICKS;
-        }
+        // Only touches video memory if something changed (a character, the
+        // blinking cursor, or the mouse moved) - and then only those pixels.
+        gfxPresent();
     }
 }

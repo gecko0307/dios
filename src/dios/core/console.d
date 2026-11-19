@@ -4,6 +4,7 @@ import dios.core.vga;
 import dios.core.framebuffer;
 import dios.core.font;
 import dios.core.mem;
+import dios.core.gfx;
 
 import core.stdc.stdarg;
 
@@ -38,33 +39,9 @@ ConsoleState* consoleInit(Framebuffer* fb, uint x, uint y) @nogc nothrow
     console.h_stride = CHAR_WIDTH - 2;
     console.v_stride = CHAR_HEIGHT;
     
-    uint numPixels = fb.height * fb.width;
-    for (uint i = 0; i < numPixels; i++)
-        console.fb.ptr[i] = console.clear_color;
-    
+    // (no full-screen clear any more: the console draws into the scene, which
+    // main() has already filled with the background and the logo)
     return &console;
-}
-
-void consoleBlitTo(Framebuffer* fb) @nogc nothrow
-{
-    uint baseX = console.x;
-    uint baseY = console.y;
-    if (baseX >= fb.width || baseY >= fb.height)
-        return;
-
-    uint w = console.fb.width;
-    if (baseX + w > fb.width)
-        w = fb.width - baseX;
-    uint stride = console.fb.pitch / console.fb.bytesPerPixel;
-
-    // Row-wise copy instead of one pixel (and one division) at a time.
-    for (uint y = 0; y < console.fb.height; y++)
-    {
-        if (baseY + y >= fb.height)
-            break;
-        uint offset = (baseY + y) * stride + baseX;
-        memcpy(fb.ptr + offset, console.fb.ptr + offset, w * console.fb.bytesPerPixel);
-    }
 }
 
 void consolePrintChar(char c) @nogc nothrow
@@ -100,6 +77,8 @@ void consolePrintChar(char c) @nogc nothrow
         }
     }
     
+    gfxDirty(cast(int)baseX, cast(int)baseY, CHAR_WIDTH, CHAR_HEIGHT);
+
     console.print_x += console.h_stride;
     if (console.print_x >= console.width)
     {
@@ -140,6 +119,7 @@ void consoleBack() @nogc nothrow
                 console.fb.ptr[offset] = console.clear_color;
             }
         }
+        gfxDirty(cast(int)baseX, cast(int)baseY, CHAR_WIDTH, CHAR_HEIGHT);
     }
 }
 

@@ -1,20 +1,21 @@
 module dios.core.xhci;
 
-// xHCI (USB 3.x host controller) driver + USB HID boot-protocol mouse.
-//
-// Scope: polling only (no interrupts), devices on ROOT ports only (no hubs),
-// no hot-plug. The flow is the textbook one from the xHCI spec (rev 1.2):
-//
-//   reset controller -> DCBAA + command ring + event ring -> run
-//   -> per connected port: reset port -> Enable Slot -> Address Device
-//   -> control transfers (descriptors) -> Set Configuration / Set Protocol
-//   -> Configure Endpoint -> queue Normal TRBs on the interrupt-IN endpoint
-//   -> every completed TRB is one mouse report -> mouseMove()
-//
-// All DMA memory comes from the PMM below 4 GiB, so it works whether or not
-// the controller supports 64-bit addressing. Memory shared with the
-// controller is only touched through volatileLoad/volatileStore.
-
+/**
+ * xHCI (USB 3.x host controller) driver + USB HID boot-protocol mouse.
+ *
+ * Scope: polling only (no interrupts), devices on ROOT ports only (no hubs),
+ * no hot-plug. The flow is the textbook one from the xHCI spec (rev 1.2):
+ *
+ *   reset controller -> DCBAA + command ring + event ring -> run
+ *   -> per connected port: reset port -> Enable Slot -> Address Device
+ *   -> control transfers (descriptors) -> Set Configuration / Set Protocol
+ *   -> Configure Endpoint -> queue Normal TRBs on the interrupt-IN endpoint
+ *   -> every completed TRB is one mouse report -> mouseMove()
+ *
+ * All DMA memory comes from the PMM below 4 GiB, so it works whether or not
+ * the controller supports 64-bit addressing. Memory shared with the
+ * controller is only touched through volatileLoad/volatileStore.
+ */
 import core.volatile;
 import dios.core.mem;
 import dios.core.paging;
@@ -863,7 +864,7 @@ bool xhciSetupDevice(uint port, uint speed) @nogc nothrow
     if (mps0 != d.ep0Mps && mps0 >= 8)
     {
         d.ep0Mps = mps0;
-        xhciCtxW32(d.inCtx, 0, 1, 0x2);                                // add A1 only
+        xhciCtxW32(d.inCtx, 0, 1, 0x2); // add A1 only
         xhciFillEpCtx(d, 1, 4, mps0, 0, &d.ep0Ring, 8);
         // The ring dequeue pointer in this context is stale; the controller
         // ignores it on Evaluate Context, only MPS is taken.
