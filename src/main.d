@@ -123,14 +123,6 @@ void* allocBuffer(size_t bytes) @nogc nothrow
 
 __gshared Framebuffer sceneBuffer;
 
-// Blinking text cursor: XOR a bar into the scene; XOR-ing again removes it
-void textCursorToggle(ConsoleState* cs) @nogc nothrow
-{
-    gfxXorRect(cast(int)(cs.x + cs.print_x + 2),
-               cast(int)(cs.y + cs.print_y + cs.v_stride - 6),
-               cast(int)cs.h_stride, 3, 0x00FFFFFF);
-}
-
 void run() @nogc nothrow
 {
     size_t hhdmOffset = bootInfo.ramInfo.hhdmOffset;
@@ -150,7 +142,7 @@ void run() @nogc nothrow
     fillScreen(&sceneBuffer, 0x000000AA);
     drawBitmap(&sceneBuffer, 16, 16, DIOS_LOGO, DIOS_LOGO_WIDTH, DIOS_LOGO_HEIGHT);
 
-    ConsoleState* consoleState = consoleInit(&sceneBuffer, 16, 64);
+    consoleInit(&sceneBuffer, 16, 64);
 
     pitInit();
     mouseInit(cast(uint)frontBuffer.width - 1, cast(uint)frontBuffer.height - 1);
@@ -184,7 +176,6 @@ void run() @nogc nothrow
     ulong now = pitTimeTicks();
     ulong nextInput = now;
     ulong nextBlink = now + BLINK_TICKS;
-    bool textCursorDrawn = false;
 
     while (1)
     {
@@ -202,30 +193,23 @@ void run() @nogc nothrow
         {
             ps2State.keyPressed = 0;
 
-            // Take the text cursor out before touching the console, put it back after
-            bool wasDrawn = textCursorDrawn;
-            if (wasDrawn)
-                textCursorToggle(consoleState);
-
-            if (ps2State.lastScancode == 0x0e)
+            // The console hides/restores the blinking cursor around its own drawing
+            ubyte sc = ps2State.lastScancode;
+            if (sc == 0x0e)
                 consoleBack();
-            else if (ps2State.lastScancode == 0x1C)
+            else if (sc == 0x1C)
                 consoleNewline();
             else
             {
-                char c = scancodeToChar(ps2State.lastScancode);
+                char c = scancodeToChar(sc, ps2State.lastShift != 0);
                 if (c)
                     consolePrintChar(c);
             }
-
-            if (wasDrawn)
-                textCursorToggle(consoleState);
         }
 
         if (now >= nextBlink)
         {
-            textCursorToggle(consoleState);
-            textCursorDrawn = !textCursorDrawn;
+            consoleCursorToggle();
             nextBlink = now + BLINK_TICKS;
         }
 

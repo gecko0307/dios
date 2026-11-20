@@ -14,12 +14,13 @@ struct ConsoleState
     uint x;
     uint y;
     uint width;
-    uint height;
+    uint height;     // visible height of the text area in pixels (a whole number of lines)
     uint print_x;
     uint print_y;
     uint h_stride;
     uint v_stride;
     uint clear_color;
+    bool cursorOn;   // the blinking text cursor is currently XOR-ed into the scene
 }
 
 __gshared ConsoleState console;
@@ -32,30 +33,101 @@ ConsoleState* consoleInit(Framebuffer* fb, uint x, uint y) @nogc nothrow
     console.x = x;
     console.y = y;
     console.width = fb.width - x - 16;
-    console.height = CHAR_HEIGHT;
     console.print_x = 0;
     console.print_y = 0;
     console.clear_color = 0x000000AA;
     console.h_stride = CHAR_WIDTH - 2;
     console.v_stride = CHAR_HEIGHT;
-    
+    console.cursorOn = false;
+
+    // The text area runs from y to the bottom of the screen, in whole lines.
+    // Always keep at least one line so the scroll arithmetic stays sane.
+    uint rows = (fb.height > y) ? (fb.height - y) / console.v_stride : 0;
+    if (rows == 0)
+        rows = 1;
+    console.height = rows * console.v_stride;
+
     // (no full-screen clear any more: the console draws into the scene, which main()
     // has already filled with the background and the logo)
     return &console;
 }
 
-void consolePrintChar(char c) @nogc nothrow
+// XOR the cursor bar (the bottom of the current cell) into the scene.
+// Doing it twice restores the pixels exactly.
+void consoleCursorXor() @nogc nothrow
+{
+    gfxXorRect(cast(int)(console.x + console.print_x + 2),
+               cast(int)(console.y + console.print_y + console.v_stride - 6),
+               cast(int)console.h_stride, 3, 0x00FFFFFF);
+}
+
+// Blink phase flip; call this from the main loop on a timer.
+void consoleCursorToggle() @nogc nothrow
+{
+    consoleCursorXor();
+    console.cursorOn = !console.cursorOn;
+}
+
+// Scroll the text area up by one line and clear the line that frees up at the bottom.
+void consoleScroll() @nogc nothrow
+{
+    Framebuffer* fb = console.fb;
+    uint lines = console.v_stride;
+    if (console.y >= fb.height || console.height <= lines)
+    {
+        // A single-line console: nothing to move, just blank it.
+        lines = console.height;
+    }
+    else
+    {
+        // Rows are contiguous in the scene buffer, so the whole block is one move.
+        uint* dst = fb.ptr + cast(size_t)console.y * (fb.pitch / fb.bytesPerPixel);
+        const(uint)* src = dst + cast(size_t)lines * (fb.pitch / fb.bytesPerPixel);
+        memmove(dst, src, cast(size_t)(console.height - lines) * fb.pitch);
+    }
+
+    // Blank the bottom line(s) across the full row width.
+    uint stride = fb.pitch / fb.bytesPerPixel;
+    uint first = console.y + console.height - lines;
+    for (uint yy = first; yy < console.y + console.height && yy < fb.height; yy++)
+    {
+        uint* row = fb.ptr + cast(size_t)yy * stride;
+        for (uint xx = 0; xx < fb.width; xx++)
+            row[xx] = console.clear_color;
+    }
+
+    gfxDirty(0, cast(int)console.y, cast(int)fb.width, cast(int)console.height);
+}
+
+// Move to the start of the next line, scrolling if that would run off the bottom.
+void consoleLineFeed() @nogc nothrow
+{
+    console.print_x = 0;
+    console.print_y += console.v_stride;
+    if (console.print_y + console.v_stride > console.height)
+    {
+        consoleScroll();
+        console.print_y = console.height - console.v_stride;
+    }
+}
+
+// Draw one character at the cursor position and advance. Does not touch the
+// blinking cursor: use consolePrintChar from outside.
+void consolePutChar(char c) @nogc nothrow
 {
     if (c == 0)
         return;
-    else if (c == '\n')
+    else if (c == '\r')
     {
         console.print_x = 0;
-        console.print_y += console.v_stride;
-        console.height += console.v_stride;
         return;
     }
-    
+    else if (c == '\n')
+    {
+        consoleLineFeed();
+        return;
+    }
+
     uint charX = CHAR_WIDTH * (c % 16);
     uint charY = CHAR_HEIGHT * (c / 16);
     uint baseX = console.x + console.print_x;
@@ -81,11 +153,19 @@ void consolePrintChar(char c) @nogc nothrow
 
     console.print_x += console.h_stride;
     if (console.print_x >= console.width)
-    {
-        console.print_x = 0;
-        console.print_y += console.v_stride;
-        console.height += console.v_stride;
-    }
+        consoleLineFeed();
+}
+
+void consolePrintChar(char c) @nogc nothrow
+{
+    // Take the blinking cursor out first (a scroll or a glyph would otherwise
+    // smear it), and put it back at the new position afterwards.
+    bool hadCursor = console.cursorOn;
+    if (hadCursor)
+        consoleCursorXor();
+    consolePutChar(c);
+    if (hadCursor)
+        consoleCursorXor();
 }
 
 void consolePrintString(string str) @nogc nothrow
@@ -100,6 +180,10 @@ void consoleBack() @nogc nothrow
 {
     if (console.print_x > 0)
     {
+        bool hadCursor = console.cursorOn;
+        if (hadCursor)
+            consoleCursorXor();
+
         console.print_x -= console.h_stride;
         
         uint baseX = console.x + console.print_x;
@@ -120,14 +204,20 @@ void consoleBack() @nogc nothrow
             }
         }
         gfxDirty(cast(int)baseX, cast(int)baseY, CHAR_WIDTH, CHAR_HEIGHT);
+
+        if (hadCursor)
+            consoleCursorXor();
     }
 }
 
 void consoleNewline() @nogc nothrow
 {
-    console.print_x = 0;
-    console.print_y += console.v_stride;
-    console.height += console.v_stride;
+    bool hadCursor = console.cursorOn;
+    if (hadCursor)
+        consoleCursorXor();
+    consoleLineFeed();
+    if (hadCursor)
+        consoleCursorXor();
 }
 
 immutable char[16] HEXMAP = [

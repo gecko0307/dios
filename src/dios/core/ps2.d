@@ -26,6 +26,8 @@ struct PS2State
     ubyte keyPressed;
     ubyte lastScancode;
     ubyte extended;
+    ubyte shiftMask;   // bit 0: left Shift held, bit 1: right Shift held
+    ubyte lastShift;   // was Shift held when lastScancode went down? (0/1)
     ubyte packetIndex;
     bool present;      // an 8042 controller answered
     bool mouseOk;      // the mouse acknowledged F4
@@ -155,11 +157,32 @@ void ps2HandleKeyByte(ubyte sc) @nogc nothrow
         ps2State.extended = 1;
         return;
     }
+    bool ext = ps2State.extended != 0;
     ps2State.extended = 0;
-    if (sc & 0x80)
+
+    bool release = (sc & 0x80) != 0;
+    ubyte code = sc & 0x7F;
+
+    // Shift: 0x2A left, 0x36 right. Track the two separately so releasing one
+    // while holding the other keeps Shift active. The E0-prefixed 0x2A/0x36
+    // that some keyboards send around arrows/Insert/etc. are "fake shifts" and
+    // must not change the state.
+    if (!ext && (code == 0x2A || code == 0x36))
+    {
+        ubyte bit = cast(ubyte)((code == 0x2A) ? 1 : 2);
+        if (release)
+            ps2State.shiftMask = cast(ubyte)(ps2State.shiftMask & ~bit);
+        else
+            ps2State.shiftMask = cast(ubyte)(ps2State.shiftMask | bit);
+        return;
+    }
+
+    if (release)
         return; // key release
     ps2State.keyPressed = 1;
     ps2State.lastScancode = sc;
+    // Snapshot now: Shift may be released again before the main loop looks at the key.
+    ps2State.lastShift = cast(ubyte)((ps2State.shiftMask != 0) ? 1 : 0);
 }
 
 void ps2Poll() @nogc nothrow

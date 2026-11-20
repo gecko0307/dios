@@ -88,11 +88,23 @@ immutable ubyte[128] scancodeToAscii = [
     0, ' ', 0, 0, 0, 0, 0, 0                // 0x38-0x3F
 ];
 
-char scancodeToChar(ubyte code) @nogc nothrow
+// Same layout as scancodeToAscii, with Shift held (US layout).
+immutable ubyte[128] scancodeToAsciiShift = [
+    0,  27, '!', '@', '#', '$', '%', '^',   // 0x00-0x07
+    '&', '*', '(', ')', '_', '+', 8, 9,     // 0x08-0x0F
+    'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', // 0x10-0x17
+    'O', 'P', '{', '}', 13, 0, 'A', 'S',    // 0x18-0x1F
+    'D', 'F', 'G', 'H', 'J', 'K', 'L', ':', // 0x20-0x27
+    '"', '~', 0, '|', 'Z', 'X', 'C', 'V',   // 0x28-0x2F
+    'B', 'N', 'M', '<', '>', '?', 0, '*',   // 0x30-0x37
+    0, ' ', 0, 0, 0, 0, 0, 0                // 0x38-0x3F
+];
+
+char scancodeToChar(ubyte code, bool shift = false) @nogc nothrow
 {
     if (code >= scancodeToAscii.length)
         return 0;
-    return cast(char)scancodeToAscii[code];
+    return cast(char)(shift ? scancodeToAsciiShift[code] : scancodeToAscii[code]);
 }
 
 ubyte kKbdGetKey() @nogc nothrow
