@@ -19,6 +19,7 @@ import dios.core.cursor;
 import dios.core.font;
 import dios.core.console;
 import dios.core.stdio;
+import dios.core.shell;
 import dios.core.error;
 import dios.core.mouse;
 import dios.core.gfx;
@@ -191,6 +192,7 @@ void run() @nogc nothrow
 
     // Enumerate PCI; this also brings up the xHCI controller(s) and any USB mouse
     pciScan();
+    shellInit();
 
     enum ulong BLINK_MS = 100;
 
@@ -210,17 +212,7 @@ void run() @nogc nothrow
         bool shift;
         while (ps2PopKey(&sc, &shift))
         {
-            // The console hides/restores the blinking cursor around its own drawing
-            if (sc == 0x0e)
-                consoleBack();
-            else if (sc == 0x1C)
-                consoleNewline();
-            else
-            {
-                char c = scancodeToChar(sc, shift);
-                if (c)
-                    consolePrintChar(c);
-            }
+            shellHandleKey(sc, shift);
         }
 
         ulong now = nowMs();
