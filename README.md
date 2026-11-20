@@ -8,6 +8,8 @@ You are free to use this code as a base to create your own kernel. PRs implement
 
 DIOS is an ELF kernel that requires a bootloader to run. Default setup in this repo uses [Limine](https://github.com/limine-bootloader/limine) for booting from the CD-ROM. Both UEFI and BIOS are supported. You can also make a bootable USB stick with the DIOS ISO image using [Ventoy](https://www.ventoy.net/en/index.html).
 
+[![Screenshot](media/screenshot.png)](media/screenshot.png)
+
 ## Features
 
 - Boots using Limine startup protocol
