@@ -53,7 +53,7 @@ DIOS is now 64-bit only, x86 support was dropped.
 
 Prerequisites:
 
-* Recent LDC compiler
+* Recent [LDC](https://github.com/ldc-developers/ldc)
 * [NASM](http://www.nasm.us)
 * Python (for running the build script)
 * [xorriso](https://github.com/Distrotech/xorriso) to generate a bootable CD image
