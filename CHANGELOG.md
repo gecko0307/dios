@@ -4,8 +4,8 @@ DIOS 0.1.0 - TBD
 - GDT
 - HPET timer that replaces the legacy PIT
 - I/O APIC, Local APIC
-- Interrupt-driven PS/2 keyboard; Shift support
-- Scrolling console and a simple shell for running built-in kernel commands.
+- USB keyboard support; interrupt-driven PS/2 keyboard; Shift support
+- A simple shell for running built-in kernel commands.
 
 DIOS 0.0.4 - 20 Nov, 2026
 -------------------------

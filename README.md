@@ -28,7 +28,20 @@ DIOS is planned as a graphical OS: all rendering features are built into the ker
 
 DIOS is now 64-bit only, x86 support was dropped.
 
-## Structure
+## Kernel Shell Commands
+
+- `help` - show the command list
+- `about` - kernel version information
+- `mem` - physical memory statistics
+- `uptime` - time since boot
+- `clock` - clock source and timer status
+- `irq` - interrupt controller status
+- `pci` - enumerate PCI functions
+- `history` - show recent commands
+- `echo TEXT` - print TEXT
+- `poweroff` - shut down the computer.
+
+## Code Structure
 
 - `src/dios` contains the kernel code:
   - `src/dios/bootloader` - boot protocol; currently only Limine protocol is implemented. Multiboot support was dropped
