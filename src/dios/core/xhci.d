@@ -201,6 +201,11 @@ struct XhciController
 
 __gshared XhciController xhci;
 
+// Print the raw bytes of the first mouse reports and a "first report" note.
+// Handy when a new mouse misbehaves, but those lines show up whenever the mouse
+// first moves - in the middle of the shell - so they are off by default.
+__gshared bool xhciDebugReports = false;
+
 extern(C):
 
 // helpers
@@ -466,7 +471,7 @@ int hidGetField(ubyte* rpt, uint lenBytes, uint baseBits, HidField* f) @nogc not
 void xhciProcessReport(XhciUsbDevice* d, ubyte* rpt, uint got) @nogc nothrow
 {
     // Show the first few raw reports: invaluable when a new mouse misbehaves.
-    if (d.rptsDumped < 4 && got > 0)
+    if (xhciDebugReports && d.rptsDumped < 4 && got > 0)
     {
         d.rptsDumped++;
         kprintf("  report (%u bytes):", got);
@@ -523,7 +528,8 @@ void xhciHandleMouseEvent(XhciUsbDevice* d, uint code, uint residual) @nogc noth
     if (got > 0 && !d.gotFirstReport)
     {
         d.gotFirstReport = true;
-        kprintf("USB mouse: first report received\n");
+        if (xhciDebugReports)
+            kprintf("USB mouse: first report received\n");
     }
     xhciProcessReport(d, d.dma + bufOff, got);
 
