@@ -6,7 +6,7 @@ DIOS stands for D Incomplete Operating System (because it is a toy project that 
 
 You are free to use this code as a base to create your own kernel. PRs implementing real-world OS features are welcome. The code is a bit messy but readable.
 
-DIOS is an ELF kernel that requires a bootloader to run. Default setup in this repo uses [Limine](https://github.com/limine-bootloader/limine) for booting from the CD-ROM. You can also make a bootable USB stick with the DIOS ISO image using [Ventoy](https://www.ventoy.net/en/index.html).
+DIOS is an ELF kernel that requires a bootloader to run. Default setup in this repo uses [Limine](https://github.com/limine-bootloader/limine) for booting from the CD-ROM. Both UEFI and BIOS are supported. You can also make a bootable USB stick with the DIOS ISO image using [Ventoy](https://www.ventoy.net/en/index.html).
 
 ## Features
 
