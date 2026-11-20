@@ -22,7 +22,7 @@ DIOS is an ELF kernel that requires a bootloader to run. Default setup in this r
 - Interrupt-driven PS/2 keyboard
 - PCI enumeration
 - xHCI driver, HID mouse
-- Simple console.
+- A simple shell with built-in kernel commands.
 
 DIOS is planned as a graphical OS: all rendering features are built into the kernel (but there's no full-featured GUI yet).
 
