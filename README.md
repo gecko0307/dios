@@ -25,6 +25,14 @@ DIOS is planned as a graphical OS: all rendering features are built into the ker
 
 DIOS is now 64-bit only, x86 support was dropped.
 
+## Structure
+
+- `src/dios` contains the kernel code:
+  - `src/dios/bootloader` - boot protocol; currently only Limine protocol is implemented. Multiboot support was dropped
+  - `src/dios/core` - kernel modules, including core drivers necessary to run the main I/O loop
+- `src/main.d` - the kernel entry point
+- `src/object.d` - D runtime stub.
+
 ## Building
 
 Prerequisites:

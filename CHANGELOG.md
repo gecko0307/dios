@@ -1,7 +1,11 @@
 DIOS 0.1.0 - TBD
 ----------------
-- Scrolling console
-- Shift support.
+- IDT
+- GDT
+- HPET timer that replaces the legacy PIT
+- I/O APIC, Local APIC
+- Interrupt-driven PS/2 keyboard; Shift support
+- Scrolling console.
 
 DIOS 0.0.4 - 20 Nov, 2026
 -------------------------
