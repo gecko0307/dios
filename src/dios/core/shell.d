@@ -1,6 +1,7 @@
 module dios.core.shell;
 
 import dios.core.clock;
+import dios.core.acpi;
 import dios.core.console;
 import dios.core.cpu;
 import dios.core.interrupts;
@@ -15,7 +16,7 @@ enum size_t SHELL_HISTORY_CAPACITY = 16;
 
 immutable string[10] SHELL_COMMANDS = [
     "help", "about", "mem", "uptime", "clock",
-    "irq", "pci", "history", "echo", "clear"
+    "irq", "pci", "history", "echo", "poweroff"
 ];
 
 __gshared char[SHELL_LINE_CAPACITY] shellLine;
@@ -163,7 +164,7 @@ void shellExecute() @nogc nothrow
         kprintf("  pci        Enumerate PCI functions\n");
         kprintf("  history    Show recent commands\n");
         kprintf("  echo TEXT  Print TEXT\n");
-        kprintf("\nThese commands are kernel built-ins, not user programs.\n");
+        kprintf("  poweroff   Shut down the computer\n");
     }
     else if (shellEquals(shellLine.ptr, "about"))
     {
@@ -217,6 +218,12 @@ void shellExecute() @nogc nothrow
     else if (shellEquals(shellLine.ptr, "echo"))
     {
         kprintf("%s\n", cast(char*)args);
+    }
+    else if (shellEquals(shellLine.ptr, "poweroff"))
+    {
+        kprintf("Powering off...\n");
+        if (!acpiPoweroff())
+            kprintf("ACPI shutdown is unavailable (missing FADT/DSDT _S5_ or PM1a control block).\n");
     }
     else if (shellLine[0] != 0)
     {

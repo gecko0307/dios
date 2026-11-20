@@ -14,6 +14,8 @@ module dios.core.acpi;
 import dios.bootloader.limine;
 import dios.core.stdio;
 import dios.core.vmem;
+import dios.core.cpu;
+import dios.core.port;
 
 enum uint ACPI_MAX_IOAPICS = 8;
 enum uint ACPI_MAX_ISOS    = 32;
@@ -46,6 +48,13 @@ struct AcpiInfo
     uint numIsos;
     AcpiIso[ACPI_MAX_ISOS] isos;
     ulong hpetAddr;
+    bool fadtFound;
+    bool s5Found;
+    ushort pm1aControlPort;
+    ushort pm1bControlPort;
+    ubyte pm1ControlLength;
+    ubyte sleepTypeA;
+    ubyte sleepTypeB;
 }
 
 __gshared AcpiInfo acpi;
@@ -175,6 +184,220 @@ void acpiParseHpet(const(ubyte)* t, uint len) @nogc nothrow
     acpi.hpetAddr = addr;
 }
 
+// Decode an AML PkgLength. `offset` points to its lead byte.
+bool acpiAmlPkgLength(const(ubyte)* aml, uint amlLen, uint offset,
+                      uint* value, uint* encodedBytes) @nogc nothrow
+{
+    if (offset >= amlLen)
+        return false;
+
+    ubyte lead = aml[offset];
+    uint follow = lead >> 6;
+    uint length;
+    if (follow == 0)
+    {
+        length = lead & 0x3F;
+    }
+    else
+    {
+        length = lead & 0x0F;
+        if (offset + follow >= amlLen)
+            return false;
+        for (uint i = 0; i < follow; i++)
+            length |= cast(uint)aml[offset + 1 + i] << (4 + i * 8);
+    }
+
+    *value = length;
+    *encodedBytes = follow + 1;
+    return true;
+}
+
+// Read the small integer encodings used by the standard _S5_ package.
+bool acpiAmlInteger(const(ubyte)* aml, uint amlLen, uint* offset,
+                    ubyte* value) @nogc nothrow
+{
+    if (*offset >= amlLen)
+        return false;
+
+    ubyte op = aml[*offset];
+    (*offset)++;
+    if (op == 0x00) // ZeroOp
+    {
+        *value = 0;
+        return true;
+    }
+    if (op == 0x01) // OneOp
+    {
+        *value = 1;
+        return true;
+    }
+    if (op == 0x0A) // BytePrefix
+    {
+        if (*offset + 1 > amlLen) return false;
+        *value = aml[*offset];
+        (*offset)++;
+        return true;
+    }
+    if (op == 0x0B) // WordPrefix
+    {
+        if (*offset + 2 > amlLen) return false;
+        *value = cast(ubyte)acpiRd16(aml, *offset);
+        *offset += 2;
+        return true;
+    }
+    if (op == 0x0C) // DWordPrefix
+    {
+        if (*offset + 4 > amlLen) return false;
+        *value = cast(ubyte)acpiRd32(aml, *offset);
+        *offset += 4;
+        return true;
+    }
+    if (op == 0x0E) // QWordPrefix
+    {
+        if (*offset + 8 > amlLen) return false;
+        *value = cast(ubyte)acpiRd64(aml, *offset);
+        *offset += 8;
+        return true;
+    }
+    return false;
+}
+
+// This is deliberately not a general AML interpreter. It recognizes the
+// conventional Name (_S5_, Package (...) { SleepTypeA, SleepTypeB, ... }).
+bool acpiFindS5(const(ubyte)* dsdt, uint len, ubyte* typeA, ubyte* typeB) @nogc nothrow
+{
+    if (len < 8)
+        return false;
+
+    for (uint i = 36; i + 7 < len; i++)
+    {
+        if (dsdt[i] != 0x08 || dsdt[i + 1] != '_' ||
+            dsdt[i + 2] != 'S' || dsdt[i + 3] != '5' || dsdt[i + 4] != '_')
+            continue;
+
+        uint pkgOp = i + 5;
+        if (dsdt[pkgOp] != 0x12)
+            continue;
+
+        uint pkgLen;
+        uint pkgLenBytes;
+        if (!acpiAmlPkgLength(dsdt, len, pkgOp + 1, &pkgLen, &pkgLenBytes))
+            continue;
+
+        uint pkgStart = pkgOp + 1;
+        uint pkgEnd = pkgStart + pkgLen;
+        uint cursor = pkgStart + pkgLenBytes;
+        if (pkgEnd > len || cursor >= pkgEnd)
+            continue;
+
+        ubyte elements = dsdt[cursor++];
+        if (elements < 2)
+            continue;
+
+        ubyte a, b;
+        if (!acpiAmlInteger(dsdt, pkgEnd, &cursor, &a) ||
+            !acpiAmlInteger(dsdt, pkgEnd, &cursor, &b))
+            continue;
+
+        *typeA = a;
+        *typeB = b;
+        return true;
+    }
+    return false;
+}
+
+void acpiParseFadt(const(ubyte)* t, uint len) @nogc nothrow
+{
+    if (len < 90)
+        return;
+
+    acpi.fadtFound = true;
+    ulong dsdtPhys = acpiRd32(t, 40);
+    if (len >= 148)
+    {
+        ulong xDsdt = acpiRd64(t, 140);
+        if (xDsdt != 0)
+            dsdtPhys = xDsdt;
+    }
+
+    // Prefer the legacy PM1 control blocks. They are I/O ports on conventional
+    // x86 PCs and are sufficient for the first DIOS power-management path.
+    uint pm1a = acpiRd32(t, 64);
+    uint pm1b = acpiRd32(t, 68);
+    acpi.pm1ControlLength = t[89];
+
+    // If legacy fields are absent, accept the extended GAS only when it names
+    // System I/O space. FADT X_PM1x_CNT_BLK offsets are 172 and 184.
+    if (pm1a == 0 && len >= 184 && t[172] == 1)
+    {
+        ulong addr = acpiRd64(t, 176);
+        if (addr <= 0xFFFF)
+        {
+            pm1a = cast(uint)addr;
+            if (acpi.pm1ControlLength == 0)
+                acpi.pm1ControlLength = cast(ubyte)((t[173] + 7) / 8);
+        }
+    }
+    if (pm1b == 0 && len >= 196 && t[184] == 1)
+    {
+        ulong addr = acpiRd64(t, 188);
+        if (addr <= 0xFFFF)
+        {
+            pm1b = cast(uint)addr;
+            if (acpi.pm1ControlLength == 0)
+                acpi.pm1ControlLength = cast(ubyte)((t[185] + 7) / 8);
+        }
+    }
+
+    if (pm1a <= 0xFFFF)
+        acpi.pm1aControlPort = cast(ushort)pm1a;
+    if (pm1b <= 0xFFFF)
+        acpi.pm1bControlPort = cast(ushort)pm1b;
+
+    if (dsdtPhys == 0)
+        return;
+
+    uint dsdtLen;
+    const(ubyte)* dsdt = acpiMapTable(dsdtPhys, &dsdtLen, 1u << 20);
+    if (dsdt is null || !acpiSigEq(dsdt, "DSDT") || !acpiChecksumOk(dsdt, dsdtLen))
+        return;
+
+    acpi.s5Found = acpiFindS5(dsdt, dsdtLen, &acpi.sleepTypeA, &acpi.sleepTypeB);
+}
+
+/// Request ACPI S5 (soft power-off). Returns false if firmware data is absent.
+/// A successful request normally powers the machine off before this returns.
+bool acpiPoweroff() @nogc nothrow
+{
+    if (!acpi.s5Found || acpi.pm1aControlPort == 0 || acpi.pm1ControlLength < 2)
+        return false;
+
+    // SLP_TYP is bits 10..12 and SLP_EN is bit 13 in PM1 control registers.
+    // Preserve all unrelated control bits.
+    cpuCli();
+    ushort controlA = kPortRead16(acpi.pm1aControlPort);
+    controlA = cast(ushort)((controlA & ~((7u << 10) | (1u << 13))) |
+                            ((acpi.sleepTypeA & 7u) << 10));
+    kPortWrite16(acpi.pm1aControlPort, controlA);
+
+    // Program PM1b first as well, but do not set SLP_EN there. ACPI requires
+    // the sleep type to be written before the enable bit is asserted in PM1a.
+    if (acpi.pm1bControlPort != 0)
+    {
+        ushort controlB = kPortRead16(acpi.pm1bControlPort);
+        controlB = cast(ushort)((controlB & ~((7u << 10) | (1u << 13))) |
+                                ((acpi.sleepTypeB & 7u) << 10));
+        kPortWrite16(acpi.pm1bControlPort, controlB);
+    }
+
+    kPortWrite16(acpi.pm1aControlPort, cast(ushort)(controlA | (1u << 13)));
+
+    // If firmware/hardware did not power off, remain halted rather than
+    // returning to a shell that has already requested shutdown.
+    for (;;)
+        asm @nogc nothrow { hlt; }
+}
+
 bool acpiInit(ulong hhdmOffset) @nogc nothrow
 {
     acpi = AcpiInfo.init;
@@ -229,7 +452,8 @@ bool acpiInit(ulong hhdmOffset) @nogc nothrow
             continue;
         bool isMadt = acpiSigEq(hdr, "APIC");
         bool isHpet = acpiSigEq(hdr, "HPET");
-        if (!isMadt && !isHpet)
+        bool isFadt = acpiSigEq(hdr, "FACP");
+        if (!isMadt && !isHpet && !isFadt)
             continue;
 
         uint len;
@@ -239,8 +463,10 @@ bool acpiInit(ulong hhdmOffset) @nogc nothrow
 
         if (isMadt)
             acpiParseMadt(t, len);
-        else
+        else if (isHpet)
             acpiParseHpet(t, len);
+        else
+            acpiParseFadt(t, len);
     }
 
     acpi.valid = acpi.madtFound;

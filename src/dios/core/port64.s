@@ -5,6 +5,7 @@ bits 64
 
 global kPortReadByte
 global kPortWriteByte
+global kPortRead16
 global kPortWrite16
 global kPortRead32
 global kPortWrite32
@@ -19,6 +20,12 @@ kPortWriteByte:
     mov dx, di
     mov al, sil
     out dx, al
+    ret
+
+kPortRead16:
+    mov dx, di
+    in  ax, dx
+    movzx eax, ax
     ret
 
 kPortWrite16:
