@@ -7,7 +7,10 @@ import dios.core.ps2;
 import dios.core.vbe;
 import dios.core.framebuffer;
 import dios.core.paging;
-import dios.core.pit;
+import dios.core.clock;
+import dios.core.interrupts;
+import dios.core.lapic;
+import dios.core.cpu;
 import dios.core.pci;
 import dios.core.mem;
 import dios.core.vmem;
@@ -123,6 +126,14 @@ void* allocBuffer(size_t bytes) @nogc nothrow
 
 __gshared Framebuffer sceneBuffer;
 
+// Milliseconds since boot: the tick counter if the timer interrupt runs, else the clock.
+ulong nowMs() @nogc nothrow
+{
+    if (interruptStatus.tick)
+        return clockTickMs();
+    return clockNowNs() / 1_000_000;
+}
+
 void run() @nogc nothrow
 {
     size_t hhdmOffset = bootInfo.ramInfo.hhdmOffset;
@@ -144,10 +155,23 @@ void run() @nogc nothrow
 
     consoleInit(&sceneBuffer, 16, 64);
 
-    pitInit();
     mouseInit(cast(uint)frontBuffer.width - 1, cast(uint)frontBuffer.height - 1);
     gfxInit(frontBuffer, &sceneBuffer); // from here on kprintf shows up immediately
+
+    // From now on a CPU exception prints a register dump instead of resetting the machine
+    interruptsEarlyInit();
+
+    // MMIO mappings (LAPIC, IOAPIC, HPET) need the virtual memory manager
+    if (vmemInit(&bootInfo.ramInfo) != 0)
+        kPanic("vmemInit failed\n");
+
+    // ACPI, HPET clock, LAPIC + IOAPIC, 1 kHz tick. Interrupts are enabled on return
+    // (if the machine has a local APIC at all).
+    interruptsInit(hhdmOffset);
+
     bool havePs2 = ps2Init();
+    if (havePs2 && interruptStatus.ioapic)
+        ps2StartIrq(interruptStatus.apicId);
 
     kprintf("DIOS 0.0.4\n");
     kprintf("---------------\n");
@@ -162,59 +186,57 @@ void run() @nogc nothrow
     kprintf("Free pages: %llu of %llu (page size %x B)\n", pmmFreeCount(), pmmTotalCount(), MEM_PAGE_SIZE);
     kprintf("Framebuffer: %ux%u %ubpp @ %llx\n",
         frontBuffer.width, frontBuffer.height, frontBuffer.bytesPerPixel * 8, cast(ulong)frontBuffer.ptr);
-    kprintf("PS/2: %s\n", havePs2 ? "present".ptr : "absent".ptr);
-
-    if (vmemInit(&bootInfo.ramInfo) != 0)
-        kPanic("vmemInit failed\n");
+    kprintf("PS/2: %s\n", !havePs2 ? "absent".ptr : (ps2State.irqMode ? "present, interrupt driven".ptr : "present, polled".ptr));
+    interruptsPrintStatus();
 
     // Enumerate PCI; this also brings up the xHCI controller(s) and any USB mouse
     pciScan();
 
-    enum ulong INPUT_TICKS = PIT_FREQUENCY / 1000;
-    enum ulong BLINK_TICKS = PIT_FREQUENCY / 10;
+    enum ulong BLINK_MS = 100;
 
-    ulong now = pitTimeTicks();
-    ulong nextInput = now;
-    ulong nextBlink = now + BLINK_TICKS;
+    ulong nextBlink = nowMs() + BLINK_MS;
 
     while (1)
     {
-        now = pitTimeTicks();
-
         usbPoll();
 
-        if (now >= nextInput)
-        {
+        if (ps2State.irqMode)
+            ps2Drain();         // decode what the IRQ handler queued
+        else
             ps2Poll();
-            nextInput = now + INPUT_TICKS;
-        }
 
-        if (ps2State.keyPressed)
+        // Every key press, in order (Shift state was captured when it went down)
+        ubyte sc;
+        bool shift;
+        while (ps2PopKey(&sc, &shift))
         {
-            ps2State.keyPressed = 0;
-
             // The console hides/restores the blinking cursor around its own drawing
-            ubyte sc = ps2State.lastScancode;
             if (sc == 0x0e)
                 consoleBack();
             else if (sc == 0x1C)
                 consoleNewline();
             else
             {
-                char c = scancodeToChar(sc, ps2State.lastShift != 0);
+                char c = scancodeToChar(sc, shift);
                 if (c)
                     consolePrintChar(c);
             }
         }
 
+        ulong now = nowMs();
         if (now >= nextBlink)
         {
             consoleCursorToggle();
-            nextBlink = now + BLINK_TICKS;
+            nextBlink = now + BLINK_MS;
         }
 
         // Only touches video memory if something changed (a character, the
         // blinking cursor, or the mouse moved) - and then only those pixels
         gfxPresent();
+
+        // Sleep until the next interrupt (at most 1 ms: the timer tick). Without a
+        // working tick there would be nothing to wake us, so keep spinning then.
+        if (interruptStatus.tick)
+            cpuHlt();
     }
 }

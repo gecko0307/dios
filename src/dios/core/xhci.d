@@ -19,7 +19,7 @@ module dios.core.xhci;
 import core.volatile;
 import dios.core.mem;
 import dios.core.paging;
-import dios.core.pit;
+import dios.core.clock;
 import dios.core.stdio;
 import dios.core.mouse;
 
@@ -205,7 +205,7 @@ void xhciFence() @nogc nothrow
 
 ulong xhciDeadline(uint ms) @nogc nothrow
 {
-    return pitTimeTicks() + (cast(ulong)ms * PIT_FREQUENCY) / 1000;
+    return clockDeadlineMs(ms);
 }
 
 bool xhciWaitReg(ubyte* base, size_t off, uint mask, uint value, uint ms) @nogc nothrow
@@ -213,7 +213,7 @@ bool xhciWaitReg(ubyte* base, size_t off, uint mask, uint value, uint ms) @nogc 
     ulong dl = xhciDeadline(ms);
     while ((xhciRd32(base, off) & mask) != value)
     {
-        if (pitTimeTicks() > dl)
+        if (clockNowNs() > dl)
             return false;
     }
     return true;
@@ -600,7 +600,7 @@ bool xhciCommand(ulong param, uint control, uint* outSlot) @nogc nothrow
     while (!xhci.cmdDone)
     {
         xhciPollEvents();
-        if (pitTimeTicks() > dl)
+        if (clockNowNs() > dl)
         {
             kprintf("xHCI: command timed out\n");
             return false;
@@ -643,7 +643,7 @@ bool xhciControl(XhciUsbDevice* d, ubyte reqType, ubyte req, ushort value,
     while (!d.ep0Done)
     {
         xhciPollEvents();
-        if (pitTimeTicks() > dl)
+        if (clockNowNs() > dl)
         {
             kprintf("USB: control transfer timed out\n");
             return false;
@@ -923,7 +923,7 @@ uint xhciResetPort(uint port) @nogc nothrow
         xhciWr32(xhci.op, off, (sc & PORT_PRESERVE) | PORT_PR);
         if (!xhciWaitReg(xhci.op, off, PORT_PRC, PORT_PRC, 500))
             return 0;
-        pitDelayMs(10);
+        clockDelayMs(10);
         sc = xhciRd32(xhci.op, off);
         xhciWr32(xhci.op, off, (sc & PORT_PRESERVE) | PORT_CHANGE_BITS); // clear change bits
         sc = xhciRd32(xhci.op, off);
@@ -948,7 +948,7 @@ void xhciEnumeratePorts() @nogc nothrow
         if (!(sc & PORT_PP))
             xhciWr32(xhci.op, off, (sc & PORT_PRESERVE) | PORT_PP);
     }
-    pitDelayMs(150);
+    clockDelayMs(150);
 
     // Real hardware is slower than QEMU: if nothing is connected yet, wait
     // once more before giving up.
@@ -956,7 +956,7 @@ void xhciEnumeratePorts() @nogc nothrow
     for (uint pass = 0; pass < 2 && connected == 0; pass++)
     {
         if (pass == 1)
-            pitDelayMs(400);
+            clockDelayMs(400);
         for (uint p = 1; p <= xhci.maxPorts; p++)
             if (xhciRd32(xhci.op, OP_PORTS + (p - 1) * 0x10) & PORT_CCS)
                 connected++;

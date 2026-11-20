@@ -2,6 +2,9 @@ module dios.core.ps2;
 
 import dios.core.port;
 import dios.core.mouse;
+import dios.core.cpu;
+import dios.core.idt;
+import dios.core.ioapic;
 
 enum PS2: ubyte
 {
@@ -23,17 +26,33 @@ enum PS2: ubyte
 struct PS2State
 {
     ubyte[3] packet;
-    ubyte keyPressed;
-    ubyte lastScancode;
     ubyte extended;
     ubyte shiftMask;   // bit 0: left Shift held, bit 1: right Shift held
-    ubyte lastShift;   // was Shift held when lastScancode went down? (0/1)
     ubyte packetIndex;
     bool present;      // an 8042 controller answered
     bool mouseOk;      // the mouse acknowledged F4
+    bool irqMode;      // bytes arrive through IRQ1/IRQ12 instead of being polled
+}
+
+enum uint PS2_RING_SIZE = 256;   // power of two
+enum uint PS2_KEYQ_SIZE = 64;    // power of two
+
+// Two single-producer/single-consumer queues:
+//  - raw bytes: filled by the interrupt handler, drained by the main loop
+//  - key events: filled and drained by the main loop (a press = scancode + Shift snapshot)
+struct PS2Queues
+{
+    ushort[PS2_RING_SIZE] raw;   // (isMouse << 8) | byte
+    uint rawHead;                // written only by the IRQ handler
+    uint rawTail;                // written only by the consumer, with interrupts off
+    ushort[PS2_KEYQ_SIZE] keys;  // (shift << 8) | scancode
+    uint keyHead;
+    uint keyTail;
+    uint rawDropped;
 }
 
 __gshared PS2State ps2State;
+__gshared PS2Queues ps2q;
 
 extern(C):
 
@@ -94,6 +113,7 @@ bool ps2MouseCommand(ubyte cmd) @nogc nothrow
 bool ps2Init() @nogc nothrow
 {
     ps2State = PS2State.init;
+    ps2q = PS2Queues.init;
 
     if (kPortReadByte(PS2.StatusPort) == 0xFF)
         return false; // no controller
@@ -179,18 +199,35 @@ void ps2HandleKeyByte(ubyte sc) @nogc nothrow
 
     if (release)
         return; // key release
-    ps2State.keyPressed = 1;
-    ps2State.lastScancode = sc;
-    // Snapshot now: Shift may be released again before the main loop looks at the key.
-    ps2State.lastShift = cast(ubyte)((ps2State.shiftMask != 0) ? 1 : 0);
+
+    // Queue the press with a Shift snapshot taken now, so it stays correct even if
+    // Shift is released again before the main loop gets to it.
+    uint next = ps2q.keyHead + 1;
+    if (next - ps2q.keyTail > PS2_KEYQ_SIZE)
+        return; // queue full: drop the key
+    ushort shifted = cast(ushort)((ps2State.shiftMask != 0) ? 0x100 : 0);
+    ps2q.keys[ps2q.keyHead & (PS2_KEYQ_SIZE - 1)] = cast(ushort)(shifted | sc);
+    ps2q.keyHead = next;
 }
 
+/// Next key press, in order. `scancode` is the set-1 make code, `shift` whether Shift was down.
+bool ps2PopKey(ubyte* scancode, bool* shift) @nogc nothrow
+{
+    if (ps2q.keyTail == ps2q.keyHead)
+        return false;
+    ushort e = ps2q.keys[ps2q.keyTail & (PS2_KEYQ_SIZE - 1)];
+    ps2q.keyTail++;
+    *scancode = cast(ubyte)(e & 0xFF);
+    *shift = (e & 0x100) != 0;
+    return true;
+}
+
+// Polled mode: drain what is there instead of one byte per call.
 void ps2Poll() @nogc nothrow
 {
     if (!ps2State.present)
         return;
 
-    // Drain what is there instead of one byte per call.
     for (uint n = 0; n < 16; n++)
     {
         ubyte status = kPortReadByte(PS2.StatusPort);
@@ -202,4 +239,81 @@ void ps2Poll() @nogc nothrow
         else
             ps2HandleKeyByte(val);
     }
+}
+
+// IRQ1 and IRQ12 handler. Runs with interrupts off: only moves bytes into the
+// raw ring - decoding (and anything that draws) happens in the main loop.
+extern(C) void ps2Irq(InterruptFrame* f) @nogc nothrow
+{
+    for (uint n = 0; n < 16; n++)
+    {
+        ubyte status = kPortReadByte(PS2.StatusPort);
+        if (!(status & 0x01))
+            return;
+        ubyte val = kPortReadByte(PS2.DataPort);
+        uint next = ps2q.rawHead + 1;
+        if (next - ps2q.rawTail > PS2_RING_SIZE)
+        {
+            ps2q.rawDropped++;
+            continue;
+        }
+        ps2q.raw[ps2q.rawHead & (PS2_RING_SIZE - 1)] = cast(ushort)(((status & 0x20) ? 0x100 : 0) | val);
+        ps2q.rawHead = next;
+    }
+}
+
+// Decode everything the IRQ handler has queued. Call from the main loop.
+void ps2Drain() @nogc nothrow
+{
+    for (;;)
+    {
+        ulong flags = cpuIrqSave();         // the IRQ handler owns rawHead; keep it out while we look
+        bool have = ps2q.rawTail != ps2q.rawHead;
+        ushort e = 0;
+        if (have)
+        {
+            e = ps2q.raw[ps2q.rawTail & (PS2_RING_SIZE - 1)];
+            ps2q.rawTail++;
+        }
+        cpuIrqRestore(flags);
+
+        if (!have)
+            return;
+        if (e & 0x100)
+            ps2HandleMouseByte(cast(ubyte)(e & 0xFF));
+        else
+            ps2HandleKeyByte(cast(ubyte)(e & 0xFF));
+    }
+}
+
+/// Switch from polling to interrupts: route IRQ1/IRQ12 through the IOAPIC to
+/// `destApicId`, then let the 8042 raise them. Returns false (and stays in polled
+/// mode) if the keyboard line cannot be routed.
+bool ps2StartIrq(uint destApicId) @nogc nothrow
+{
+    if (!ps2State.present)
+        return false;
+
+    int kbdGsi = ioapicRouteIsa(1, VEC_KEYBOARD, destApicId);
+    if (kbdGsi < 0)
+        return false;
+    int mouseGsi = ioapicRouteIsa(12, VEC_MOUSE, destApicId);
+
+    irqRegister(VEC_KEYBOARD, &ps2Irq);
+    irqRegister(VEC_MOUSE, &ps2Irq);
+
+    // Controller configuration byte: bit 0 = IRQ1 enable, bit 1 = IRQ12 enable.
+    if (!ps2WriteCommand(PS2.CmdReadConfig))
+        return false;
+    int cfg = ps2ReadData();
+    if (cfg < 0)
+        return false;
+    cfg |= 1;
+    if (mouseGsi >= 0 && ps2State.mouseOk)
+        cfg |= 2;
+    ps2Flush();
+    ps2State.irqMode = true;            // from here on the IRQ handler owns the data port
+    ps2WriteCommand(PS2.CmdWriteConfig);
+    ps2WriteData(cast(ubyte)cfg);
+    return true;
 }
