@@ -14,13 +14,13 @@ struct ConsoleState
     uint x;
     uint y;
     uint width;
-    uint height;     // visible height of the text area in pixels (a whole number of lines)
+    uint height; // visible height of the text area in pixels (a whole number of lines)
     uint print_x;
     uint print_y;
     uint h_stride;
     uint v_stride;
     uint clear_color;
-    bool cursorOn;   // the blinking text cursor is currently XOR-ed into the scene
+    bool cursorOn; // the blinking text cursor is currently XOR-ed into the scene
 }
 
 __gshared ConsoleState console;
@@ -368,7 +368,7 @@ void consolePrintStringFmt(string fmt, va_list ap) @nogc nothrow
     }
 }
 
-// VGA text mode fallback
+// Legacy VGA text mode
 struct VGAConsole
 {
     public static:

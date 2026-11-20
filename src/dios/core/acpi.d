@@ -2,7 +2,7 @@ module dios.core.acpi;
 
 /**
  * Minimal ACPI table reader: RSDP -> XSDT/RSDT -> MADT (interrupt controller
- * layout) and HPET (high precision timer). No AML interpreter - we only need
+ * layout) and HPET (high precision timer). No AML interpreter - DIOS only needs
  * static tables.
  *
  * Every table is mapped explicitly (read-only, write-back like the HHDM) instead
@@ -32,7 +32,7 @@ struct AcpiIso
 {
     ubyte source;
     uint gsi;
-    ushort flags;   // bits 0-1 polarity, bits 2-3 trigger (0 = bus default)
+    ushort flags; // bits 0-1 polarity, bits 2-3 trigger (0 = bus default)
 }
 
 struct AcpiInfo
@@ -40,9 +40,9 @@ struct AcpiInfo
     bool valid;
     bool madtFound;
     bool hpetFound;
-    bool pcatCompat;        // dual 8259 present
+    bool pcatCompat; // dual 8259 present
     ulong lapicAddr;
-    uint cpuCount;          // enabled / online-capable processors
+    uint cpuCount; // enabled / online-capable processors
     uint numIoApics;
     AcpiIoApic[ACPI_MAX_IOAPICS] ioapics;
     uint numIsos;
@@ -175,7 +175,7 @@ void acpiParseHpet(const(ubyte)* t, uint len) @nogc nothrow
     if (len < 56)
         return;
     // Generic Address Structure at offset 40: [space id][width][offset][access][address:8]
-    if (t[40] != 0)                // 0 = system memory; I/O-space HPETs do not exist in practice
+    if (t[40] != 0) // 0 = system memory; I/O-space HPETs do not exist in practice
         return;
     ulong addr = acpiRd64(t, 44);
     if (addr == 0)
@@ -186,7 +186,7 @@ void acpiParseHpet(const(ubyte)* t, uint len) @nogc nothrow
 
 // Decode an AML PkgLength. `offset` points to its lead byte.
 bool acpiAmlPkgLength(const(ubyte)* aml, uint amlLen, uint offset,
-                      uint* value, uint* encodedBytes) @nogc nothrow
+    uint* value, uint* encodedBytes) @nogc nothrow
 {
     if (offset >= amlLen)
         return false;
@@ -214,7 +214,7 @@ bool acpiAmlPkgLength(const(ubyte)* aml, uint amlLen, uint offset,
 
 // Read the small integer encodings used by the standard _S5_ package.
 bool acpiAmlInteger(const(ubyte)* aml, uint amlLen, uint* offset,
-                    ubyte* value) @nogc nothrow
+    ubyte* value) @nogc nothrow
 {
     if (*offset >= amlLen)
         return false;

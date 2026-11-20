@@ -1,12 +1,12 @@
 module dios.core.clock;
 
 /**
- * Time keeping. Replaces the PIT-based pitTimeTicks().
+ * Time keeping. Replaces the legacy pitTimeTicks().
  *
  *  - Monotonic nanosecond clock: the HPET main counter (ACPI HPET table).
- *    If the machine has no HPET we fall back to the PIT, exactly like the old
- *    code did (and keep it fed from the tick interrupt, so its 16-bit counter
- *    cannot silently wrap twice between two reads).
+ *    If the machine has no HPET we fall back to the PIT (and keep it fed
+ *    from the tick interrupt, so its 16-bit counter cannot silently wrap
+ *    twice between two reads).
  *  - A 1 kHz heartbeat from the LAPIC timer. It wakes the main loop out of HLT
  *    and is the future scheduler tick. See lapic.d for how it is calibrated -
  *    against this clock.

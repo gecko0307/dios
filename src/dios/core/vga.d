@@ -1,5 +1,13 @@
 module dios.core.vga;
 
+/*
+ * VGA text mode.
+ * It is usually not used on modern machines. Bootloaders
+ * typically provide a linear framebuffer (UEFI GOP or VESA/VBE).
+ * DIOS stdio aka the kernel shell, however, supports VGA text mode
+ * as a legacy backend inherited from the 32-bit era.
+ */
+
 import dios.core.port;
 
 enum VGAColor
@@ -27,7 +35,6 @@ enum VGAColor
 
 extern(C):
 
-// This is the true interface to the console
 __gshared struct VGAText
 {
     static public __gshared:
