@@ -210,7 +210,7 @@ void run() @nogc nothrow
         // Every key press, in order (Shift state was captured when it went down)
         ubyte sc;
         bool shift;
-        while (ps2PopKey(&sc, &shift))
+        while (keyPop(&sc, &shift))
         {
             shellHandleKey(sc, shift);
         }

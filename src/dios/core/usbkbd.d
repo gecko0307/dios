@@ -1,0 +1,146 @@
+module dios.core.usbkbd;
+
+/**
+ * USB HID boot-protocol keyboard: turns 8-byte input reports into the same key
+ * events the PS/2 driver produces (see keyboard.d), so the shell does not care
+ * which kind of keyboard is typing.
+ *
+ * A boot report is:  [0] modifier bits  [1] reserved  [2..7] up to six key usages.
+ * A report lists the keys currently held, not key events, so a press is a
+ * usage that was absent from the previous report. USB keyboards do not
+ * auto-repeat on their own (PS/2 ones do), so repeat is done here in software
+ * from usbKbdRepeatTick(), which the main loop reaches through usbPoll().
+ *
+ * No hardware access in this file: the xHCI driver hands in already-copied reports.
+ */
+import dios.core.clock;
+import dios.core.keyboard;
+
+enum uint USBKBD_REPEAT_DELAY_MS  = 500;   // hold time before repeating starts
+enum uint USBKBD_REPEAT_PERIOD_MS = 40;    // 25 characters per second
+
+// HID usage (keyboard page 0x07) -> PS/2 scan code set 1 make code.
+// Bit 7 set marks an "extended" key (E0-prefixed on PS/2). 0 = no mapping.
+immutable ubyte[0x65] USB_TO_SCANCODE = [
+    0x00, 0x00, 0x00, 0x00, 0x1E, 0x30, 0x2E, 0x20, 0x12, 0x21, 0x22, 0x23,
+    0x17, 0x24, 0x25, 0x26, 0x32, 0x31, 0x18, 0x19, 0x10, 0x13, 0x1F, 0x14,
+    0x16, 0x2F, 0x11, 0x2D, 0x15, 0x2C, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+    0x08, 0x09, 0x0A, 0x0B, 0x1C, 0x01, 0x0E, 0x0F, 0x39, 0x0C, 0x0D, 0x1A,
+    0x1B, 0x2B, 0x2B, 0x27, 0x28, 0x29, 0x33, 0x34, 0x35, 0x3A, 0x3B, 0x3C,
+    0x3D, 0x3E, 0x3F, 0x40, 0x41, 0x42, 0x43, 0x44, 0x57, 0x58, 0xB7, 0x46,
+    0x00, 0xD2, 0xC7, 0xC9, 0xD3, 0xCF, 0xD1, 0xCD, 0xCB, 0xD0, 0xC8, 0x45,
+    0xB5, 0x37, 0x4A, 0x4E, 0x9C, 0x4F, 0x50, 0x51, 0x4B, 0x4C, 0x4D, 0x47,
+    0x48, 0x49, 0x52, 0x53, 0x56
+];
+
+struct UsbKbdState
+{
+    ubyte prevMods;
+    ubyte[6] prevKeys;
+}
+
+// The key that is auto-repeating: the most recently pressed one that is still
+// held. One set of repeat state shared by all USB keyboards.
+__gshared ubyte repeatUsage;
+__gshared bool repeatShift;
+__gshared ulong repeatAtNs;
+
+extern(C):
+
+bool usbKbdMap(ubyte usage, ubyte* scancode, bool* extended) @nogc nothrow
+{
+    if (usage >= USB_TO_SCANCODE.length)
+        return false;
+    ubyte v = USB_TO_SCANCODE[usage];
+    if (v == 0)
+        return false;
+    *scancode = cast(ubyte)(v & 0x7F);
+    *extended = (v & 0x80) != 0;
+    return true;
+}
+
+bool usbKbdPress(ubyte usage, bool shift) @nogc nothrow
+{
+    ubyte sc;
+    bool ext;
+    if (!usbKbdMap(usage, &sc, &ext))
+        return false;
+    keyPush(sc, shift, ext);
+    return true;
+}
+
+bool usbKbdHas(const(ubyte)* keys, uint n, ubyte usage) @nogc nothrow
+{
+    for (uint i = 0; i < n; i++)
+        if (keys[i] == usage)
+            return true;
+    return false;
+}
+
+/// Stop auto-repeat (device gone, or its transfers failed while a key was down).
+void usbKbdStop(UsbKbdState* st) @nogc nothrow
+{
+    *st = UsbKbdState.init;
+    repeatUsage = 0;
+}
+
+/// Process one input report. `rpt` is the copied report, `got` its length in bytes.
+void usbKbdProcessReport(UsbKbdState* st, const(ubyte)* rpt, uint got) @nogc nothrow
+{
+    if (got < 3)
+        return;                         // not even one key slot
+
+    ubyte[6] keys;
+    for (uint i = 0; i < 6; i++)
+        keys[i] = (2 + i < got) ? rpt[2 + i] : cast(ubyte)0;
+
+    // 0x01 = ErrorRollOver: more keys down than the report can hold. The
+    // report says nothing useful, so keep the previous state.
+    if (keys[0] == 0x01)
+        return;
+
+    ubyte mods = rpt[0];
+    bool shift = (mods & 0x22) != 0;    // left (bit 1) or right (bit 5) Shift
+
+    // Presses: usages that were not held in the previous report.
+    // (Usages 1..3 are error codes, 0 is an empty slot.)
+    for (uint i = 0; i < 6; i++)
+    {
+        ubyte k = keys[i];
+        if (k <= 3 || usbKbdHas(st.prevKeys.ptr, 6, k))
+            continue;
+        if (usbKbdPress(k, shift))
+        {
+            repeatUsage = k;
+            repeatShift = shift;
+            repeatAtNs = clockNowNs() + cast(ulong)USBKBD_REPEAT_DELAY_MS * 1_000_000UL;
+        }
+    }
+
+    // The repeating key was let go -> stop. (If other keys are still down, PC
+    // keyboards do not resume repeating them either.)
+    if (repeatUsage != 0)
+    {
+        if (!usbKbdHas(keys.ptr, 6, repeatUsage))
+            repeatUsage = 0;
+        else
+            repeatShift = shift;        // Shift may have changed while holding
+    }
+
+    for (uint i = 0; i < 6; i++)
+        st.prevKeys[i] = keys[i];
+    st.prevMods = mods;
+}
+
+/// Emit auto-repeat events. Cheap when nothing is held: one load and a compare.
+void usbKbdRepeatTick() @nogc nothrow
+{
+    if (repeatUsage == 0)
+        return;
+    ulong now = clockNowNs();
+    if (now < repeatAtNs)
+        return;
+    usbKbdPress(repeatUsage, repeatShift);
+    // No catch-up if the main loop was busy: next repeat is one period from now.
+    repeatAtNs = now + cast(ulong)USBKBD_REPEAT_PERIOD_MS * 1_000_000UL;
+}

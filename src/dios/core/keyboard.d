@@ -2,6 +2,27 @@ module dios.core.keyboard;
 
 import dios.core.port;
 
+// ---------------------------------------------------------------------------
+// Key events. PS/2 and USB keyboards both feed this one queue; the main loop
+// drains it. Everything here runs in main-loop context (the PS/2 IRQ handler
+// only queues raw bytes, USB is polled), so no locking is needed.
+//
+// An event is a set-1 make code plus two flags: whether Shift was held when the
+// key went down, and whether the key is "extended" (E0-prefixed on PS/2:
+// arrows, Home/End/PgUp/PgDn/Insert/Delete, keypad Enter and "/", right Ctrl/Alt).
+// ---------------------------------------------------------------------------
+enum uint KEYQ_SIZE = 64;       // power of two
+
+struct KeyQueue
+{
+    ushort[KEYQ_SIZE] keys;     // (extended << 9) | (shift << 8) | scancode
+    uint head;
+    uint tail;
+    uint dropped;
+}
+
+__gshared KeyQueue keyQueue;
+
 extern(C):
 
 void kRestartKeyboard() @nogc nothrow
@@ -112,4 +133,51 @@ ubyte kKbdGetKey() @nogc nothrow
     while ((kPortReadByte(0x64) & 1) == 0)
         asm @nogc nothrow { hlt; }
     return kPortReadByte(0x60);
+}
+
+/// Queue a key press. Returns false (and counts a drop) if the queue is full.
+bool keyPush(ubyte scancode, bool shift, bool extended) @nogc nothrow
+{
+    uint next = keyQueue.head + 1;
+    if (next - keyQueue.tail > KEYQ_SIZE)
+    {
+        keyQueue.dropped++;
+        return false;
+    }
+    keyQueue.keys[keyQueue.head & (KEYQ_SIZE - 1)] =
+        cast(ushort)(scancode | (shift ? 0x100 : 0) | (extended ? 0x200 : 0));
+    keyQueue.head = next;
+    return true;
+}
+
+/// Next key press, in order, with everything the event carries.
+bool keyPopEx(ubyte* scancode, bool* shift, bool* extended) @nogc nothrow
+{
+    if (keyQueue.tail == keyQueue.head)
+        return false;
+    ushort e = keyQueue.keys[keyQueue.tail & (KEYQ_SIZE - 1)];
+    keyQueue.tail++;
+    *scancode = cast(ubyte)(e & 0xFF);
+    *shift = (e & 0x100) != 0;
+    *extended = (e & 0x200) != 0;
+    return true;
+}
+
+/// Text-input view of the queue: like keyPopEx, but extended keys are skipped
+/// except keypad Enter (0x1C) and keypad "/" (0x35), which behave like their
+/// plain counterparts. (Arrows, PrintScreen etc. must not turn into the
+/// keypad digit or "*" that shares their code.)
+bool keyPop(ubyte* scancode, bool* shift) @nogc nothrow
+{
+    ubyte sc;
+    bool sh, ext;
+    while (keyPopEx(&sc, &sh, &ext))
+    {
+        if (ext && sc != 0x1C && sc != 0x35)
+            continue;
+        *scancode = sc;
+        *shift = sh;
+        return true;
+    }
+    return false;
 }

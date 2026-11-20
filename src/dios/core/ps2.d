@@ -1,6 +1,7 @@
 module dios.core.ps2;
 
 import dios.core.port;
+import dios.core.keyboard;
 import dios.core.mouse;
 import dios.core.cpu;
 import dios.core.idt;
@@ -35,19 +36,15 @@ struct PS2State
 }
 
 enum uint PS2_RING_SIZE = 256;   // power of two
-enum uint PS2_KEYQ_SIZE = 64;    // power of two
 
-// Two single-producer/single-consumer queues:
-//  - raw bytes: filled by the interrupt handler, drained by the main loop
-//  - key events: filled and drained by the main loop (a press = scancode + Shift snapshot)
+// Single-producer/single-consumer ring of raw bytes: filled by the interrupt
+// handler, drained by the main loop. Decoded key presses go to the shared key
+// queue in keyboard.d.
 struct PS2Queues
 {
     ushort[PS2_RING_SIZE] raw;   // (isMouse << 8) | byte
     uint rawHead;                // written only by the IRQ handler
     uint rawTail;                // written only by the consumer, with interrupts off
-    ushort[PS2_KEYQ_SIZE] keys;  // (shift << 8) | scancode
-    uint keyHead;
-    uint keyTail;
     uint rawDropped;
 }
 
@@ -201,25 +198,8 @@ void ps2HandleKeyByte(ubyte sc) @nogc nothrow
         return; // key release
 
     // Queue the press with a Shift snapshot taken now, so it stays correct even if
-    // Shift is released again before the main loop gets to it.
-    uint next = ps2q.keyHead + 1;
-    if (next - ps2q.keyTail > PS2_KEYQ_SIZE)
-        return; // queue full: drop the key
-    ushort shifted = cast(ushort)((ps2State.shiftMask != 0) ? 0x100 : 0);
-    ps2q.keys[ps2q.keyHead & (PS2_KEYQ_SIZE - 1)] = cast(ushort)(shifted | sc);
-    ps2q.keyHead = next;
-}
-
-/// Next key press, in order. `scancode` is the set-1 make code, `shift` whether Shift was down.
-bool ps2PopKey(ubyte* scancode, bool* shift) @nogc nothrow
-{
-    if (ps2q.keyTail == ps2q.keyHead)
-        return false;
-    ushort e = ps2q.keys[ps2q.keyTail & (PS2_KEYQ_SIZE - 1)];
-    ps2q.keyTail++;
-    *scancode = cast(ubyte)(e & 0xFF);
-    *shift = (e & 0x100) != 0;
-    return true;
+    // Shift is released again before the main loop gets to it
+    keyPush(sc, ps2State.shiftMask != 0, ext);
 }
 
 // Polled mode: drain what is there instead of one byte per call.

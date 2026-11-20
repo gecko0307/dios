@@ -1,7 +1,7 @@
 module dios.core.xhci;
 
 /**
- * xHCI (USB 3.x host controller) driver + USB HID boot-protocol mouse.
+ * xHCI (USB 3.x host controller) driver + USB HID boot-protocol mouse and keyboard.
  *
  * Scope: polling only (no interrupts), devices on ROOT ports only (no hubs),
  * no hot-plug. The flow is the textbook one from the xHCI spec (rev 1.2):
@@ -11,6 +11,7 @@ module dios.core.xhci;
  *   -> control transfers (descriptors) -> Set Configuration / Set Protocol
  *   -> Configure Endpoint -> queue Normal TRBs on the interrupt-IN endpoint
  *   -> every completed TRB is one mouse report -> mouseMove()
+ *      (or one keyboard report -> usbkbd.d -> key events, see XhciKbd)
  *
  * All DMA memory comes from the PMM below 4 GiB, so it works whether or not
  * the controller supports 64-bit addressing. Memory shared with the
@@ -22,6 +23,7 @@ import dios.core.paging;
 import dios.core.clock;
 import dios.core.stdio;
 import dios.core.mouse;
+import dios.core.usbkbd;
 
 // constants
 
@@ -29,6 +31,8 @@ enum uint XHCI_MAX_SLOTS = 8;       // we only enable this many device slots
 enum uint XHCI_RING_TRBS = 256;     // one 4 KiB page per ring
 enum uint XHCI_RPT_BUFS = 16;       // report buffers kept queued on the mouse endpoint
 enum uint XHCI_RPT_STRIDE = 64;
+// Scratch page layout: [0,1024) control data, [1024,2048) mouse reports, [2048,3072) keyboard reports
+enum uint XHCI_KBD_BUF_OFF = 2048;
 
 enum : uint
 {
@@ -108,6 +112,24 @@ struct HidMouseLayout
     uint btnCount;
 }
 
+// A HID boot keyboard interface. Separate from the mouse fields in
+// XhciUsbDevice so that a composite device (keyboard + mouse behind one
+// receiver) can run both, each with its own interrupt endpoint and ring.
+struct XhciKbd
+{
+    bool found;                 // a boot keyboard interface was seen in the configuration
+    bool active;                // endpoint configured and transfers queued
+    ubyte ifaceNum;
+    ubyte intEpAddr;
+    uint  intMps;
+    ubyte intInterval;
+    ubyte intDci;
+    uint reportLen;
+    uint rptHead;               // reports completed so far (selects the buffer)
+    XhciRing intRing;
+    UsbKbdState state;          // previous report, for press detection
+}
+
 struct XhciUsbDevice
 {
     bool present;
@@ -129,6 +151,8 @@ struct XhciUsbDevice
     ulong ep0Wait;
 
     // configuration descriptor findings
+    bool configured;            // Set Configuration has been sent
+    XhciKbd kbd;
     ubyte cfgValue;
     ubyte ifaceNum;
     ubyte intEpAddr;
@@ -509,6 +533,35 @@ void xhciHandleMouseEvent(XhciUsbDevice* d, uint code, uint residual) @nogc noth
     xhciRingDoorbell(d.slotId, d.intDci);
 }
 
+void xhciHandleKeyboardEvent(XhciUsbDevice* d, uint code, uint residual) @nogc nothrow
+{
+    XhciKbd* k = &d.kbd;
+    if (code != CC_SUCCESS && code != CC_SHORT_PACKET)
+    {
+        kprintf("USB keyboard: transfer error %u, stopping\n", code);
+        k.active = false;
+        usbKbdStop(&k.state);       // also ends any auto-repeat
+        return;
+    }
+
+    uint buf = k.rptHead % XHCI_RPT_BUFS;
+    ulong bufOff = XHCI_KBD_BUF_OFF + cast(ulong)buf * XHCI_RPT_STRIDE;
+    uint len = k.reportLen;
+    uint got = residual <= len ? len - residual : 0;
+
+    // Copy out of DMA memory (volatile reads), then decode.
+    ubyte[8] rpt;
+    uint n = got > 8 ? 8 : got;
+    for (uint i = 0; i < n; i++)
+        rpt[i] = volatileLoad(d.dma + bufOff + i);
+    usbKbdProcessReport(&k.state, rpt.ptr, n);
+
+    // Completions arrive in queue order, so this buffer is free again: re-queue it.
+    k.rptHead++;
+    xhciRingPush(&k.intRing, d.dmaPhys + bufOff, k.reportLen, (TRB_NORMAL << 10) | TRB_IOC | TRB_ISP);
+    xhciRingDoorbell(d.slotId, k.intDci);
+}
+
 void xhciHandleEvent(ulong param, uint status, uint control) @nogc nothrow
 {
     uint type = (control >> 10) & 0x3F;
@@ -541,6 +594,10 @@ void xhciHandleEvent(ulong param, uint status, uint control) @nogc nothrow
         else if (d.mouseActive && epId == d.intDci)
         {
             xhciHandleMouseEvent(d, code, status & 0xFFFFFF);
+        }
+        else if (d.kbd.active && epId == d.kbd.intDci)
+        {
+            xhciHandleKeyboardEvent(d, code, status & 0xFFFFFF);
         }
     }
     // Port status change and everything else: ignored (no hot-plug yet).
@@ -585,6 +642,7 @@ void xhciPollEvents() @nogc nothrow
 public void usbPoll() @nogc nothrow
 {
     xhciPollEvents();
+    usbKbdRepeatTick();     // USB keyboards do not auto-repeat by themselves
 }
 
 // commands
@@ -690,6 +748,7 @@ void xhciParseConfig(XhciUsbDevice* d, ubyte* buf, uint len) @nogc nothrow
 {
     d.cfgValue = volatileLoad(buf + 5);
     bool inMouse = false;
+    bool inKbd = false;
     uint i = 0;
     while (i + 2 <= len)
     {
@@ -710,6 +769,9 @@ void xhciParseConfig(XhciUsbDevice* d, ubyte* buf, uint len) @nogc nothrow
             inMouse = (alt == 0 && cls == 3 && sub == 1 && prot == 2 && !d.hasMouse);
             if (inMouse)
                 d.ifaceNum = volatileLoad(buf + i + 2);
+            inKbd = (alt == 0 && cls == 3 && sub == 1 && prot == 1 && !d.kbd.found);
+            if (inKbd)
+                d.kbd.ifaceNum = volatileLoad(buf + i + 2);
         }
         else if (dtype == 0x21 && dlen >= 9 && inMouse)   // HID descriptor
         {
@@ -727,6 +789,19 @@ void xhciParseConfig(XhciUsbDevice* d, ubyte* buf, uint len) @nogc nothrow
                 d.intInterval = volatileLoad(buf + i + 6);
                 d.hasMouse = true;
                 inMouse = false;
+            }
+        }
+        else if (dtype == 5 && dlen >= 7 && inKbd)     // endpoint of the keyboard interface
+        {
+            ubyte addr = volatileLoad(buf + i + 2);
+            ubyte attr = volatileLoad(buf + i + 3);
+            if ((addr & 0x80) && (attr & 3) == 3)       // interrupt IN
+            {
+                d.kbd.intEpAddr = addr;
+                d.kbd.intMps = (volatileLoad(buf + i + 4) | (volatileLoad(buf + i + 5) << 8)) & 0x7FF;
+                d.kbd.intInterval = volatileLoad(buf + i + 6);
+                d.kbd.found = true;
+                inKbd = false;
             }
         }
         i += dlen;
@@ -757,9 +832,20 @@ uint xhciEncodeInterval(uint speed, uint bInterval) @nogc nothrow
 
 // enumeration
 
+// Set Configuration, once per device (a composite device sets up several HID interfaces).
+bool xhciEnsureConfigured(XhciUsbDevice* d) @nogc nothrow
+{
+    if (d.configured)
+        return true;
+    if (!xhciControl(d, 0x00, 9, d.cfgValue, 0, 0, 0))
+        return false;
+    d.configured = true;
+    return true;
+}
+
 bool xhciSetupMouse(XhciUsbDevice* d) @nogc nothrow
 {
-    if (!xhciControl(d, 0x00, 9, d.cfgValue, 0, 0, 0))       // Set Configuration
+    if (!xhciEnsureConfigured(d))
         return false;
 
     // Preferred: read the HID report descriptor and decode reports with it.
@@ -813,6 +899,53 @@ bool xhciSetupMouse(XhciUsbDevice* d) @nogc nothrow
     for (uint i = 0; i < XHCI_RPT_BUFS; i++)
         xhciRingPush(&d.intRing, d.dmaPhys + 1024 + cast(ulong)i * XHCI_RPT_STRIDE,
                      d.reportLen, (TRB_NORMAL << 10) | TRB_IOC | TRB_ISP);
+    xhciRingDoorbell(d.slotId, dci);
+    return true;
+}
+
+// Bring up a HID boot keyboard: force the boot protocol (fixed 8-byte reports, no
+// report descriptor to parse), add its interrupt endpoint, queue report buffers.
+bool xhciSetupKeyboard(XhciUsbDevice* d) @nogc nothrow
+{
+    XhciKbd* k = &d.kbd;
+
+    if (!xhciEnsureConfigured(d))
+        return false;
+
+    // Devices start in report protocol; boot protocol guarantees the layout
+    // usbkbd.d decodes. Not fatal if refused: most keyboards use that layout anyway.
+    if (!xhciControl(d, 0x21, 0x0B, 0, k.ifaceNum, 0, 0))
+        kprintf("  keyboard: Set Protocol (boot) refused, assuming the boot layout\n");
+
+    if (!xhciRingInit(&k.intRing))
+        return false;
+
+    uint dci = (k.intEpAddr & 0x0F) * 2 + 1;     // IN endpoint
+    k.intDci = cast(ubyte)dci;
+    k.reportLen = k.intMps > XHCI_RPT_STRIDE ? XHCI_RPT_STRIDE : k.intMps;
+
+    // Configure Endpoint: add the keyboard endpoint. If the mouse endpoint of the
+    // same device is already running, the slot's context-entry count must still cover it.
+    uint maxDci = dci;
+    if (d.mouseActive && d.intDci > maxDci)
+        maxDci = d.intDci;
+
+    memset(d.inCtx, 0, 4096);
+    xhciCtxW32(d.inCtx, 0, 1, 1 | (1u << dci));
+    xhciCtxW32(d.inCtx, 1, 0, (maxDci << 27) | (cast(uint)d.speed << 20));
+    xhciCtxW32(d.inCtx, 1, 1, cast(uint)d.port << 16);
+    xhciFillEpCtx(d, dci, 7 /* interrupt IN */, k.intMps,
+                  xhciEncodeInterval(d.speed, k.intInterval), &k.intRing, k.intMps);
+
+    if (!xhciCommand(d.inCtxPhys, (TRB_CMD_CONFIGURE_EP << 10) | (cast(uint)d.slotId << 24), null))
+        return false;
+
+    usbKbdStop(&k.state);
+    k.active = true;
+    k.rptHead = 0;
+    for (uint i = 0; i < XHCI_RPT_BUFS; i++)
+        xhciRingPush(&k.intRing, d.dmaPhys + XHCI_KBD_BUF_OFF + cast(ulong)i * XHCI_RPT_STRIDE,
+                     k.reportLen, (TRB_NORMAL << 10) | TRB_IOC | TRB_ISP);
     xhciRingDoorbell(d.slotId, dci);
     return true;
 }
@@ -895,21 +1028,38 @@ bool xhciSetupDevice(uint port, uint speed) @nogc nothrow
         return false;
     xhciParseConfig(d, d.dma, total);
 
-    if (!d.hasMouse)
+    if (!d.hasMouse && !d.kbd.found)
     {
-        kprintf("  not a HID boot mouse, ignoring\n");
+        kprintf("  not a HID boot mouse or keyboard, ignoring\n");
         return true;
     }
-    kprintf("  HID boot mouse: iface %u, ep %x, mps %u, interval %u\n",
-            cast(uint)d.ifaceNum, cast(uint)d.intEpAddr, d.intMps, cast(uint)d.intInterval);
 
-    if (!xhciSetupMouse(d))
+    bool ok = true;
+    if (d.hasMouse)
     {
-        kprintf("  mouse setup failed\n");
-        return false;
+        kprintf("  HID boot mouse: iface %u, ep %x, mps %u, interval %u\n",
+                cast(uint)d.ifaceNum, cast(uint)d.intEpAddr, d.intMps, cast(uint)d.intInterval);
+        if (xhciSetupMouse(d))
+            kprintf("  mouse running\n");
+        else
+        {
+            kprintf("  mouse setup failed\n");
+            ok = false;
+        }
     }
-    kprintf("  mouse running\n");
-    return true;
+    if (d.kbd.found)
+    {
+        kprintf("  HID boot keyboard: iface %u, ep %x, mps %u, interval %u\n",
+                cast(uint)d.kbd.ifaceNum, cast(uint)d.kbd.intEpAddr, d.kbd.intMps, cast(uint)d.kbd.intInterval);
+        if (xhciSetupKeyboard(d))
+            kprintf("  keyboard running\n");
+        else
+        {
+            kprintf("  keyboard setup failed\n");
+            ok = false;
+        }
+    }
+    return ok;
 }
 
 // Reset a port and return its speed id, or 0 if no enabled device results.
@@ -987,7 +1137,15 @@ public bool xhciMouseRunning() @nogc nothrow
     return false;
 }
 
-// Stop the controller (used when it has no mouse so the next one can be tried).
+public bool xhciKeyboardRunning() @nogc nothrow
+{
+    for (uint s = 1; s <= XHCI_MAX_SLOTS; s++)
+        if (xhci.devs[s].kbd.active)
+            return true;
+    return false;
+}
+
+// Stop the controller (used when it has nothing useful so the next one can be tried).
 public void xhciShutdown() @nogc nothrow
 {
     if (!xhci.running)

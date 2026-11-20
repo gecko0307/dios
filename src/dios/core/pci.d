@@ -31,6 +31,8 @@ enum ushort PCI_CMD_MEMORY = 0x2;
 enum ushort PCI_CMD_BUSMASTER = 0x4;
 
 __gshared bool xhciFound = false;
+// First xHCI controller that had a mouse but no keyboard: restarted at the end of the scan if no keyboard turns up
+__gshared void* xhciMouseOnlyRegs = null;
 
 extern(C):
 
@@ -175,7 +177,7 @@ void pciCheckFunction(uint bus, uint device, uint func) @nogc nothrow
         cast(uint)vendorID, cast(uint)deviceID);
 
     if (progIf != 0x30 || xhciFound)
-        return; // stop once one controller has a mouse
+        return; // stop once one controller has a keyboard
 
     ulong phys, size;
     if (!pciGetBar0(bus, device, func, &phys, &size))
@@ -196,14 +198,25 @@ void pciCheckFunction(uint bus, uint device, uint func) @nogc nothrow
         return;
     }
     // Machines often have several xHCI controllers (e.g. a Thunderbolt one
-    // plus the PCH one with the real USB-A ports). Try each in turn; keep
-    // the first one that ends up with a working mouse, stop the others.
+    // plus the PCH one with the real USB-A ports). The driver runs one
+    // controller at a time, so try each in turn. A controller with a keyboard
+    // wins (the shell needs one); a mouse-only controller is remembered and
+    // restarted after the scan if no keyboard shows up anywhere.
     xhciInit(regs);
-    if (xhciMouseRunning())
+    if (xhciKeyboardRunning())
+    {
         xhciFound = true;
+    }
+    else if (xhciMouseRunning())
+    {
+        kprintf("  USB mouse but no keyboard on this controller, looking further\n");
+        if (xhciMouseOnlyRegs is null)
+            xhciMouseOnlyRegs = regs;
+        xhciShutdown();
+    }
     else
     {
-        kprintf("  no USB mouse on this controller\n");
+        kprintf("  no USB keyboard or mouse on this controller\n");
         xhciShutdown();
     }
 }
@@ -222,5 +235,16 @@ void pciScan() @nogc nothrow
             for (uint func = 0; func < numFuncs; func++)
                 pciCheckFunction(bus, device, func);
         }
+    }
+
+    // No USB keyboard anywhere: bring back the controller that had the mouse.
+    if (!xhciFound && xhciMouseOnlyRegs !is null)
+    {
+        kprintf("USB: no keyboard found, restarting the controller with the mouse\n");
+        xhciInit(xhciMouseOnlyRegs);
+        if (xhciMouseRunning())
+            xhciFound = true;
+        else
+            xhciShutdown();
     }
 }
