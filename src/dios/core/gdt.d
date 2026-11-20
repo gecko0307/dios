@@ -1,7 +1,7 @@
 module dios.core.gdt;
 
 /**
- * Our own GDT + TSS (the bootloader's GDT is not ours to rely on).
+ * Our own GDT + TSS).
  *
  *   0x00 null
  *   0x08 kernel code (64-bit)      0x10 kernel data

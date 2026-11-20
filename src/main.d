@@ -126,7 +126,7 @@ void* allocBuffer(size_t bytes) @nogc nothrow
 
 __gshared Framebuffer sceneBuffer;
 
-// Milliseconds since boot: the tick counter if the timer interrupt runs, else the clock.
+// Milliseconds since boot: the tick counter if the timer interrupt runs, else the clock
 ulong nowMs() @nogc nothrow
 {
     if (interruptStatus.tick)
@@ -166,7 +166,7 @@ void run() @nogc nothrow
         kPanic("vmemInit failed\n");
 
     // ACPI, HPET clock, LAPIC + IOAPIC, 1 kHz tick. Interrupts are enabled on return
-    // (if the machine has a local APIC at all).
+    // (if the machine has a local APIC at all)
     interruptsInit(hhdmOffset);
 
     bool havePs2 = ps2Init();
@@ -201,7 +201,7 @@ void run() @nogc nothrow
         usbPoll();
 
         if (ps2State.irqMode)
-            ps2Drain();         // decode what the IRQ handler queued
+            ps2Drain(); // decode what the IRQ handler queued
         else
             ps2Poll();
 
@@ -235,7 +235,7 @@ void run() @nogc nothrow
         gfxPresent();
 
         // Sleep until the next interrupt (at most 1 ms: the timer tick). Without a
-        // working tick there would be nothing to wake us, so keep spinning then.
+        // working tick there would be nothing to wake us, so keep spinning then
         if (interruptStatus.tick)
             cpuHlt();
     }

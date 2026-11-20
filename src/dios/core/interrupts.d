@@ -8,9 +8,6 @@ module dios.core.interrupts;
  *                           Needs nothing but the console. Call as early as possible.
  *   interruptsInit()        ACPI -> clock (HPET) -> legacy PIC off -> LAPIC ->
  *                           IOAPIC -> 1 kHz tick. Needs vmemInit() (MMIO mappings).
- *
- * Without ACPI/MADT or without a LAPIC the kernel simply keeps polling, like
- * before; check interruptStatus to see what ended up active.
  */
 import dios.core.acpi;
 import dios.core.clock;

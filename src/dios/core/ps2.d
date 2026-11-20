@@ -58,7 +58,7 @@ extern(C):
 
 // All waits are bounded. The old code spun forever; on a machine with no
 // 8042 (many UEFI/USB-only PCs) port 0x64 reads 0xFF, "input buffer full"
-// never clears and the kernel hangs right here.
+// never clears and the kernel hangs right here
 bool ps2WaitInputClear() @nogc nothrow
 {
     for (uint i = 0; i < 100000; i++)
@@ -102,7 +102,7 @@ void ps2Flush() @nogc nothrow
         kPortReadByte(PS2.DataPort);
 }
 
-// Send a command to the mouse and wait for its ACK (0xFA).
+// Send a command to the mouse and wait for its ACK (0xFA)
 bool ps2MouseCommand(ubyte cmd) @nogc nothrow
 {
     if (!ps2WriteCommand(PS2.CmdMouse)) return false;
@@ -124,7 +124,7 @@ bool ps2Init() @nogc nothrow
     ps2WriteCommand(PS2.CmdEnableAuxiliaryDevice); // was commented out
 
     // Config byte: we poll, so disable both IRQs (bits 0,1) and make sure
-    // both port clocks are enabled (bits 4,5). Translation (bit 6) untouched.
+    // both port clocks are enabled (bits 4,5). Translation (bit 6) untouched
     if (ps2WriteCommand(PS2.CmdReadConfig))
     {
         int cfg = ps2ReadData();
@@ -140,7 +140,7 @@ bool ps2Init() @nogc nothrow
     // The mouse ACKs every command with 0xFA. The old code never read that
     // ACK, so ps2Poll took it for the first byte of a packet (0xFA has bit 3
     // set, so it even passed the sync check) and every packet after that was
-    // shifted by one byte - phantom right-clicks and a jumping cursor.
+    // shifted by one byte - phantom right-clicks and a jumping cursor
     ps2MouseCommand(PS2.MouseSetDefaults);
     ps2State.mouseOk = ps2MouseCommand(PS2.MouseEnableReporting);
     ps2Flush();
@@ -150,7 +150,7 @@ bool ps2Init() @nogc nothrow
 
 void ps2HandleMouseByte(ubyte val) @nogc nothrow
 {
-    // Byte 0 always has bit 3 set - use that to resynchronise.
+    // Byte 0 always has bit 3 set - use that to resynchronise
     if (ps2State.packetIndex == 0 && (val & 0x08) == 0)
         return;
 
@@ -164,7 +164,7 @@ void ps2HandleMouseByte(ubyte val) @nogc nothrow
     if (b0 & 0xC0)
         return; // x/y overflow: drop the packet
 
-    // 9-bit two's complement: sign bits live in byte 0.
+    // 9-bit two's complement: sign bits live in byte 0
     int dx = cast(int)ps2State.packet[1] - ((b0 << 4) & 0x100);
     int dy = cast(int)ps2State.packet[2] - ((b0 << 3) & 0x100);
     mouseMove(dx, -dy, b0 & 0x07); // PS/2: +y is up
@@ -186,7 +186,7 @@ void ps2HandleKeyByte(ubyte sc) @nogc nothrow
     // Shift: 0x2A left, 0x36 right. Track the two separately so releasing one
     // while holding the other keeps Shift active. The E0-prefixed 0x2A/0x36
     // that some keyboards send around arrows/Insert/etc. are "fake shifts" and
-    // must not change the state.
+    // must not change the state
     if (!ext && (code == 0x2A || code == 0x36))
     {
         ubyte bit = cast(ubyte)((code == 0x2A) ? 1 : 2);
@@ -242,7 +242,7 @@ void ps2Poll() @nogc nothrow
 }
 
 // IRQ1 and IRQ12 handler. Runs with interrupts off: only moves bytes into the
-// raw ring - decoding (and anything that draws) happens in the main loop.
+// raw ring - decoding (and anything that draws) happens in the main loop
 extern(C) void ps2Irq(InterruptFrame* f) @nogc nothrow
 {
     for (uint n = 0; n < 16; n++)
@@ -262,12 +262,12 @@ extern(C) void ps2Irq(InterruptFrame* f) @nogc nothrow
     }
 }
 
-// Decode everything the IRQ handler has queued. Call from the main loop.
+// Decode everything the IRQ handler has queued. Call from the main loop
 void ps2Drain() @nogc nothrow
 {
     for (;;)
     {
-        ulong flags = cpuIrqSave();         // the IRQ handler owns rawHead; keep it out while we look
+        ulong flags = cpuIrqSave(); // the IRQ handler owns rawHead; keep it out while we look
         bool have = ps2q.rawTail != ps2q.rawHead;
         ushort e = 0;
         if (have)
@@ -286,9 +286,9 @@ void ps2Drain() @nogc nothrow
     }
 }
 
-/// Switch from polling to interrupts: route IRQ1/IRQ12 through the IOAPIC to
-/// `destApicId`, then let the 8042 raise them. Returns false (and stays in polled
-/// mode) if the keyboard line cannot be routed.
+// Switch from polling to interrupts: route IRQ1/IRQ12 through the IOAPIC to
+// `destApicId`, then let the 8042 raise them. Returns false (and stays in polled
+// mode) if the keyboard line cannot be routed
 bool ps2StartIrq(uint destApicId) @nogc nothrow
 {
     if (!ps2State.present)
@@ -312,7 +312,7 @@ bool ps2StartIrq(uint destApicId) @nogc nothrow
     if (mouseGsi >= 0 && ps2State.mouseOk)
         cfg |= 2;
     ps2Flush();
-    ps2State.irqMode = true;            // from here on the IRQ handler owns the data port
+    ps2State.irqMode = true; // from here on the IRQ handler owns the data port
     ps2WriteCommand(PS2.CmdWriteConfig);
     ps2WriteData(cast(ubyte)cfg);
     return true;

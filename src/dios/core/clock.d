@@ -149,8 +149,8 @@ void clockInit() @nogc nothrow
         if (hpetRegs !is null)
         {
             uint capLow = hpetRd32(HPET_REG_CAPS);
-            uint period = hpetRd32(HPET_REG_CAPS + 4);      // femtoseconds per tick
-            // Spec: period <= 100 ns (0x05F5E100 fs); 0 or all-ones means a broken device.
+            uint period = hpetRd32(HPET_REG_CAPS + 4); // femtoseconds per tick
+            // Spec: period <= 100 ns (0x05F5E100 fs); 0 or all-ones means a broken device
             if (period != 0 && period <= 100_000_000 && period != 0xFFFFFFFF)
             {
                 hpet64 = (capLow & (1u << 13)) != 0;
