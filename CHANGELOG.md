@@ -1,5 +1,5 @@
-DIOS 0.1.0 - TBD
-----------------
+DIOS 0.1.0 - 21 Nov, 2026
+-------------------------
 - IDT
 - GDT
 - HPET timer that replaces the legacy PIT
