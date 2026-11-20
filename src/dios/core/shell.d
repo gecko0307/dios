@@ -156,7 +156,7 @@ void shellExecute() @nogc nothrow
     {
         kprintf("DIOS kernel shell\n");
         kprintf("  help       Show this command list\n");
-        kprintf("  about      Kernel and boot information\n");
+        kprintf("  about      Kernel version information\n");
         kprintf("  mem        Physical memory statistics\n");
         kprintf("  uptime     Time since boot\n");
         kprintf("  clock      Clock source and timer status\n");
