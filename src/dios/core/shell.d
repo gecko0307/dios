@@ -168,7 +168,7 @@ void shellExecute() @nogc nothrow
     }
     else if (shellEquals(shellLine.ptr, "about"))
     {
-        kprintf("DIOS 0.1.0 for x86_64\n");
+        kprintf("D Incomplete Operating System 0.2.0 for x86_64\n");
     }
     else if (shellEquals(shellLine.ptr, "mem"))
     {
@@ -295,7 +295,7 @@ void shellInit() @nogc nothrow
     shellLineLength = 0;
     shellHistoryCount = 0;
     shellHistoryNext = 0;
-    kprintf("\nDIOS kernel shell ready. Type 'help' for commands.\n");
+    kprintf("\nWelcome to the kernel shell! Type 'help' to list available commands.\n");
     shellPrompt();
 }
 
