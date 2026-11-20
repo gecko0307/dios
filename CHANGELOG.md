@@ -20,6 +20,6 @@ DIOS 0.0.4 - 20 Nov, 2026
 
 Early development (c. 2016 - 2020)
 ----------------------------------
-- 640x480 VESA graphics mode
 - GRUB/Multiboot
-- Basic I/O
+- VGA text mode
+- Basic console output.
