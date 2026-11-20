@@ -174,7 +174,7 @@ void run() @nogc nothrow
     if (havePs2 && interruptStatus.ioapic)
         ps2StartIrq(interruptStatus.apicId);
 
-    kprintf("DIOS 0.1.0\n");
+    kprintf("DIOS 0.2.0\n");
     kprintf("---------------\n");
     if (!limineBaseRevisionSupported())
         kprintf("Warning: bootloader does not support base revision 3\n");
