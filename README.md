@@ -20,6 +20,7 @@ DIOS is an ELF kernel that requires a bootloader to run. Default setup in this r
 - HPET timer (plus legacy PIT fallback)
 - I/O APIC, Local APIC
 - Interrupt-driven PS/2 keyboard
+- PCI enumeration
 - xHCI driver, HID mouse
 - Simple console.
 
