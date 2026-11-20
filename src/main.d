@@ -42,12 +42,10 @@ extern(C):
 /// Kernel entry point.
 void kmain() @nogc nothrow
 {
-    // MUST be first: the bootloader leaves SSE disabled and the compiler uses
-    // SSE even for plain struct initialisation (see REVIEW.md, section D).
+    // MUST be first: the bootloader leaves SSE disabled
     enableSSE();
 
-    // Every Limine response can be null (request not understood). Check them
-    // before dereferencing: there is no console yet, so just halt.
+    // Every Limine response can be null (request not understood)
     if (hhdmRequest.response is null ||
         memmapRequest.response is null ||
         framebufferRequest.response is null ||
@@ -67,7 +65,7 @@ void kmain() @nogc nothrow
         bootInfo.ramInfo.kernelBaseVirtual = cast(size_t)kernelAddressRequest.response.virtual_base;
     }
 
-    // Collect ALL usable regions (the old code only used the largest one).
+    // Collect all usable regions
     auto memmap = memmapRequest.response;
     size_t numRanges = 0;
     ulong totalUsable = 0;
@@ -88,7 +86,7 @@ void kmain() @nogc nothrow
     }
     bootInfo.ramInfo.availMemSize = totalUsable;
 
-    // Physical memory manager. Must come before anything allocates.
+    // Physical memory manager. Must come before anything allocates
     if (!pmmInit(bootInfo.ramInfo.hhdmOffset, memRanges.ptr, numRanges))
         hcf();
 
@@ -96,7 +94,7 @@ void kmain() @nogc nothrow
     if (fb.bpp != 32)
         hcf();
 
-    bootInfo.videoBuffer.ptr = cast(uint*)fb.address;      // already an HHDM address
+    bootInfo.videoBuffer.ptr = cast(uint*)fb.address; // already an HHDM address
     bootInfo.videoBuffer.width = cast(uint)fb.width;
     bootInfo.videoBuffer.height = cast(uint)fb.height;
     bootInfo.videoBuffer.pitch = cast(uint)fb.pitch;
@@ -114,7 +112,7 @@ extern(C) void cpuFlushCache() @nogc nothrow
     }
 }
 
-// Allocate zeroed, contiguous pages and return a usable (HHDM) pointer.
+// Allocate zeroed, contiguous pages and return a usable (HHDM) pointer
 void* allocBuffer(size_t bytes) @nogc nothrow
 {
     ulong phys = pmmAllocContiguousZeroed(alignUp(bytes, MEM_PAGE_SIZE) / MEM_PAGE_SIZE, 1, 0);
@@ -125,7 +123,7 @@ void* allocBuffer(size_t bytes) @nogc nothrow
 
 __gshared Framebuffer sceneBuffer;
 
-// Blinking text cursor: XOR a bar into the scene; XOR-ing again removes it.
+// Blinking text cursor: XOR a bar into the scene; XOR-ing again removes it
 void textCursorToggle(ConsoleState* cs) @nogc nothrow
 {
     gfxXorRect(cast(int)(cs.x + cs.print_x + 2),
@@ -139,7 +137,7 @@ void run() @nogc nothrow
     Framebuffer* frontBuffer = &bootInfo.videoBuffer;
     size_t framebufferSize = frontBuffer.height * frontBuffer.pitch;
 
-    // The scene: the whole picture (minus the mouse cursor) in ordinary RAM.
+    // The scene: the whole picture (minus the mouse cursor) in ordinary RAM
     void* sceneAddr = allocBuffer(framebufferSize);
     if (sceneAddr is null)
         hcf();
@@ -177,11 +175,11 @@ void run() @nogc nothrow
     if (vmemInit(&bootInfo.ramInfo) != 0)
         kPanic("vmemInit failed\n");
 
-    // Enumerate PCI; this also brings up the xHCI controller(s) and any USB mouse.
+    // Enumerate PCI; this also brings up the xHCI controller(s) and any USB mouse
     pciScan();
 
     enum ulong INPUT_TICKS = PIT_FREQUENCY / 1000;
-    enum ulong BLINK_TICKS = PIT_FREQUENCY / 2;
+    enum ulong BLINK_TICKS = PIT_FREQUENCY / 10;
 
     ulong now = pitTimeTicks();
     ulong nextInput = now;
@@ -204,7 +202,7 @@ void run() @nogc nothrow
         {
             ps2State.keyPressed = 0;
 
-            // Take the text cursor out before touching the console, put it back after.
+            // Take the text cursor out before touching the console, put it back after
             bool wasDrawn = textCursorDrawn;
             if (wasDrawn)
                 textCursorToggle(consoleState);
@@ -232,7 +230,7 @@ void run() @nogc nothrow
         }
 
         // Only touches video memory if something changed (a character, the
-        // blinking cursor, or the mouse moved) - and then only those pixels.
+        // blinking cursor, or the mouse moved) - and then only those pixels
         gfxPresent();
     }
 }

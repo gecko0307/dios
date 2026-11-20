@@ -925,7 +925,7 @@ uint xhciResetPort(uint port) @nogc nothrow
             return 0;
         pitDelayMs(10);
         sc = xhciRd32(xhci.op, off);
-        xhciWr32(xhci.op, off, (sc & PORT_PRESERVE) | PORT_CHANGE_BITS);   // clear change bits
+        xhciWr32(xhci.op, off, (sc & PORT_PRESERVE) | PORT_CHANGE_BITS); // clear change bits
         sc = xhciRd32(xhci.op, off);
     }
     else
@@ -1011,9 +1011,9 @@ void xhciLegacyHandoff() @nogc nothrow
         uint v = xhciRd32(p, 0);
         if ((v & 0xFF) == 1)
         {
-            if (v & (1u << 16))                       // BIOS owns it
+            if (v & (1u << 16)) // BIOS owns it
             {
-                xhciWr32(p, 0, v | (1u << 24));       // set OS owned
+                xhciWr32(p, 0, v | (1u << 24)); // set OS owned
                 if (!xhciWaitReg(p, 0, 1u << 16, 0, 1000))
                     kprintf("xHCI: BIOS did not release the controller\n");
             }

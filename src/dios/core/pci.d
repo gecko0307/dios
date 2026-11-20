@@ -123,7 +123,7 @@ bool pciGetBar0(uint bus, uint device, uint func, ulong* outPhys, ulong* outSize
 {
     uint orig0 = pciConfigRead32(bus, device, func, PCI_CONFIG_BAR0);
     if (orig0 & 1)
-        return false;                               // I/O BAR
+        return false; // I/O BAR
     bool is64 = ((orig0 >> 1) & 3) == 2;
     uint orig1 = is64 ? pciConfigRead32(bus, device, func, PCI_CONFIG_BAR1) : 0;
 
@@ -145,7 +145,7 @@ bool pciGetBar0(uint bus, uint device, uint func, ulong* outPhys, ulong* outSize
     ulong size = ~mask + 1;
     ulong phys = (cast(ulong)orig1 << 32) | (orig0 & 0xFFFFFFF0);
     if (phys == 0 || size == 0)
-        return false;                               // firmware never assigned it
+        return false; // firmware never assigned it
     *outPhys = phys;
     *outSize = size;
     return true;
@@ -175,7 +175,7 @@ void pciCheckFunction(uint bus, uint device, uint func) @nogc nothrow
         cast(uint)vendorID, cast(uint)deviceID);
 
     if (progIf != 0x30 || xhciFound)
-        return;                                     // stop once one controller has a mouse
+        return; // stop once one controller has a mouse
 
     ulong phys, size;
     if (!pciGetBar0(bus, device, func, &phys, &size))
