@@ -55,6 +55,7 @@ Prerequisites:
 
 * Recent LDC compiler
 * [NASM](http://www.nasm.us)
+* Python (for running the build script)
 * [xorriso](https://github.com/Distrotech/xorriso) to generate a bootable CD image
 
-Run `./build.bat` to compile the kernel (`cdroot/kernel64.bin`) and generate `dios64.iso`.
+Run `python build.py` to compile the kernel (`cdroot/kernel64.bin`) and generate `dios64.iso`.
