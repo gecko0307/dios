@@ -72,9 +72,11 @@ These are currently simple examples of what can be done in DIOS userspace.
 - `hello` - "Hello, World!" program that prints its arguments
 - `count` - counts once a second. Ctrl+C stops it (the kernel handles that)
 - `rev` - reads lines and prints them reversed. An empty line ends the program
-- `fault` - deliberately crashes by dereferencing a null pointer. The kernel reports it and keeps running.
+- `fault` - deliberately crashes by dereferencing a null pointer. The kernel reports it and keeps running
+- `dir [PATH]` - lists a directory
+- `show FILE [OFFSET]`  - print a text file, optionally starting at a byte offset.
 
-Programs are also written in D and compiled to *.elf files. They can be loaded by Limine as kernel modules, or placed to Ventoy USB stick alongside with the DIOS image.
+Programs are also written in D and compiled to *.elf files (in fact, they can be written in any language that outputs ELF64). They can be loaded by Limine as kernel modules, or placed to Ventoy USB stick alongside with the DIOS image.
 
 ## Code Structure
 
@@ -84,9 +86,11 @@ Programs are also written in D and compiled to *.elf files. They can be loaded b
   - `src/kernel/main.d` - the kernel entry point
 - `src/user` contains sample userspace programs:
   - `src/user/count.d`
+  - `src/user/dir.d`
   - `src/user/fault.d`
   - `src/user/hello.d`
   - `src/user/rev.d`
+  - `src/user/show.d`
 
 ## Building
 
