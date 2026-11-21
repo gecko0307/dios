@@ -34,6 +34,34 @@ enum ulong SYS_GETKEY = 2;
 enum ulong SYS_SLEEP = 3;
 enum ulong SYS_TICKS = 4;
 enum ulong SYS_CLEAR = 5;
+enum ulong SYS_OPEN = 6;
+enum ulong SYS_READ = 7;
+enum ulong SYS_CLOSE = 8;
+enum ulong SYS_SEEK = 9;
+enum ulong SYS_STAT = 10;
+enum ulong SYS_READDIR = 11;
+enum ulong SYS_GETCWD = 12;
+
+// useek() origins
+enum int SEEK_SET = 0;
+enum int SEEK_CUR = 1;
+enum int SEEK_END = 2;
+
+// Layouts shared with the kernel (sysfile.d)
+struct UStat
+{
+    ulong size;
+    uint mtime;                 // DOS timestamp: (year-1980)<<25 | month<<21 | day<<16 | hour<<11 | min<<5 | sec/2
+    uint isDir;
+}
+
+struct UDirent
+{
+    ulong size;
+    uint mtime;
+    uint isDir;
+    char[256] name;
+}
 
 // Key codes returned by getkey (besides plain ASCII; Enter is 10).
 enum int KEY_UP = 0x101;
@@ -155,4 +183,48 @@ ulong uticks() @nogc nothrow
 void uclear() @nogc nothrow
 {
     sys_call(SYS_CLEAR, 0, 0, 0);
+}
+
+// Files (read-only). Paths are relative to the shell's current directory or absolute.
+// At most 8 files can be open at once; they are closed when the program ends.
+
+/// File descriptor of a file or directory, or -1.
+int uopen(const(char)* path) @nogc nothrow
+{
+    return cast(int)sys_call(SYS_OPEN, cast(ulong)path, 0, 0);
+}
+
+/// Bytes read (0 = end of file), or -1.
+long uread(int fd, void* buf, size_t n) @nogc nothrow
+{
+    return sys_call(SYS_READ, cast(ulong)fd, cast(ulong)buf, n);
+}
+
+int uclose(int fd) @nogc nothrow
+{
+    return cast(int)sys_call(SYS_CLOSE, cast(ulong)fd, 0, 0);
+}
+
+/// New position, or -1.
+long useek(int fd, long offset, int whence) @nogc nothrow
+{
+    return sys_call(SYS_SEEK, cast(ulong)fd, cast(ulong)offset, cast(ulong)whence);
+}
+
+/// 0 on success, -1 if the path does not exist.
+int ustat(const(char)* path, UStat* st) @nogc nothrow
+{
+    return cast(int)sys_call(SYS_STAT, cast(ulong)path, cast(ulong)st, 0);
+}
+
+/// Next entry of a directory opened with uopen(): 1 = filled in, 0 = no more, -1 = error.
+int ureaddir(int fd, UDirent* e) @nogc nothrow
+{
+    return cast(int)sys_call(SYS_READDIR, cast(ulong)fd, cast(ulong)e, 0);
+}
+
+/// Current directory into buf; returns its length or -1.
+long ugetcwd(char* buf, size_t n) @nogc nothrow
+{
+    return sys_call(SYS_GETCWD, cast(ulong)buf, n, 0);
 }

@@ -59,7 +59,9 @@ import dios.core.lapic;
 import dios.core.mem;
 import dios.core.paging;
 import dios.core.ps2;
+import dios.core.fs;
 import dios.core.stdio;
+import dios.core.sysfile;
 import dios.core.vmem;
 import dios.core.xhci;
 
@@ -78,6 +80,13 @@ enum ulong SYS_GETKEY = 2;
 enum ulong SYS_SLEEP = 3;
 enum ulong SYS_TICKS = 4;
 enum ulong SYS_CLEAR = 5;
+enum ulong SYS_OPEN = 6;
+enum ulong SYS_READ = 7;
+enum ulong SYS_CLOSE = 8;
+enum ulong SYS_SEEK = 9;
+enum ulong SYS_STAT = 10;
+enum ulong SYS_READDIR = 11;
+enum ulong SYS_GETCWD = 12;
 
 enum uint MSR_EFER = 0xC0000080;
 enum uint MSR_STAR = 0xC0000081;
@@ -514,6 +523,7 @@ bool procLaunchProgram(Program* prog, const(char)* args, long* exitCode) @nogc n
         return false;
     }
 
+    sysfileReset();
     keyQueueClear(); // keys typed before the program started are not its input
     tickDivider = 0;
     proc.active = true;
@@ -523,6 +533,7 @@ bool procLaunchProgram(Program* prog, const(char)* args, long* exitCode) @nogc n
     // Back from userResume(): kernel page tables first, then clean up.
     setCR3(PML4_PHYS);
     proc.active = false;
+    sysfileReset();
     procFreeSpace(proc.pml4Phys);
     proc.pml4Phys = 0;
     keyQueueClear();
@@ -638,6 +649,72 @@ long sysWrite(ulong buf, ulong len) @nogc nothrow
     return cast(long)len;
 }
 
+// Copy a NUL terminated string out of user memory. False if it is not mapped or too long.
+bool procCopyPath(ulong addr, char* dst, uint cap) @nogc nothrow
+{
+    for (uint i = 0; i < cap; i++)
+    {
+        if (!procUserOk(addr + i, 1, false))
+            return false;
+        char c = *cast(const(char)*)(addr + i);
+        dst[i] = c;
+        if (c == 0)
+            return true;
+    }
+    return false;
+}
+
+long sysOpen(ulong path) @nogc nothrow
+{
+    char[FS_PATH_MAX] p;
+    if (!procCopyPath(path, p.ptr, p.length))
+        return -1;
+    return sysfileOpen(p.ptr);
+}
+
+long sysRead(ulong fd, ulong buf, ulong len) @nogc nothrow
+{
+    if (len > 1024 * 1024)
+        len = 1024 * 1024;
+    if (!procUserOk(buf, len, true))
+        return -1;
+    return sysfileRead(fd, cast(void*)buf, len);
+}
+
+long sysStat(ulong path, ulong out_) @nogc nothrow
+{
+    char[FS_PATH_MAX] p;
+    UserStat st;
+    if (!procCopyPath(path, p.ptr, p.length) || !procUserOk(out_, UserStat.sizeof, true))
+        return -1;
+    if (!sysfileStat(p.ptr, &st))
+        return -1;
+    *cast(UserStat*)out_ = st;
+    return 0;
+}
+
+long sysReaddir(ulong fd, ulong out_) @nogc nothrow
+{
+    if (!procUserOk(out_, UserDirent.sizeof, true))
+        return -1;
+    return sysfileReaddir(fd, cast(UserDirent*)out_);
+}
+
+long sysGetCwd(ulong buf, ulong len) @nogc nothrow
+{
+    if (!rootMount.mounted)
+        return -1;
+    ulong n = 0;
+    while (fsCwd[n] != 0)
+        n++;
+    if (n + 1 > len || !procUserOk(buf, n + 1, true))
+        return -1;
+    char* out_ = cast(char*)buf;
+    for (ulong i = 0; i <= n; i++)
+        out_[i] = fsCwd[i];
+    return cast(long)n;
+}
+
 // Called from the SYSCALL entry stub (cpu.s) on the ring-0 stack, interrupts off.
 long syscallDispatch(ulong nr, ulong a0, ulong a1, ulong a2) @nogc nothrow
 {
@@ -658,6 +735,20 @@ long syscallDispatch(ulong nr, ulong a0, ulong a1, ulong a2) @nogc nothrow
             consoleClear();
             gfxPresent();
             return 0;
+        case SYS_OPEN:
+            return sysOpen(a0);
+        case SYS_READ:
+            return sysRead(a0, a1, a2);
+        case SYS_CLOSE:
+            return sysfileClose(a0);
+        case SYS_SEEK:
+            return sysfileSeek(a0, cast(long)a1, a2);
+        case SYS_STAT:
+            return sysStat(a0, a1);
+        case SYS_READDIR:
+            return sysReaddir(a0, a1);
+        case SYS_GETCWD:
+            return sysGetCwd(a0, a1);
         default:
             return -1;
     }
