@@ -2,7 +2,7 @@ module dios.core.acpi;
 
 /**
  * Minimal ACPI table reader: RSDP -> XSDT/RSDT -> MADT (interrupt controller
- * layout) and HPET (high precision timer). No AML interpreter - DIOS only needs
+ * layout) and HPET (high precision timer). No AML interpreter - we only need
  * static tables.
  *
  * Every table is mapped explicitly (read-only, write-back like the HHDM) instead
@@ -32,17 +32,36 @@ struct AcpiIso
 {
     ubyte source;
     uint gsi;
-    ushort flags; // bits 0-1 polarity, bits 2-3 trigger (0 = bus default)
+    ushort flags;   // bits 0-1 polarity, bits 2-3 trigger (0 = bus default)
+}
+
+enum uint ACPI_MAX_TABLES = 40;
+
+// One entry of the RSDT/XSDT, cached for the `acpi` shell command.
+struct AcpiTableRef
+{
+    char[4] sig;
+    ubyte revision;
+    uint length;
+    ulong phys;
 }
 
 struct AcpiInfo
 {
     bool valid;
+    ubyte rsdpRevision;
+    bool rootIsXsdt;
+    uint numTables;
+    AcpiTableRef[ACPI_MAX_TABLES] tables;
+    bool resetSupported;    // FADT RESET_REG usable
+    ubyte resetSpace;       // address space: 0 memory, 1 I/O, 2 PCI config
+    ulong resetAddr;
+    ubyte resetValue;
     bool madtFound;
     bool hpetFound;
-    bool pcatCompat; // dual 8259 present
+    bool pcatCompat;        // dual 8259 present
     ulong lapicAddr;
-    uint cpuCount; // enabled / online-capable processors
+    uint cpuCount;          // enabled / online-capable processors
     uint numIoApics;
     AcpiIoApic[ACPI_MAX_IOAPICS] ioapics;
     uint numIsos;
@@ -175,7 +194,7 @@ void acpiParseHpet(const(ubyte)* t, uint len) @nogc nothrow
     if (len < 56)
         return;
     // Generic Address Structure at offset 40: [space id][width][offset][access][address:8]
-    if (t[40] != 0) // 0 = system memory; I/O-space HPETs do not exist in practice
+    if (t[40] != 0)                // 0 = system memory; I/O-space HPETs do not exist in practice
         return;
     ulong addr = acpiRd64(t, 44);
     if (addr == 0)
@@ -186,7 +205,7 @@ void acpiParseHpet(const(ubyte)* t, uint len) @nogc nothrow
 
 // Decode an AML PkgLength. `offset` points to its lead byte.
 bool acpiAmlPkgLength(const(ubyte)* aml, uint amlLen, uint offset,
-    uint* value, uint* encodedBytes) @nogc nothrow
+                      uint* value, uint* encodedBytes) @nogc nothrow
 {
     if (offset >= amlLen)
         return false;
@@ -214,7 +233,7 @@ bool acpiAmlPkgLength(const(ubyte)* aml, uint amlLen, uint offset,
 
 // Read the small integer encodings used by the standard _S5_ package.
 bool acpiAmlInteger(const(ubyte)* aml, uint amlLen, uint* offset,
-    ubyte* value) @nogc nothrow
+                    ubyte* value) @nogc nothrow
 {
     if (*offset >= amlLen)
         return false;
@@ -312,6 +331,15 @@ void acpiParseFadt(const(ubyte)* t, uint len) @nogc nothrow
         return;
 
     acpi.fadtFound = true;
+
+    // RESET_REG (GAS at 116) and RESET_VALUE (128); FLAGS bit 10 = RESET_REG_SUP.
+    if (len >= 129 && (acpiRd32(t, 112) & (1u << 10)) != 0)
+    {
+        acpi.resetSpace = t[116];
+        acpi.resetAddr = acpiRd64(t, 120);
+        acpi.resetValue = t[128];
+        acpi.resetSupported = (acpi.resetSpace == 0 || acpi.resetSpace == 1) && acpi.resetAddr != 0;
+    }
     ulong dsdtPhys = acpiRd32(t, 40);
     if (len >= 148)
     {
@@ -365,6 +393,27 @@ void acpiParseFadt(const(ubyte)* t, uint len) @nogc nothrow
     acpi.s5Found = acpiFindS5(dsdt, dsdtLen, &acpi.sleepTypeA, &acpi.sleepTypeB);
 }
 
+/// Pulse the FADT reset register. Returns false if the firmware does not offer
+/// one; on success the machine normally resets before this returns.
+bool acpiReset() @nogc nothrow
+{
+    if (!acpi.resetSupported)
+        return false;
+    if (acpi.resetSpace == 1)
+    {
+        if (acpi.resetAddr > 0xFFFF)
+            return false;
+        kPortWriteByte(cast(ushort)acpi.resetAddr, acpi.resetValue);
+        return true;
+    }
+    // Memory-mapped register.
+    ubyte* reg = cast(ubyte*)vmemMapMMIO(acpi.resetAddr, 1, PTE_PRESENT | PTE_RW | PTE_PCD);
+    if (reg is null)
+        return false;
+    *reg = acpi.resetValue;
+    return true;
+}
+
 /// Request ACPI S5 (soft power-off). Returns false if firmware data is absent.
 /// A successful request normally powers the machine off before this returns.
 bool acpiPoweroff() @nogc nothrow
@@ -416,6 +465,7 @@ bool acpiInit(ulong hhdmOffset) @nogc nothrow
         return false;
 
     ubyte revision = rsdp[15];
+    acpi.rsdpRevision = revision;
     ulong rootPhys;
     uint entrySize;
     uint rsdpLen = acpiRd32(rsdp, 20);
@@ -439,6 +489,7 @@ bool acpiInit(ulong hhdmOffset) @nogc nothrow
     if (root is null || !acpiSigEq(root, entrySize == 8 ? "XSDT" : "RSDT"))
         return false;
 
+    acpi.rootIsXsdt = entrySize == 8;
     uint count = (rootLen - 36) / entrySize;
     for (uint i = 0; i < count; i++)
     {
@@ -450,6 +501,15 @@ bool acpiInit(ulong hhdmOffset) @nogc nothrow
         const(ubyte)* hdr = acpiMap(tablePhys, 36);
         if (hdr is null)
             continue;
+        if (acpi.numTables < ACPI_MAX_TABLES)
+        {
+            AcpiTableRef* r = &acpi.tables[acpi.numTables++];
+            for (uint k = 0; k < 4; k++)
+                r.sig[k] = cast(char)hdr[k];
+            r.length = acpiRd32(hdr, 4);
+            r.revision = hdr[8];
+            r.phys = tablePhys;
+        }
         bool isMadt = acpiSigEq(hdr, "APIC");
         bool isHpet = acpiSigEq(hdr, "HPET");
         bool isFadt = acpiSigEq(hdr, "FACP");

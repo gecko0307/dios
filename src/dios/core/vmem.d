@@ -142,6 +142,37 @@ int mapPage4k(ulong pml4_phys, ulong vaddr, ulong paddr, ulong flags) @nogc noth
     return 0;
 }
 
+// Walk the current page tables (CR3). Returns true and the physical address if
+// `vaddr` is mapped, handling 1GiB/2MiB/4KiB pages. Never faults: every table
+// is reached through the HHDM, and non-canonical addresses are rejected.
+bool vmemTranslate(ulong vaddr, ulong* phys) @nogc nothrow
+{
+    ulong top = vaddr >> 47;
+    if (top != 0 && top != 0x1FFFF)
+        return false;                       // not canonical
+
+    ulong e = vmemReadEntry(cast(void*)vmemPhysToVirt(getCR3() & PTE_ADDR_MASK), idx_pml4(vaddr));
+    if (!(e & PTE_PRESENT)) return false;
+    e = vmemReadEntry(cast(void*)vmemPhysToVirt(e & PTE_ADDR_MASK), idx_pdpt(vaddr));
+    if (!(e & PTE_PRESENT)) return false;
+    if (e & PTE_PSE)
+    {
+        *phys = (e & 0x000FFFFFC0000000UL) | (vaddr & 0x3FFFFFFFUL);
+        return true;
+    }
+    e = vmemReadEntry(cast(void*)vmemPhysToVirt(e & PTE_ADDR_MASK), idx_pd(vaddr));
+    if (!(e & PTE_PRESENT)) return false;
+    if (e & PTE_PSE)
+    {
+        *phys = (e & 0x000FFFFFFFE00000UL) | (vaddr & 0x1FFFFFUL);
+        return true;
+    }
+    e = vmemReadEntry(cast(void*)vmemPhysToVirt(e & PTE_ADDR_MASK), idx_pt(vaddr));
+    if (!(e & PTE_PRESENT)) return false;
+    *phys = (e & PTE_ADDR_MASK) | (vaddr & 0xFFFUL);
+    return true;
+}
+
 // Clear one 4KiB mapping. Returns 0 if it was mapped, -1 otherwise.
 int unmapPage4k(ulong pml4_phys, ulong vaddr) @nogc nothrow
 {

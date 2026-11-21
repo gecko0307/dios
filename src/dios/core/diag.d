@@ -1,0 +1,455 @@
+module dios.core.diag;
+
+/**
+ * Diagnostics and machine control behind the shell commands: cpuinfo, acpi,
+ * irqstat, hexdump, crash, sleep, reboot. Everything runs in main-loop context.
+ */
+import core.volatile;
+
+import dios.core.acpi;
+import dios.core.clock;
+import dios.core.console;
+import dios.core.cpu;
+import dios.core.gfx;
+import dios.core.idt;
+import dios.core.keyboard;
+import dios.core.port;
+import dios.core.ps2;
+import dios.core.stdio;
+import dios.core.vmem;
+import dios.core.xhci;
+
+struct DiagFlag
+{
+    ubyte bit;
+    string name;
+}
+
+immutable DiagFlag[17] FLAGS_LEAF1_ECX = [
+    DiagFlag(0, "sse3\0"), DiagFlag(1, "pclmul\0"), DiagFlag(5, "vmx\0"), DiagFlag(9, "ssse3\0"),
+    DiagFlag(12, "fma\0"), DiagFlag(13, "cx16\0"), DiagFlag(17, "pcid\0"), DiagFlag(19, "sse4.1\0"),
+    DiagFlag(20, "sse4.2\0"), DiagFlag(21, "x2apic\0"), DiagFlag(22, "movbe\0"), DiagFlag(23, "popcnt\0"),
+    DiagFlag(25, "aes\0"), DiagFlag(26, "xsave\0"), DiagFlag(28, "avx\0"), DiagFlag(30, "rdrand\0"),
+    DiagFlag(31, "hypervisor\0")
+];
+
+immutable DiagFlag[15] FLAGS_LEAF1_EDX = [
+    DiagFlag(0, "fpu\0"), DiagFlag(4, "tsc\0"), DiagFlag(5, "msr\0"), DiagFlag(6, "pae\0"),
+    DiagFlag(9, "apic\0"), DiagFlag(11, "sep\0"), DiagFlag(13, "pge\0"), DiagFlag(15, "cmov\0"),
+    DiagFlag(16, "pat\0"), DiagFlag(19, "clflush\0"), DiagFlag(23, "mmx\0"), DiagFlag(24, "fxsr\0"),
+    DiagFlag(25, "sse\0"), DiagFlag(26, "sse2\0"), DiagFlag(28, "htt\0")
+];
+
+immutable DiagFlag[11] FLAGS_LEAF7_EBX = [
+    DiagFlag(0, "fsgsbase\0"), DiagFlag(3, "bmi1\0"), DiagFlag(5, "avx2\0"), DiagFlag(7, "smep\0"),
+    DiagFlag(8, "bmi2\0"), DiagFlag(9, "erms\0"), DiagFlag(10, "invpcid\0"), DiagFlag(16, "avx512f\0"),
+    DiagFlag(18, "rdseed\0"), DiagFlag(20, "smap\0"), DiagFlag(29, "sha\0")
+];
+
+immutable DiagFlag[5] FLAGS_EXT1_EDX = [
+    DiagFlag(11, "syscall\0"), DiagFlag(20, "nx\0"), DiagFlag(26, "pdpe1gb\0"),
+    DiagFlag(27, "rdtscp\0"), DiagFlag(29, "lm\0")
+];
+
+extern(C):
+
+// ---------------------------------------------------------------------------
+// reboot
+// ---------------------------------------------------------------------------
+
+/// Restart the machine: ACPI reset register, then the 8042 reset line, then a
+/// deliberate triple fault. Does not return.
+void systemReboot() @nogc nothrow
+{
+    kprintf("Rebooting...\n");
+    gfxPresent();                       // make sure the message is on screen
+    cpuCli();
+
+    if (acpiReset())
+        clockDelayMs(100);
+
+    // 8042 "pulse output line 0" = CPU reset on PC-compatible chipsets.
+    if (ps2WaitInputClear())
+        kPortWriteByte(0x64, 0xFE);
+    clockDelayMs(100);
+
+    cpuTripleFault();
+}
+
+// ---------------------------------------------------------------------------
+// number parsing
+// ---------------------------------------------------------------------------
+
+/// Parse "0x1F" / "1f"-less decimal. Returns the pointer after the number, or
+/// null if there is no number. Leading blanks are skipped.
+const(char)* diagParseNumber(const(char)* s, ulong* value) @nogc nothrow
+{
+    while (*s == ' ' || *s == '\t')
+        s++;
+
+    ulong v = 0;
+    uint digits = 0;
+    if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X'))
+    {
+        s += 2;
+        for (;;)
+        {
+            char c = *s;
+            uint d;
+            if (c >= '0' && c <= '9')
+                d = c - '0';
+            else if (c >= 'a' && c <= 'f')
+                d = c - 'a' + 10;
+            else if (c >= 'A' && c <= 'F')
+                d = c - 'A' + 10;
+            else
+                break;
+            v = (v << 4) | d;
+            digits++;
+            s++;
+        }
+    }
+    else
+    {
+        while (*s >= '0' && *s <= '9')
+        {
+            v = v * 10 + (*s - '0');
+            digits++;
+            s++;
+        }
+    }
+
+    if (digits == 0)
+        return null;
+    *value = v;
+    return s;
+}
+
+// ---------------------------------------------------------------------------
+// cpuinfo
+// ---------------------------------------------------------------------------
+
+void diagPutReg(char* dst, uint reg) @nogc nothrow
+{
+    for (uint i = 0; i < 4; i++)
+        dst[i] = cast(char)((reg >> (i * 8)) & 0xFF);
+}
+
+void diagPrintFlags(const(DiagFlag)* table, size_t n, uint value) @nogc nothrow
+{
+    for (size_t i = 0; i < n; i++)
+        if (value & (1u << table[i].bit))
+            kprintf("%s ", table[i].name.ptr);
+}
+
+void diagCpuInfo() @nogc nothrow
+{
+    uint[4] r;
+
+    cpuCpuid(0, 0, r.ptr);
+    uint maxLeaf = r[0];
+    char[13] vendor;
+    diagPutReg(vendor.ptr, r[1]);
+    diagPutReg(vendor.ptr + 4, r[3]);
+    diagPutReg(vendor.ptr + 8, r[2]);
+    vendor[12] = 0;
+
+    cpuCpuid(0x80000000, 0, r.ptr);
+    uint maxExt = r[0];
+
+    char[49] brand;
+    brand[0] = 0;
+    if (maxExt >= 0x80000004)
+    {
+        for (uint i = 0; i < 3; i++)
+        {
+            cpuCpuid(0x80000002 + i, 0, r.ptr);
+            for (uint j = 0; j < 4; j++)
+                diagPutReg(brand.ptr + i * 16 + j * 4, r[j]);
+        }
+        brand[48] = 0;
+    }
+    const(char)* b = brand.ptr;
+    while (*b == ' ')
+        b++;
+
+    kprintf("CPU: %s\n", b);
+    kprintf("  Vendor: %s\n", vendor.ptr);
+
+    uint leaf1Ecx = 0, leaf1Edx = 0;
+    if (maxLeaf >= 1)
+    {
+        cpuCpuid(1, 0, r.ptr);
+        uint eax = r[0];
+        leaf1Ecx = r[2];
+        leaf1Edx = r[3];
+        uint family = (eax >> 8) & 0xF;
+        uint model = (eax >> 4) & 0xF;
+        if (family == 0xF)
+            family += (eax >> 20) & 0xFF;
+        if ((((eax >> 8) & 0xF) == 0xF) || (((eax >> 8) & 0xF) == 6))
+            model |= ((eax >> 16) & 0xF) << 4;
+        kprintf("  Family %u, model %u, stepping %u\n", family, model, eax & 0xF);
+        kprintf("  Logical CPUs per package: %u (ACPI reports %u CPU(s))\n",
+            (r[1] >> 16) & 0xFF, acpi.cpuCount);
+    }
+
+    if (maxExt >= 0x80000008)
+    {
+        cpuCpuid(0x80000008, 0, r.ptr);
+        kprintf("  Address bits: %u physical, %u virtual\n", r[0] & 0xFF, (r[0] >> 8) & 0xFF);
+    }
+    if (maxExt >= 0x80000007)
+    {
+        cpuCpuid(0x80000007, 0, r.ptr);
+        kprintf("  Invariant TSC: %s\n", (r[3] & (1u << 8)) ? "yes".ptr : "no".ptr);
+    }
+
+    kprintf("  Features: ");
+    diagPrintFlags(FLAGS_LEAF1_EDX.ptr, FLAGS_LEAF1_EDX.length, leaf1Edx);
+    diagPrintFlags(FLAGS_LEAF1_ECX.ptr, FLAGS_LEAF1_ECX.length, leaf1Ecx);
+    if (maxLeaf >= 7)
+    {
+        cpuCpuid(7, 0, r.ptr);
+        diagPrintFlags(FLAGS_LEAF7_EBX.ptr, FLAGS_LEAF7_EBX.length, r[1]);
+    }
+    if (maxExt >= 0x80000001)
+    {
+        cpuCpuid(0x80000001, 0, r.ptr);
+        diagPrintFlags(FLAGS_EXT1_EDX.ptr, FLAGS_EXT1_EDX.length, r[3]);
+        if (r[2] & (1u << 5))
+            kprintf("lzcnt ");
+    }
+    kprintf("\n");
+
+    if (leaf1Ecx & (1u << 31))
+    {
+        cpuCpuid(0x40000000, 0, r.ptr);
+        char[13] hv;
+        diagPutReg(hv.ptr, r[1]);
+        diagPutReg(hv.ptr + 4, r[2]);
+        diagPutReg(hv.ptr + 8, r[3]);
+        hv[12] = 0;
+        kprintf("  Hypervisor: %s\n", hv.ptr);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// acpi
+// ---------------------------------------------------------------------------
+
+void diagAcpi() @nogc nothrow
+{
+    if (!acpi.valid)
+    {
+        kprintf("ACPI: not available (no RSDP/MADT).\n");
+        return;
+    }
+
+    kprintf("ACPI: RSDP revision %u, root table %s, %u table(s)\n",
+        cast(uint)acpi.rsdpRevision, acpi.rootIsXsdt ? "XSDT".ptr : "RSDT".ptr, acpi.numTables);
+    for (uint i = 0; i < acpi.numTables; i++)
+    {
+        char[5] sig;
+        for (uint k = 0; k < 4; k++)
+            sig[k] = acpi.tables[i].sig[k];
+        sig[4] = 0;
+        kprintf("  %s  rev %u  len %u  at %llx\n",
+            sig.ptr, cast(uint)acpi.tables[i].revision, acpi.tables[i].length, acpi.tables[i].phys);
+    }
+
+    kprintf("MADT: local APIC at %llx, %u CPU(s), %u I/O APIC(s), %u override(s)%s\n",
+        acpi.lapicAddr, acpi.cpuCount, acpi.numIoApics, acpi.numIsos,
+        acpi.pcatCompat ? ", dual 8259".ptr : "".ptr);
+    for (uint i = 0; i < acpi.numIoApics; i++)
+        kprintf("  I/O APIC %u at %x, GSI base %u\n",
+            cast(uint)acpi.ioapics[i].id, acpi.ioapics[i].addr, acpi.ioapics[i].gsiBase);
+    for (uint i = 0; i < acpi.numIsos; i++)
+        kprintf("  IRQ %u -> GSI %u (flags %k)\n",
+            cast(uint)acpi.isos[i].source, acpi.isos[i].gsi, acpi.isos[i].flags);
+
+    if (acpi.hpetFound)
+        kprintf("HPET: %llx\n", acpi.hpetAddr);
+    else
+        kprintf("HPET: none\n");
+
+    if (acpi.fadtFound)
+    {
+        kprintf("FADT: PM1a control %k, PM1b control %k\n",
+            acpi.pm1aControlPort, acpi.pm1bControlPort);
+        if (acpi.s5Found)
+            kprintf("  S5 sleep type: %u / %u (poweroff available)\n",
+                cast(uint)acpi.sleepTypeA, cast(uint)acpi.sleepTypeB);
+        else
+            kprintf("  S5 sleep type not found (poweroff unavailable)\n");
+        if (acpi.resetSupported)
+            kprintf("  Reset register: %s %llx, value %x\n",
+                acpi.resetSpace == 1 ? "I/O port".ptr : "memory".ptr,
+                acpi.resetAddr, cast(uint)acpi.resetValue);
+        else
+            kprintf("  No ACPI reset register (reboot falls back to the 8042)\n");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// irqstat
+// ---------------------------------------------------------------------------
+
+string diagVectorName(uint v) @nogc nothrow
+{
+    if (v < 32)
+        return exceptionNames[v];
+    if (v == VEC_TIMER)
+        return "LAPIC timer\0";
+    if (v == VEC_KEYBOARD)
+        return "PS/2 keyboard\0";
+    if (v == VEC_MOUSE)
+        return "PS/2 mouse\0";
+    if (v == VEC_LAPIC_ERROR)
+        return "LAPIC error\0";
+    if (v == VEC_SPURIOUS)
+        return "spurious\0";
+    if (v >= VEC_DYNAMIC_FIRST && v <= VEC_DYNAMIC_LAST)
+        return "dynamic\0";
+    return "?\0";
+}
+
+void diagIrqStat() @nogc nothrow
+{
+    kprintf("Vector  Count          Unhandled  Name\n");
+    uint shown = 0;
+    for (uint v = 0; v < 256; v++)
+    {
+        if (irqCount[v] == 0 && irqUnhandled[v] == 0)
+            continue;
+        kprintf("0x%x  %llu  %u  %s\n", cast(uint)v & 0xFF, irqCount[v], irqUnhandled[v],
+            diagVectorName(v).ptr);
+        shown++;
+    }
+    if (shown == 0)
+        kprintf("(no interrupts delivered yet)\n");
+    kprintf("NMIs: %u   key events dropped: %u   PS/2 bytes dropped: %u\n",
+        nmiCount, keyQueue.dropped, ps2q.rawDropped);
+}
+
+// ---------------------------------------------------------------------------
+// hexdump
+// ---------------------------------------------------------------------------
+
+void diagHexByte(ubyte b) @nogc nothrow
+{
+    consolePrintChar(HEXMAP[b >> 4]);
+    consolePrintChar(HEXMAP[b & 15]);
+}
+
+/// Dump `len` bytes from `addr` (a virtual address, or a physical one through
+/// the HHDM when `physical`). Every row is checked against the page tables
+/// first, so a bad address prints a message instead of crashing the kernel.
+void diagHexdump(ulong addr, ulong len, bool physical) @nogc nothrow
+{
+    if (len == 0)
+        len = 64;
+    if (len > 1024)
+        len = 1024;
+
+    ulong virt = physical ? vmemPhysToVirt(addr) : addr;
+    ulong end = virt + len;
+
+    for (ulong row = virt & ~0xFUL; row < end; row += 16)
+    {
+        ulong ph;
+        if (!vmemTranslate(row, &ph) || !vmemTranslate(row + 15, &ph))
+        {
+            kprintf("%llx: <not mapped>\n", physical ? row - (virt - addr) : row);
+            return;
+        }
+
+        kprintf("%llx: ", physical ? row - (virt - addr) : row);
+        for (uint i = 0; i < 16; i++)
+        {
+            ulong a = row + i;
+            if (a < virt || a >= end)
+            {
+                consolePrintString("   ");
+                continue;
+            }
+            diagHexByte(volatileLoad(cast(ubyte*)a));
+            consolePrintChar(' ');
+        }
+        consolePrintChar(' ');
+        for (uint i = 0; i < 16; i++)
+        {
+            ulong a = row + i;
+            if (a < virt || a >= end)
+            {
+                consolePrintChar(' ');
+                continue;
+            }
+            ubyte c = volatileLoad(cast(ubyte*)a);
+            consolePrintChar((c >= 32 && c < 127) ? cast(char)c : '.');
+        }
+        consolePrintChar('\n');
+    }
+}
+
+// ---------------------------------------------------------------------------
+// crash (exercises the exception dump and backtrace)
+// ---------------------------------------------------------------------------
+
+__gshared uint diagZero;
+
+void diagCrashLeaf(uint kind) @nogc nothrow
+{
+    if (kind == 0)
+        volatileLoad(cast(ulong*)0x0000123456780000UL);     // canonical but unmapped -> #PF
+    else if (kind == 1)
+        asm @nogc nothrow { ud2; }                          // #UD
+    else if (kind == 2)
+    {
+        int z = volatileLoad(&diagZero);
+        volatileStore(&diagZero, 1 / z);                    // #DE
+    }
+    else
+        volatileLoad(cast(ulong*)0x8000000000000000UL);     // non-canonical -> #GP
+}
+
+void diagCrashMid(uint kind) @nogc nothrow
+{
+    diagCrashLeaf(kind);
+    volatileStore(&diagZero, 0);                            // keeps this a non-tail call
+}
+
+void diagCrash(uint kind) @nogc nothrow
+{
+    gfxPresent();
+    diagCrashMid(kind);
+    volatileStore(&diagZero, 0);
+}
+
+// ---------------------------------------------------------------------------
+// sleep
+// ---------------------------------------------------------------------------
+
+/// Wait `ms` milliseconds, keeping input and the screen alive. Ctrl+C ends it
+/// early (returns false); other keys typed meanwhile are discarded.
+bool diagSleep(ulong ms) @nogc nothrow
+{
+    ulong deadline = clockNowNs() + ms * 1_000_000UL;
+    while (clockNowNs() < deadline)
+    {
+        usbPoll();
+        if (ps2State.irqMode)
+            ps2Drain();
+        else
+            ps2Poll();
+
+        KeyEvent ev;
+        while (keyPopEvent(&ev))
+            if (ev.ctrl && keyEventChar(&ev) == 3)
+                return false;
+
+        gfxPresent();
+        cpuHlt();
+    }
+    return true;
+}

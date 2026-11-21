@@ -22,6 +22,7 @@ import dios.core.gdt;
 import dios.core.lapic;
 import dios.core.stdio;
 import dios.core.error;
+import dios.core.vmem;
 
 enum uint VEC_PIC_BASE     = 0x20;
 enum uint VEC_TIMER        = 0x40;
@@ -70,6 +71,7 @@ __gshared IrqHandler[256] irqHandlers;
 __gshared uint[256] irqUnhandled;      // how often a vector fired with no handler
 __gshared uint nextDynamicVector = VEC_DYNAMIC_FIRST;
 __gshared uint nmiCount;
+__gshared ulong[256] irqCount;         // every delivery of every vector (for the irqstat command)
 __gshared bool inException;
 
 immutable string[32] exceptionNames = [
@@ -168,14 +170,50 @@ void exceptionDump(InterruptFrame* f) @nogc nothrow
     kprintf("RBP %llx  R8  %llx  R9  %llx\n", f.rbp, f.r8, f.r9);
     kprintf("R10 %llx  R11 %llx  R12 %llx\n", f.r10, f.r11, f.r12);
     kprintf("R13 %llx  R14 %llx  R15 %llx\n", f.r13, f.r14, f.r15);
+    exceptionBacktrace(f);
     kprintf("System halted.\n");
     hcf();
+}
+
+// Both words of a frame record must be mapped before they are read: a corrupt
+// RBP must end the trace, not fault inside the fault handler.
+bool exceptionReadWord(ulong addr, ulong* value) @nogc nothrow
+{
+    ulong phys;
+    if ((addr & 7) != 0 || !vmemTranslate(addr, &phys))
+        return false;
+    *value = *cast(ulong*)addr;
+    return true;
+}
+
+// Walk the rbp chain (the kernel keeps frame pointers). Addresses can be
+// resolved offline:  llvm-addr2line -f -e kernel64.bin <addr> ...
+void exceptionBacktrace(InterruptFrame* f) @nogc nothrow
+{
+    kprintf("Backtrace (llvm-addr2line -f -e kernel64.bin):\n");
+    kprintf("  #0 %llx\n", f.rip);
+    ulong rbp = f.rbp;
+    uint depth = 1;
+    while (depth < 16 && rbp != 0)
+    {
+        ulong next, ret;
+        if (!exceptionReadWord(rbp, &next) || !exceptionReadWord(rbp + 8, &ret))
+            break;
+        if (ret == 0)
+            break;
+        kprintf("  #%u %llx\n", depth, ret);
+        depth++;
+        if (next <= rbp)                    // the chain must climb the stack
+            break;
+        rbp = next;
+    }
 }
 
 // Called from the assembly stubs in cpu.s.
 void isrDispatch(InterruptFrame* f) @nogc nothrow
 {
     uint v = cast(uint)f.vector;
+    irqCount[v & 0xFF]++;
 
     if (v == 2)
     {

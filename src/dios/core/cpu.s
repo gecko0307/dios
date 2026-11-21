@@ -17,6 +17,7 @@ global cpuIrqRestore
 global cpuSti
 global cpuCli
 global cpuHlt
+global cpuTripleFault
 global isrStubAddress
 
 extern isrDispatch
@@ -45,6 +46,20 @@ gdtFlush:
 idtLoad:
     lidt [rdi]
     ret
+
+; void cpuTripleFault() - last-resort reset: load an empty IDT, then raise an
+; exception. With no handler the #UD escalates to #DF and then a triple fault,
+; which makes the chipset reset the machine. Never returns.
+cpuTripleFault:
+    cli
+    sub rsp, 16
+    mov word [rsp], 0
+    mov qword [rsp + 2], 0
+    lidt [rsp]
+    ud2
+.hang:
+    hlt
+    jmp .hang
 
 ; void tssLoad(ushort selector)
 tssLoad:

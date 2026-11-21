@@ -208,11 +208,10 @@ void run() @nogc nothrow
             ps2Poll();
 
         // Every key press, in order (Shift state was captured when it went down)
-        ubyte sc;
-        bool shift;
-        while (keyPop(&sc, &shift))
+        KeyEvent ev;
+        while (keyPopEvent(&ev))
         {
-            shellHandleKey(sc, shift);
+            shellHandleKey(&ev);
         }
 
         ulong now = nowMs();

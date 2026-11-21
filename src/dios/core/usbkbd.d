@@ -43,6 +43,7 @@ struct UsbKbdState
 // held. One set of repeat state shared by all USB keyboards.
 __gshared ubyte repeatUsage;
 __gshared bool repeatShift;
+__gshared bool repeatCtrl;
 __gshared ulong repeatAtNs;
 
 extern(C):
@@ -59,13 +60,19 @@ bool usbKbdMap(ubyte usage, ubyte* scancode, bool* extended) @nogc nothrow
     return true;
 }
 
-bool usbKbdPress(ubyte usage, bool shift) @nogc nothrow
+/// Returns true if the key repeats (false for unmapped keys and for Caps Lock).
+bool usbKbdPress(ubyte usage, bool shift, bool ctrl) @nogc nothrow
 {
     ubyte sc;
     bool ext;
     if (!usbKbdMap(usage, &sc, &ext))
         return false;
-    keyPush(sc, shift, ext);
+    if (!ext && sc == 0x3A)
+    {
+        keyCapsToggle();                // lock key: one toggle per press, no repeat
+        return false;
+    }
+    keyPush(sc, shift, ext, ctrl);
     return true;
 }
 
@@ -101,6 +108,7 @@ void usbKbdProcessReport(UsbKbdState* st, const(ubyte)* rpt, uint got) @nogc not
 
     ubyte mods = rpt[0];
     bool shift = (mods & 0x22) != 0;    // left (bit 1) or right (bit 5) Shift
+    bool ctrl = (mods & 0x11) != 0;     // left (bit 0) or right (bit 4) Ctrl
 
     // Presses: usages that were not held in the previous report.
     // (Usages 1..3 are error codes, 0 is an empty slot.)
@@ -109,10 +117,11 @@ void usbKbdProcessReport(UsbKbdState* st, const(ubyte)* rpt, uint got) @nogc not
         ubyte k = keys[i];
         if (k <= 3 || usbKbdHas(st.prevKeys.ptr, 6, k))
             continue;
-        if (usbKbdPress(k, shift))
+        if (usbKbdPress(k, shift, ctrl))
         {
             repeatUsage = k;
             repeatShift = shift;
+            repeatCtrl = ctrl;
             repeatAtNs = clockNowNs() + cast(ulong)USBKBD_REPEAT_DELAY_MS * 1_000_000UL;
         }
     }
@@ -124,7 +133,10 @@ void usbKbdProcessReport(UsbKbdState* st, const(ubyte)* rpt, uint got) @nogc not
         if (!usbKbdHas(keys.ptr, 6, repeatUsage))
             repeatUsage = 0;
         else
-            repeatShift = shift;        // Shift may have changed while holding
+        {
+            repeatShift = shift;        // modifiers may have changed while holding
+            repeatCtrl = ctrl;
+        }
     }
 
     for (uint i = 0; i < 6; i++)
@@ -140,7 +152,7 @@ void usbKbdRepeatTick() @nogc nothrow
     ulong now = clockNowNs();
     if (now < repeatAtNs)
         return;
-    usbKbdPress(repeatUsage, repeatShift);
+    usbKbdPress(repeatUsage, repeatShift, repeatCtrl);
     // No catch-up if the main loop was busy: next repeat is one period from now.
     repeatAtNs = now + cast(ulong)USBKBD_REPEAT_PERIOD_MS * 1_000_000UL;
 }

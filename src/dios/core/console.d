@@ -14,16 +14,22 @@ struct ConsoleState
     uint x;
     uint y;
     uint width;
-    uint height; // visible height of the text area in pixels (a whole number of lines)
+    uint height;     // visible height of the text area in pixels (a whole number of lines)
     uint print_x;
     uint print_y;
     uint h_stride;
     uint v_stride;
     uint clear_color;
-    bool cursorOn; // the blinking text cursor is currently XOR-ed into the scene
+    bool cursorOn;   // the blinking text cursor is currently XOR-ed into the scene
 }
 
 __gshared ConsoleState console;
+
+enum uint CONSOLE_MAX_ROWS = 512;
+// rowWrapped[r] != 0: row r ended because the text ran into the right edge and
+// continues on row r+1 (as opposed to an explicit newline). Lets backspace and
+// cursor-left cross a soft wrap.
+__gshared ubyte[CONSOLE_MAX_ROWS] rowWrapped;
 
 extern(C):
 
@@ -39,6 +45,8 @@ ConsoleState* consoleInit(Framebuffer* fb, uint x, uint y) @nogc nothrow
     console.h_stride = CHAR_WIDTH - 2;
     console.v_stride = CHAR_HEIGHT;
     console.cursorOn = false;
+    for (uint r = 0; r < CONSOLE_MAX_ROWS; r++)
+        rowWrapped[r] = 0;
 
     // The text area runs from y to the bottom of the screen, in whole lines.
     // Always keep at least one line so the scroll arithmetic stays sane.
@@ -96,12 +104,35 @@ void consoleScroll() @nogc nothrow
             row[xx] = console.clear_color;
     }
 
+    // Row flags follow the text up by one row.
+    uint rows = console.height / console.v_stride;
+    if (rows > CONSOLE_MAX_ROWS)
+        rows = CONSOLE_MAX_ROWS;
+    for (uint r = 0; r + 1 < rows; r++)
+        rowWrapped[r] = rowWrapped[r + 1];
+    if (rows != 0)
+        rowWrapped[rows - 1] = 0;
+
     gfxDirty(0, cast(int)console.y, cast(int)fb.width, cast(int)console.height);
 }
 
-// Move to the start of the next line, scrolling if that would run off the bottom.
-void consoleLineFeed() @nogc nothrow
+uint consoleRow() @nogc nothrow
 {
+    uint r = console.print_y / console.v_stride;
+    return (r < CONSOLE_MAX_ROWS) ? r : CONSOLE_MAX_ROWS - 1;
+}
+
+// Number of character cells that fit in one row.
+uint consoleCells() @nogc nothrow
+{
+    return (console.width + console.h_stride - 1) / console.h_stride;
+}
+
+// Move to the start of the next line, scrolling if that would run off the bottom.
+// `wrapped` marks the row we leave as continuing on the next one (soft wrap).
+void consoleLineFeedEx(bool wrapped) @nogc nothrow
+{
+    rowWrapped[consoleRow()] = wrapped ? 1 : 0;
     console.print_x = 0;
     console.print_y += console.v_stride;
     if (console.print_y + console.v_stride > console.height)
@@ -109,6 +140,11 @@ void consoleLineFeed() @nogc nothrow
         consoleScroll();
         console.print_y = console.height - console.v_stride;
     }
+}
+
+void consoleLineFeed() @nogc nothrow
+{
+    consoleLineFeedEx(false);
 }
 
 // Draw one character at the cursor position and advance. Does not touch the
@@ -153,7 +189,7 @@ void consolePutChar(char c) @nogc nothrow
 
     console.print_x += console.h_stride;
     if (console.print_x >= console.width)
-        consoleLineFeed();
+        consoleLineFeedEx(true);
 }
 
 void consolePrintChar(char c) @nogc nothrow
@@ -176,38 +212,125 @@ void consolePrintString(string str) @nogc nothrow
     }
 }
 
+// Blank one character cell (no cursor handling, no movement).
+void consoleClearCell(uint px, uint py) @nogc nothrow
+{
+    uint baseX = console.x + px;
+    uint baseY = console.y + py;
+    uint stride = console.fb.pitch / console.fb.bytesPerPixel;
+    for (uint y = 0; y < CHAR_HEIGHT; y++)
+    {
+        if (baseY + y >= console.fb.height)
+            break;
+        for (uint x = 0; x < CHAR_WIDTH; x++)
+        {
+            if (baseX + x >= console.fb.width)
+                break;
+            console.fb.ptr[(baseY + y) * stride + (baseX + x)] = console.clear_color;
+        }
+    }
+    gfxDirty(cast(int)baseX, cast(int)baseY, CHAR_WIDTH, CHAR_HEIGHT);
+}
+
+// Step the print position one cell left, crossing a soft wrap to the end of the
+// previous row. Returns false at the start of a line (nothing to step over).
+// No cursor handling.
+bool consoleStepLeft() @nogc nothrow
+{
+    if (console.print_x >= console.h_stride)
+    {
+        console.print_x -= console.h_stride;
+        return true;
+    }
+    uint row = consoleRow();
+    if (row == 0 || console.print_y < console.v_stride || rowWrapped[row - 1] == 0)
+        return false;
+    rowWrapped[row - 1] = 0;
+    console.print_y -= console.v_stride;
+    console.print_x = (consoleCells() - 1) * console.h_stride;
+    return true;
+}
+
+// Move the cursor one cell left without erasing. False at the line start.
+bool consoleMoveLeft() @nogc nothrow
+{
+    bool hadCursor = console.cursorOn;
+    if (hadCursor)
+        consoleCursorXor();
+    bool ok = consoleStepLeft();
+    if (ok)
+    {
+        // The step un-wrapped the row above; moving left leaves the text where it is,
+        // so keep the soft-wrap mark if we crossed one.
+        uint row = consoleRow();
+        if (console.print_x == (consoleCells() - 1) * console.h_stride && row + 1 < CONSOLE_MAX_ROWS)
+            rowWrapped[row] = 1;
+    }
+    if (hadCursor)
+        consoleCursorXor();
+    return ok;
+}
+
+// Move the cursor one cell right (wrapping to the next row, scrolling if needed).
+void consoleMoveRight() @nogc nothrow
+{
+    bool hadCursor = console.cursorOn;
+    if (hadCursor)
+        consoleCursorXor();
+    console.print_x += console.h_stride;
+    if (console.print_x >= console.width)
+        consoleLineFeedEx(true);
+    if (hadCursor)
+        consoleCursorXor();
+}
+
+// Blank the cell under the cursor (used to trim the tail after an edit).
+void consoleEraseHere() @nogc nothrow
+{
+    bool hadCursor = console.cursorOn;
+    if (hadCursor)
+        consoleCursorXor();
+    consoleClearCell(console.print_x, console.print_y);
+    if (hadCursor)
+        consoleCursorXor();
+}
+
+// Step back one cell and erase it; crosses soft-wrapped line breaks.
 void consoleBack() @nogc nothrow
 {
-    if (console.print_x > 0)
+    bool hadCursor = console.cursorOn;
+    if (hadCursor)
+        consoleCursorXor();
+    if (consoleStepLeft())
+        consoleClearCell(console.print_x, console.print_y);
+    if (hadCursor)
+        consoleCursorXor();
+}
+
+// Blank the whole text area and home the cursor.
+void consoleClear() @nogc nothrow
+{
+    bool hadCursor = console.cursorOn;
+    if (hadCursor)
+        consoleCursorXor();
+
+    Framebuffer* fb = console.fb;
+    uint stride = fb.pitch / fb.bytesPerPixel;
+    for (uint yy = console.y; yy < console.y + console.height && yy < fb.height; yy++)
     {
-        bool hadCursor = console.cursorOn;
-        if (hadCursor)
-            consoleCursorXor();
-
-        console.print_x -= console.h_stride;
-        
-        uint baseX = console.x + console.print_x;
-        uint baseY = console.y + console.print_y;
-        
-        for (uint y = 0; y < CHAR_HEIGHT; y++)
-        {
-            if (baseY + y >= console.fb.height)
-                break;
-            
-            for (uint x = 0; x < CHAR_WIDTH; x++)
-            {
-                if (baseX + x >= console.fb.width)
-                    break;
-                
-                uint offset = (baseY + y) * (console.fb.pitch / console.fb.bytesPerPixel) + (baseX + x);
-                console.fb.ptr[offset] = console.clear_color;
-            }
-        }
-        gfxDirty(cast(int)baseX, cast(int)baseY, CHAR_WIDTH, CHAR_HEIGHT);
-
-        if (hadCursor)
-            consoleCursorXor();
+        uint* row = fb.ptr + cast(size_t)yy * stride;
+        for (uint xx = 0; xx < fb.width; xx++)
+            row[xx] = console.clear_color;
     }
+    gfxDirty(0, cast(int)console.y, cast(int)fb.width, cast(int)console.height);
+
+    for (uint r = 0; r < CONSOLE_MAX_ROWS; r++)
+        rowWrapped[r] = 0;
+    console.print_x = 0;
+    console.print_y = 0;
+
+    if (hadCursor)
+        consoleCursorXor();
 }
 
 void consoleNewline() @nogc nothrow
@@ -368,7 +491,7 @@ void consolePrintStringFmt(string fmt, va_list ap) @nogc nothrow
     }
 }
 
-// Legacy VGA text mode
+// VGA text mode fallback
 struct VGAConsole
 {
     public static:

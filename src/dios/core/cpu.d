@@ -21,6 +21,8 @@ void cpuSti() @nogc nothrow;
 void cpuCli() @nogc nothrow;
 /// STI;HLT - sleep until the next interrupt (leaves interrupts enabled).
 void cpuHlt() @nogc nothrow;
+/// Reset the machine by deliberately triple-faulting. Does not return.
+void cpuTripleFault() @nogc nothrow;
 
 void* isrStubAddress(uint vector) @nogc nothrow;
 

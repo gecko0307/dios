@@ -4,6 +4,7 @@ import dios.core.clock;
 import dios.core.acpi;
 import dios.core.console;
 import dios.core.cpu;
+import dios.core.diag;
 import dios.core.interrupts;
 import dios.core.keyboard;
 import dios.core.paging;
@@ -14,14 +15,19 @@ import dios.core.stdio;
 enum size_t SHELL_LINE_CAPACITY = 128;
 enum size_t SHELL_HISTORY_CAPACITY = 16;
 
-immutable string[10] SHELL_COMMANDS = [
+immutable string[19] SHELL_COMMANDS = [
     "help", "about", "mem", "uptime", "clock",
-    "irq", "pci", "history", "echo", "poweroff"
+    "irq", "pci", "history", "echo", "poweroff",
+    "reboot", "clear", "cpuinfo", "acpi", "irqstat",
+    "sleep", "hexdump", "crash", "version"
 ];
 
 __gshared char[SHELL_LINE_CAPACITY] shellLine;
 __gshared char[SHELL_LINE_CAPACITY][SHELL_HISTORY_CAPACITY] shellHistory;
 __gshared size_t shellLineLength;
+__gshared size_t shellCursor;                       // insertion point, 0..shellLineLength
+__gshared int shellHistPos = -1;                    // -1: editing a fresh line, k: showing the k-th newest entry
+__gshared char[SHELL_LINE_CAPACITY] shellDraft;     // the fresh line, parked while browsing history
 __gshared size_t shellHistoryCount;
 __gshared size_t shellHistoryNext;
 
@@ -155,16 +161,26 @@ void shellExecute() @nogc nothrow
     if (shellEquals(shellLine.ptr, "help"))
     {
         kprintf("DIOS kernel shell\n");
-        kprintf("  help       Show this command list\n");
-        kprintf("  about      Kernel version information\n");
-        kprintf("  mem        Physical memory statistics\n");
-        kprintf("  uptime     Time since boot\n");
-        kprintf("  clock      Clock source and timer status\n");
-        kprintf("  irq        Interrupt controller status\n");
-        kprintf("  pci        Enumerate PCI functions\n");
-        kprintf("  history    Show recent commands\n");
-        kprintf("  echo TEXT  Print TEXT\n");
-        kprintf("  poweroff   Shut down the computer\n");
+        kprintf("  help             Show this command list\n");
+        kprintf("  about            Kernel version information\n");
+        kprintf("  mem              Physical memory statistics\n");
+        kprintf("  uptime           Time since boot\n");
+        kprintf("  clock            Clock source and timer status\n");
+        kprintf("  irq              Interrupt controller status\n");
+        kprintf("  irqstat          Interrupt counts per vector\n");
+        kprintf("  pci              Enumerate PCI functions\n");
+        kprintf("  cpuinfo          CPU identification and features\n");
+        kprintf("  acpi             ACPI tables, MADT, FADT summary\n");
+        kprintf("  hexdump [-p] ADDR [LEN]  Dump memory (-p: physical address)\n");
+        kprintf("  history          Show recent commands\n");
+        kprintf("  echo TEXT        Print TEXT\n");
+        kprintf("  sleep SECONDS    Wait (Ctrl+C aborts)\n");
+        kprintf("  clear            Clear the screen\n");
+        kprintf("  crash pf|ud|div|gp  Trigger a CPU exception (kernel halts)\n");
+        kprintf("  reboot           Restart the computer\n");
+        kprintf("  poweroff         Shut down the computer\n");
+        kprintf("Keys: arrows/Home/End/Del edit, Up/Down history, Tab completes,\n");
+        kprintf("      Ctrl+A/E start/end, Ctrl+U clear line, Ctrl+L redraw, Ctrl+C cancel\n");
     }
     else if (shellEquals(shellLine.ptr, "about"))
     {
@@ -219,6 +235,78 @@ void shellExecute() @nogc nothrow
     {
         kprintf("%s\n", cast(char*)args);
     }
+    else if (shellEquals(shellLine.ptr, "version"))
+    {
+        kprintf("DIOS 0.1.0 for x86_64\n");
+    }
+    else if (shellEquals(shellLine.ptr, "clear"))
+    {
+        consoleClear();
+    }
+    else if (shellEquals(shellLine.ptr, "cpuinfo"))
+    {
+        diagCpuInfo();
+    }
+    else if (shellEquals(shellLine.ptr, "acpi"))
+    {
+        diagAcpi();
+    }
+    else if (shellEquals(shellLine.ptr, "irqstat"))
+    {
+        diagIrqStat();
+    }
+    else if (shellEquals(shellLine.ptr, "reboot"))
+    {
+        systemReboot();
+    }
+    else if (shellEquals(shellLine.ptr, "sleep"))
+    {
+        ulong secs;
+        if (diagParseNumber(args, &secs) is null || secs > 3600)
+        {
+            kprintf("Usage: sleep SECONDS (0-3600)\n");
+        }
+        else if (!diagSleep(secs * 1000))
+        {
+            kprintf("^C\n");
+        }
+    }
+    else if (shellEquals(shellLine.ptr, "hexdump"))
+    {
+        const(char)* p = args;
+        bool physical = false;
+        if (p[0] == '-' && p[1] == 'p' && (p[2] == ' ' || p[2] == 0))
+        {
+            physical = true;
+            p += 2;
+        }
+        ulong addr, len = 64;
+        p = diagParseNumber(p, &addr);
+        if (p is null)
+        {
+            kprintf("Usage: hexdump [-p] ADDR [LEN]   (numbers: 0x1F or decimal, LEN max 1024)\n");
+        }
+        else
+        {
+            const(char)* q = diagParseNumber(p, &len);
+            if (q is null)
+                len = 64;
+            diagHexdump(addr, len, physical);
+        }
+    }
+    else if (shellEquals(shellLine.ptr, "crash"))
+    {
+        if (shellEquals(args, "pf"))
+            diagCrash(0);
+        else if (shellEquals(args, "ud"))
+            diagCrash(1);
+        else if (shellEquals(args, "div"))
+            diagCrash(2);
+        else if (shellEquals(args, "gp"))
+            diagCrash(3);
+        else
+            kprintf("Usage: crash pf|ud|div|gp\n");
+    }
     else if (shellEquals(shellLine.ptr, "poweroff"))
     {
         kprintf("Powering off...\n");
@@ -231,8 +319,7 @@ void shellExecute() @nogc nothrow
         kprintf("Type 'help' for available commands.\n");
     }
 
-    shellLine[] = 0;
-    shellLineLength = 0;
+    shellClearLine();
     shellPrompt();
 }
 
@@ -274,6 +361,7 @@ void shellComplete() @nogc nothrow
         }
         shellLineLength = commonLength;
         shellLine[shellLineLength] = 0;
+        shellCursor = shellLineLength;
     }
 
     if (matches > 1 && commonLength == shellLineLength)
@@ -291,59 +379,262 @@ void shellComplete() @nogc nothrow
 
 void shellInit() @nogc nothrow
 {
-    shellLine[] = 0;
-    shellLineLength = 0;
+    shellClearLine();
     shellHistoryCount = 0;
     shellHistoryNext = 0;
-    kprintf("\nWelcome to the kernel shell! Type 'help' to list available commands.\n");
+    kprintf("\nWelcome to the kernel shell! Type 'help' for available commands.\n");
     shellPrompt();
 }
 
-/// Feed a decoded PS/2 make code to the shell from the main loop.
-void shellHandleKey(ubyte scancode, bool shift) @nogc nothrow
+// --------------------------------------------------------------------------
+// Line editing. The console cursor and shellCursor always move together; the
+// helpers below keep them in step (the console follows soft-wrapped rows).
+// --------------------------------------------------------------------------
+
+void shellClearLine() @nogc nothrow
 {
-    if (scancode == 0x0E) // Backspace
-    {
-        if (shellLineLength != 0)
-        {
-            shellLineLength--;
-            shellLine[shellLineLength] = 0;
-            consoleBack();
-        }
-        return;
-    }
+    for (size_t i = 0; i < SHELL_LINE_CAPACITY; i++)
+        shellLine[i] = 0;
+    shellLineLength = 0;
+    shellCursor = 0;
+    shellHistPos = -1;
+}
 
-    if (scancode == 0x1C) // Enter
-    {
-        consoleNewline();
-        shellLine[shellLineLength] = 0;
-        shellRememberCommand();
-        shellExecute();
-        return;
-    }
+void shellMoveLeftN(size_t n) @nogc nothrow
+{
+    while (n-- != 0)
+        consoleMoveLeft();
+}
 
-    if (scancode == 0x0F) // Tab
-    {
-        shellComplete();
-        return;
-    }
+void shellMoveRightN(size_t n) @nogc nothrow
+{
+    while (n-- != 0)
+        consoleMoveRight();
+}
 
-    if (scancode == 0x01) // Escape: clear current input
-    {
-        while (shellLineLength != 0)
-        {
-            shellLineLength--;
-            shellLine[shellLineLength] = 0;
-            consoleBack();
-        }
+void shellCursorLeft() @nogc nothrow
+{
+    if (shellCursor == 0)
         return;
-    }
+    consoleMoveLeft();
+    shellCursor--;
+}
 
-    char c = scancodeToChar(scancode, shift);
-    if (c >= 32 && c < 127 && shellLineLength + 1 < SHELL_LINE_CAPACITY)
+void shellCursorRight() @nogc nothrow
+{
+    if (shellCursor >= shellLineLength)
+        return;
+    consoleMoveRight();
+    shellCursor++;
+}
+
+void shellCursorHome() @nogc nothrow
+{
+    shellMoveLeftN(shellCursor);
+    shellCursor = 0;
+}
+
+void shellCursorEnd() @nogc nothrow
+{
+    shellMoveRightN(shellLineLength - shellCursor);
+    shellCursor = shellLineLength;
+}
+
+void shellPrintTail(size_t from) @nogc nothrow
+{
+    for (size_t i = from; i < shellLineLength; i++)
+        consolePrintChar(shellLine[i]);
+}
+
+void shellInsertChar(char c) @nogc nothrow
+{
+    if (shellLineLength + 1 >= SHELL_LINE_CAPACITY)
+        return;
+
+    if (shellCursor == shellLineLength)
     {
         shellLine[shellLineLength++] = c;
         shellLine[shellLineLength] = 0;
+        shellCursor = shellLineLength;
         consolePrintChar(c);
+        return;
     }
+
+    for (size_t i = shellLineLength; i > shellCursor; i--)
+        shellLine[i] = shellLine[i - 1];
+    shellLine[shellCursor] = c;
+    shellLineLength++;
+    shellLine[shellLineLength] = 0;
+
+    shellPrintTail(shellCursor);            // console cursor ends up at the line end
+    shellCursor++;
+    shellMoveLeftN(shellLineLength - shellCursor);
+}
+
+// Delete the character under the cursor.
+void shellDeleteAtCursor() @nogc nothrow
+{
+    if (shellCursor >= shellLineLength)
+        return;
+
+    for (size_t i = shellCursor; i + 1 < shellLineLength; i++)
+        shellLine[i] = shellLine[i + 1];
+    shellLineLength--;
+    shellLine[shellLineLength] = 0;
+
+    shellPrintTail(shellCursor);            // console cursor ends up at the new line end
+    consoleEraseHere();                     // the old last cell
+    shellMoveLeftN(shellLineLength - shellCursor);
+}
+
+void shellBackspace() @nogc nothrow
+{
+    if (shellCursor == 0)
+        return;
+
+    if (shellCursor == shellLineLength)
+    {
+        shellLineLength--;
+        shellCursor--;
+        shellLine[shellLineLength] = 0;
+        consoleBack();
+        return;
+    }
+
+    shellCursorLeft();
+    shellDeleteAtCursor();
+}
+
+// Replace the whole input line (history recall, Esc, Ctrl+U).
+void shellReplaceLine(const(char)* text) @nogc nothrow
+{
+    shellCursorEnd();
+    while (shellLineLength != 0)
+    {
+        shellLineLength--;
+        shellLine[shellLineLength] = 0;
+        consoleBack();
+    }
+    shellCursor = 0;
+
+    size_t i = 0;
+    while (text[i] != 0 && i + 1 < SHELL_LINE_CAPACITY)
+    {
+        shellLine[i] = text[i];
+        consolePrintChar(text[i]);
+        i++;
+    }
+    shellLine[i] = 0;
+    shellLineLength = i;
+    shellCursor = i;
+}
+
+// k-th newest history entry (0 = newest).
+const(char)* shellHistoryEntry(size_t k) @nogc nothrow
+{
+    size_t index = (shellHistoryNext + SHELL_HISTORY_CAPACITY * 2 - 1 - k) % SHELL_HISTORY_CAPACITY;
+    return shellHistory[index].ptr;
+}
+
+void shellHistoryUp() @nogc nothrow
+{
+    if (cast(size_t)(shellHistPos + 1) >= shellHistoryCount)
+        return;
+    if (shellHistPos < 0)
+        shellCopy(shellDraft.ptr, shellLine.ptr);       // park what was being typed
+    shellHistPos++;
+    shellReplaceLine(shellHistoryEntry(cast(size_t)shellHistPos));
+}
+
+void shellHistoryDown() @nogc nothrow
+{
+    if (shellHistPos < 0)
+        return;
+    shellHistPos--;
+    if (shellHistPos < 0)
+        shellReplaceLine(shellDraft.ptr);
+    else
+        shellReplaceLine(shellHistoryEntry(cast(size_t)shellHistPos));
+}
+
+// Ctrl+L: wipe the screen, redraw prompt and the current input.
+void shellRedraw() @nogc nothrow
+{
+    size_t cursor = shellCursor;
+    consoleClear();
+    shellPrompt();
+    shellPrintTail(0);
+    shellMoveLeftN(shellLineLength - cursor);
+    shellCursor = cursor;
+}
+
+void shellAbortLine() @nogc nothrow
+{
+    shellCursorEnd();
+    consolePrintString("^C");
+    consoleNewline();
+    shellClearLine();
+    shellPrompt();
+}
+
+/// Feed one key press (from the shared key queue) to the shell.
+void shellHandleKey(const(KeyEvent)* ev) @nogc nothrow
+{
+    if (ev.extended)
+    {
+        switch (ev.scancode)
+        {
+            case 0x4B: shellCursorLeft(); break;        // Left
+            case 0x4D: shellCursorRight(); break;       // Right
+            case 0x48: shellHistoryUp(); break;         // Up
+            case 0x50: shellHistoryDown(); break;       // Down
+            case 0x47: shellCursorHome(); break;        // Home
+            case 0x4F: shellCursorEnd(); break;         // End
+            case 0x53: shellDeleteAtCursor(); break;    // Delete
+            default: break;
+        }
+        return;
+    }
+
+    if (ev.ctrl)
+    {
+        switch (keyEventChar(ev))
+        {
+            case 1:  shellCursorHome(); break;          // Ctrl+A
+            case 5:  shellCursorEnd(); break;           // Ctrl+E
+            case 3:  shellAbortLine(); break;           // Ctrl+C
+            case 12: shellRedraw(); break;              // Ctrl+L
+            case 21: shellReplaceLine(""); break;       // Ctrl+U
+            default: break;
+        }
+        return;
+    }
+
+    switch (ev.scancode)
+    {
+        case 0x0E:                                      // Backspace
+            shellBackspace();
+            return;
+        case 0x1C:                                      // Enter
+            shellCursorEnd();
+            consoleNewline();
+            shellLine[shellLineLength] = 0;
+            shellRememberCommand();
+            shellHistPos = -1;
+            shellExecute();
+            return;
+        case 0x0F:                                      // Tab
+            shellCursorEnd();
+            shellComplete();
+            return;
+        case 0x01:                                      // Escape: clear current input
+            shellReplaceLine("");
+            return;
+        default:
+            break;
+    }
+
+    char c = keyEventChar(ev);
+    if (c >= 32 && c < 127)
+        shellInsertChar(c);
 }

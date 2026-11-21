@@ -135,8 +135,32 @@ ubyte kKbdGetKey() @nogc nothrow
     return kPortReadByte(0x60);
 }
 
+/// Caps Lock state. Toggled by the producers (see keyCapsToggle), snapshotted into each event.
+__gshared bool keyCapsLock;
+
+enum ushort KEYF_SHIFT = 0x100;
+enum ushort KEYF_EXT   = 0x200;
+enum ushort KEYF_CTRL  = 0x400;
+enum ushort KEYF_CAPS  = 0x800;
+
+/// One key press as the shell sees it.
+struct KeyEvent
+{
+    ubyte scancode;     // set-1 make code
+    bool shift;
+    bool ctrl;
+    bool caps;          // Caps Lock was on
+    bool extended;      // arrows, Home/End/PgUp/PgDn/Insert/Delete, right Ctrl/Alt
+}
+
+/// Flip Caps Lock. Producers call this once per physical press (no auto-repeat).
+void keyCapsToggle() @nogc nothrow
+{
+    keyCapsLock = !keyCapsLock;
+}
+
 /// Queue a key press. Returns false (and counts a drop) if the queue is full.
-bool keyPush(ubyte scancode, bool shift, bool extended) @nogc nothrow
+bool keyPush(ubyte scancode, bool shift, bool extended, bool ctrl = false) @nogc nothrow
 {
     uint next = keyQueue.head + 1;
     if (next - keyQueue.tail > KEYQ_SIZE)
@@ -145,39 +169,41 @@ bool keyPush(ubyte scancode, bool shift, bool extended) @nogc nothrow
         return false;
     }
     keyQueue.keys[keyQueue.head & (KEYQ_SIZE - 1)] =
-        cast(ushort)(scancode | (shift ? 0x100 : 0) | (extended ? 0x200 : 0));
+        cast(ushort)(scancode | (shift ? KEYF_SHIFT : 0) | (extended ? KEYF_EXT : 0) |
+                     (ctrl ? KEYF_CTRL : 0) | (keyCapsLock ? KEYF_CAPS : 0));
     keyQueue.head = next;
     return true;
 }
 
-/// Next key press, in order, with everything the event carries.
-bool keyPopEx(ubyte* scancode, bool* shift, bool* extended) @nogc nothrow
+/// Next key press, in order, with everything the event carries. Keypad Enter
+/// and keypad "/" (extended 0x1C / 0x35) are reported as their plain
+/// counterparts; every other extended key keeps its `extended` flag.
+bool keyPopEvent(KeyEvent* ev) @nogc nothrow
 {
     if (keyQueue.tail == keyQueue.head)
         return false;
     ushort e = keyQueue.keys[keyQueue.tail & (KEYQ_SIZE - 1)];
     keyQueue.tail++;
-    *scancode = cast(ubyte)(e & 0xFF);
-    *shift = (e & 0x100) != 0;
-    *extended = (e & 0x200) != 0;
+    ev.scancode = cast(ubyte)(e & 0xFF);
+    ev.shift = (e & KEYF_SHIFT) != 0;
+    ev.extended = (e & KEYF_EXT) != 0;
+    ev.ctrl = (e & KEYF_CTRL) != 0;
+    ev.caps = (e & KEYF_CAPS) != 0;
+    if (ev.extended && (ev.scancode == 0x1C || ev.scancode == 0x35))
+        ev.extended = false;
     return true;
 }
 
-/// Text-input view of the queue: like keyPopEx, but extended keys are skipped
-/// except keypad Enter (0x1C) and keypad "/" (0x35), which behave like their
-/// plain counterparts. (Arrows, PrintScreen etc. must not turn into the
-/// keypad digit or "*" that shares their code.)
-bool keyPop(ubyte* scancode, bool* shift) @nogc nothrow
+/// Printable/control character for an event (0 if none). Caps Lock only flips
+/// letters; Ctrl+letter gives 1..26.
+char keyEventChar(const(KeyEvent)* ev) @nogc nothrow
 {
-    ubyte sc;
-    bool sh, ext;
-    while (keyPopEx(&sc, &sh, &ext))
-    {
-        if (ext && sc != 0x1C && sc != 0x35)
-            continue;
-        *scancode = sc;
-        *shift = sh;
-        return true;
-    }
-    return false;
+    if (ev.extended || ev.scancode >= scancodeToAscii.length)
+        return 0;
+    ubyte lower = scancodeToAscii[ev.scancode];
+    bool letter = lower >= 'a' && lower <= 'z';
+    if (ev.ctrl)
+        return letter ? cast(char)(lower - 'a' + 1) : cast(char)0;
+    bool useShift = letter ? (ev.shift != ev.caps) : ev.shift;
+    return cast(char)(useShift ? scancodeToAsciiShift[ev.scancode] : lower);
 }

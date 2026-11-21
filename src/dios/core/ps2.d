@@ -29,6 +29,8 @@ struct PS2State
     ubyte[3] packet;
     ubyte extended;
     ubyte shiftMask;   // bit 0: left Shift held, bit 1: right Shift held
+    ubyte ctrlMask;    // bit 0: left Ctrl held, bit 1: right Ctrl held
+    bool capsHeld;     // Caps Lock key is physically down (filters typematic repeat)
     ubyte packetIndex;
     bool present;      // an 8042 controller answered
     bool mouseOk;      // the mouse acknowledged F4
@@ -199,7 +201,7 @@ void ps2HandleKeyByte(ubyte sc) @nogc nothrow
 
     // Queue the press with a Shift snapshot taken now, so it stays correct even if
     // Shift is released again before the main loop gets to it
-    keyPush(sc, ps2State.shiftMask != 0, ext);
+    keyPush(code, ps2State.shiftMask != 0, ext, ps2State.ctrlMask != 0);
 }
 
 // Polled mode: drain what is there instead of one byte per call.
