@@ -164,7 +164,7 @@ void shellListPrograms() @nogc nothrow
 {
     if (programCount == 0)
     {
-        kprintf("No programs found. Add them as boot modules (see PROGRAMS.txt).\n");
+        kprintf("No programs found.\n");
         return;
     }
     for (uint i = 0; i < programCount; i++)
@@ -266,7 +266,7 @@ void shellExecute() @nogc nothrow
     }
     else if (shellEquals(shellLine.ptr, "version"))
     {
-        kprintf("DIOS 0.1.0 for x86_64\n");
+        kprintf("DIOS 0.2.0 for x86_64\n");
     }
     else if (shellEquals(shellLine.ptr, "clear"))
     {
