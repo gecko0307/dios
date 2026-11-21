@@ -1,6 +1,8 @@
 DIOS 0.2.0 - TBD
 ----------------
-- Switch to Python for building the kernel.
+- Basic userspace programs support
+- More kernel shell commands
+- Switch to Python for building.
 
 DIOS 0.1.0 - 21 Nov, 2026
 -------------------------

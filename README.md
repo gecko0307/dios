@@ -22,7 +22,8 @@ DIOS is an ELF kernel that requires a bootloader to run. Default setup in this r
 - PCI enumeration
 - xHCI driver
 - USB and PS/2 keyboard and mouse
-- A simple shell with built-in kernel commands.
+- A simple shell with built-in kernel commands
+- Basic userspace programs support.
 
 DIOS is planned as a graphical OS: all rendering features are built into the kernel (but there's no full-featured GUI yet).
 
@@ -34,22 +35,39 @@ After successful initialization, the kernel immediately starts an interactive sh
 
 - `help` - show the command list
 - `about` - kernel version information
+- `cpuinfo` - CPU identification and features
 - `mem` - physical memory statistics
 - `uptime` - time since boot
 - `clock` - clock source and timer status
 - `irq` - interrupt controller status
+- `irqstat` - interrupt counts per vector
 - `pci` - enumerate PCI functions
+- `hexdump [-p] ADDR [LEN]` - dump memory (-p: physical address)
 - `history` - show recent commands
 - `echo TEXT` - print TEXT
+- `sleep SECONDS` - wait (Ctrl+C aborts)
+- `ls` - list programs on the boot media
+- `run NAME [ARGS]` - run a program (or just type its name)
+- `clear` - clear the screen
+- `crash pf|ud|div|gp` - trigger a CPU exception (kernel halts)
+- `reboot` - restart the computer
 - `poweroff` - shut down the computer.
+
+## Programs
+
+TODO
 
 ## Code Structure
 
-- `src/dios` contains the kernel code:
-  - `src/dios/bootloader` - boot protocol; currently only Limine protocol is implemented. Multiboot support was dropped
-  - `src/dios/core` - kernel modules, including core drivers necessary to run the main I/O loop
-- `src/main.d` - the kernel entry point
-- `src/object.d` - D runtime stub.
+- `src/kernel` contains the kernel code:
+  - `src/kernel/dios/bootloader` - boot protocol; currently only Limine protocol is implemented. Multiboot support was dropped
+  - `src/kernel/dios/core` - kernel modules, including core drivers necessary to run the main I/O loop
+  - `src/kernel/main.d` - the kernel entry point
+- `src/user` contains sample userspace programs that are provided by the bootloader:
+  - `src/user/count.d`
+  - `src/user/fault.d`
+  - `src/user/hello.d`
+  - `src/user/rev.d`
 
 ## Building
 
