@@ -22,6 +22,7 @@ DIOS is an ELF kernel that requires a bootloader to run. Default setup in this r
 - PCI enumeration
 - xHCI driver
 - USB and PS/2 keyboard and mouse
+- CMOS date-time reading
 - A shell with built-in kernel commands
 - Basic single-tasking userspace in Ring 3; system calls.
 
@@ -87,3 +88,7 @@ Prerequisites:
 * [xorriso](https://github.com/Distrotech/xorriso) to generate a bootable CD image
 
 Run `python build.py` to compile the kernel (`cdroot/kernel64.bin`) and generate `dios64.iso`.
+
+## Boot Disc Structure
+
+TODO

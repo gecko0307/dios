@@ -1,6 +1,7 @@
-DIOS 0.2.0 - TBD
-----------------
+DIOS 0.2.0 - 21 Nov, 2026
+-------------------------
 - Basic ELF64 userspace programs support. They are currently loaded by Limine as kernel modules (the kernel itself doesn't have a file system)
+- CMOS date-time reading
 - More kernel shell commands
 - Switch to Python for building.
 
