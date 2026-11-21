@@ -26,7 +26,8 @@ DIOS is an ELF kernel that requires a bootloader to run. Default setup in this r
 - A shell with built-in kernel commands
 - Basic single-tasking userspace in Ring 3; system calls
 - A single-mount read-only filesystem
-- USB mass storage devices; exFAT.
+- USB mass storage devices; exFAT support
+- Running programs from a USB stick.
 
 DIOS is planned as a graphical OS: all rendering features are built into the kernel (but there's no full-featured GUI yet).
 
@@ -81,7 +82,7 @@ Programs are also written in D and compiled to *.elf files. They can be loaded b
   - `src/kernel/dios/bootloader` - boot protocol; currently only Limine protocol is implemented. Multiboot support was dropped
   - `src/kernel/dios/core` - kernel modules, including core drivers necessary to run the main I/O loop
   - `src/kernel/main.d` - the kernel entry point
-- `src/user` contains sample userspace programs that are provided by the bootloader:
+- `src/user` contains sample userspace programs:
   - `src/user/count.d`
   - `src/user/fault.d`
   - `src/user/hello.d`
@@ -95,6 +96,7 @@ Prerequisites:
 * [NASM](http://www.nasm.us)
 * Python (for running the build script)
 * [xorriso](https://github.com/Distrotech/xorriso) to generate a bootable CD image
+* Optionally, [fstool](https://github.com/KarpelesLab/fstool) to generate a USB stick image for testing in QEMU
 
 Run `python build.py` to compile the kernel (`cdroot/kernel64.bin`) and generate `dios64.iso`.
 

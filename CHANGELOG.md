@@ -1,5 +1,8 @@
 DIOS 0.3.0 - TBD
 ----------------
+- A single-mount read-only filesystem
+- USB mass storage devices; exFAT support
+- Running programs from a USB stick
 - New date-time module
 - `time` shell command.
 
