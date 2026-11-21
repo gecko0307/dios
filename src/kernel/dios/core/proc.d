@@ -130,7 +130,7 @@ struct Process
     ulong entry;
     ulong stackPointer;
     ulong argsAddr;
-    uint program;
+    char[PROC_NAME_MAX] name;   // for crash messages
 }
 
 __gshared Program[PROC_MAX_PROGRAMS] programs;
@@ -372,7 +372,7 @@ bool procLoadElf(Program* prog, ulong pml4Phys, ulong* entry) @nogc nothrow
     return true;
 }
 
-bool procBuildSpace(uint index, const(char)* args) @nogc nothrow
+bool procBuildSpace(Program* prog, const(char)* args) @nogc nothrow
 {
     ulong pml4Phys;
     void* pml4 = vmemAllocTable(&pml4Phys);
@@ -387,7 +387,7 @@ bool procBuildSpace(uint index, const(char)* args) @nogc nothrow
     (cast(ulong*)pml4)[0] = 0;
     proc.pml4Phys = pml4Phys;
 
-    if (!procLoadElf(&programs[index], pml4Phys, &proc.entry))
+    if (!procLoadElf(prog, pml4Phys, &proc.entry))
         return false;
 
     for (uint i = 0; i < USER_STACK_PAGES; i++)
@@ -447,7 +447,7 @@ extern(C) void procUserFault(InterruptFrame* f) @nogc nothrow
 {
     uint v = cast(uint)f.vector;
     kprintf("\nProgram '%s' crashed: %s (vector %u) at %llx",
-        programs[proc.program].name.ptr, exceptionNames[v & 31].ptr, v, f.rip);
+        proc.name.ptr, exceptionNames[v & 31].ptr, v, f.rip);
     if (v == 14)
         kprintf(", address %llx", cpuReadCr2());
     kprintf("\n");
@@ -473,16 +473,41 @@ extern(C) void procUserTick(InterruptFrame* f) @nogc nothrow
     }
 }
 
-/// Run program `index` to completion. Returns false if it could not be started;
+/// Run boot module `index` to completion. Returns false if it could not be started;
 /// otherwise stores its exit code (128+vector if it crashed, 130 for Ctrl+C).
 bool procLaunch(uint index, const(char)* args, long* exitCode) @nogc nothrow
 {
-    if (proc.active || index >= programCount)
+    if (index >= programCount)
+        return false;
+    return procLaunchProgram(&programs[index], args, exitCode);
+}
+
+/// Run an ELF image that is already in memory (for example read from a disk).
+/// The image only has to stay around until this returns.
+bool procLaunchImage(const(char)* name, const(ubyte)* image, ulong size, const(char)* args, long* exitCode) @nogc nothrow
+{
+    Program p;
+    uint i = 0;
+    while (name[i] != 0 && i + 1 < PROC_NAME_MAX)
+    {
+        p.name[i] = name[i];
+        i++;
+    }
+    p.name[i] = 0;
+    p.image = image;
+    p.size = size;
+    return procLaunchProgram(&p, args, exitCode);
+}
+
+bool procLaunchProgram(Program* prog, const(char)* args, long* exitCode) @nogc nothrow
+{
+    if (proc.active)
         return false;
 
-    proc.program = index;
+    for (uint i = 0; i < PROC_NAME_MAX; i++)
+        proc.name[i] = prog.name[i];
     proc.pml4Phys = 0;
-    if (!procBuildSpace(index, args))
+    if (!procBuildSpace(prog, args))
     {
         procFreeSpace(proc.pml4Phys);
         proc.pml4Phys = 0;

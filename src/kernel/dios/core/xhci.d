@@ -90,7 +90,23 @@ enum : uint
     TRB_IDT = 1 << 6,       // immediate data (setup stage)
     TRB_DIR_IN = 1 << 16,
 
-    CC_SUCCESS = 1, CC_SHORT_PACKET = 13
+    CC_SUCCESS = 1, CC_SHORT_PACKET = 13, CC_STALL = 6
+}
+
+enum : uint
+{
+    TRB_CMD_STOP_EP = 15, TRB_CMD_RESET_EP = 14, TRB_CMD_SET_TR_DEQ = 16
+}
+
+enum uint XHCI_MAX_CONTROLLERS = 4;
+enum uint XHCI_MSC_BOUNCE_PAGES = 16;      // 64 KiB data buffer per storage device
+enum uint XHCI_MSC_CBW_OFF = 2048;         // CBW/CSW live in the device's scratch page
+enum uint XHCI_MSC_CSW_OFF = 2560;
+
+// Result of xhciBulkXfer
+enum : int
+{
+    BULK_OK = 0, BULK_STALL = 1, BULK_ERROR = 2, BULK_TIMEOUT = 3
 }
 
 // structures
@@ -155,6 +171,27 @@ struct XhciKbd
     UsbKbdState state;          // previous report, for press detection
 }
 
+// A USB Mass Storage interface (Bulk-Only Transport): one bulk IN and one bulk OUT endpoint.
+struct XhciMsc
+{
+    bool found;                 // interface + both endpoints seen in the configuration
+    bool active;                // endpoints configured
+    ubyte ifaceNum;
+    ubyte inAddr, outAddr;
+    ubyte inDci, outDci;
+    uint inMps, outMps;
+    XhciRing inRing, outRing;
+
+    // completion of the last bulk transfer (set by the event handler)
+    bool xferDone;
+    uint xferCode;
+    uint xferResidual;
+    ulong xferWait;
+
+    ubyte* bounce;              // 64 KiB, 64 KiB aligned: a TRB must not cross a 64 KiB boundary
+    ulong bouncePhys;
+}
+
 struct XhciUsbDevice
 {
     bool present;
@@ -178,6 +215,7 @@ struct XhciUsbDevice
     // configuration descriptor findings
     bool configured;            // Set Configuration has been sent
     XhciKbd kbd;
+    XhciMsc msc;
     ubyte cfgValue;
     ubyte ifaceNum;
     ubyte intEpAddr;
@@ -198,6 +236,7 @@ struct XhciUsbDevice
 
 struct XhciController
 {
+    ubyte index;                // position in xhciControllers
     ubyte* cap;
     ubyte* op;
     ubyte* rt;
@@ -224,7 +263,13 @@ struct XhciController
     bool running;
 }
 
-__gshared XhciController xhci;
+// Several controllers can run at the same time (keyboard on one, the USB stick on
+// another). `xhci` always points at the one the code is working on right now:
+// xhciInit() selects the controller it brings up, usbPoll() visits all of them,
+// and anything that talks to a specific device calls xhciSelect() first.
+__gshared XhciController[XHCI_MAX_CONTROLLERS] xhciControllers;
+__gshared XhciController* xhci = &xhciControllers[0];
+__gshared uint xhciCount;
 
 // Print the raw bytes of the first mouse reports and a "first report" note.
 // Handy when a new mouse misbehaves, but those lines show up whenever the mouse
@@ -630,6 +675,15 @@ void xhciHandleEvent(ulong param, uint status, uint control) @nogc nothrow
         {
             xhciHandleKeyboardEvent(d, code, status & 0xFFFFFF);
         }
+        else if (d.msc.active && (epId == d.msc.inDci || epId == d.msc.outDci))
+        {
+            if (param == d.msc.xferWait || (code != CC_SUCCESS && code != CC_SHORT_PACKET))
+            {
+                d.msc.xferCode = code;
+                d.msc.xferResidual = status & 0xFFFFFF;
+                d.msc.xferDone = true;
+            }
+        }
     }
     // Port status change and everything else: ignored (no hot-plug yet).
 }
@@ -672,7 +726,11 @@ void xhciPollEvents() @nogc nothrow
 
 public void usbPoll() @nogc nothrow
 {
-    xhciPollEvents();
+    for (uint i = 0; i < xhciCount; i++)
+    {
+        xhci = &xhciControllers[i];
+        xhciPollEvents();
+    }
     usbKbdRepeatTick();     // USB keyboards do not auto-repeat by themselves
 }
 
@@ -780,6 +838,7 @@ void xhciParseConfig(XhciUsbDevice* d, ubyte* buf, uint len) @nogc nothrow
     d.cfgValue = volatileLoad(buf + 5);
     bool inMouse = false;
     bool inKbd = false;
+    bool inMsc = false;
     uint i = 0;
     while (i + 2 <= len)
     {
@@ -803,6 +862,38 @@ void xhciParseConfig(XhciUsbDevice* d, ubyte* buf, uint len) @nogc nothrow
             inKbd = (alt == 0 && cls == 3 && sub == 1 && prot == 1 && !d.kbd.found);
             if (inKbd)
                 d.kbd.ifaceNum = volatileLoad(buf + i + 2);
+            // Mass storage, SCSI transparent command set, Bulk-Only Transport
+            inMsc = (alt == 0 && cls == 8 && sub == 6 && prot == 0x50 && !d.msc.found);
+            if (inMsc)
+            {
+                d.msc.ifaceNum = volatileLoad(buf + i + 2);
+                d.msc.inAddr = 0;
+                d.msc.outAddr = 0;
+            }
+        }
+        else if (dtype == 5 && dlen >= 7 && inMsc)     // endpoint of the storage interface
+        {
+            ubyte addr = volatileLoad(buf + i + 2);
+            ubyte attr = volatileLoad(buf + i + 3);
+            uint mps = (volatileLoad(buf + i + 4) | (volatileLoad(buf + i + 5) << 8)) & 0x7FF;
+            if ((attr & 3) == 2)                        // bulk
+            {
+                if (addr & 0x80)
+                {
+                    d.msc.inAddr = addr;
+                    d.msc.inMps = mps;
+                }
+                else
+                {
+                    d.msc.outAddr = addr;
+                    d.msc.outMps = mps;
+                }
+                if (d.msc.inAddr != 0 && d.msc.outAddr != 0)
+                {
+                    d.msc.found = true;
+                    inMsc = false;
+                }
+            }
         }
         else if (dtype == 0x21 && dlen >= 9 && inMouse)   // HID descriptor
         {
@@ -981,6 +1072,141 @@ bool xhciSetupKeyboard(XhciUsbDevice* d) @nogc nothrow
     return true;
 }
 
+// Bring up the two bulk endpoints of a mass storage interface.
+bool xhciSetupStorage(XhciUsbDevice* d) @nogc nothrow
+{
+    XhciMsc* m = &d.msc;
+
+    if (!xhciEnsureConfigured(d))
+        return false;
+
+    if (!xhciRingInit(&m.inRing) || !xhciRingInit(&m.outRing))
+        return false;
+
+    // 64 KiB bounce buffer, 64 KiB aligned (16 pages): one TRB never crosses a 64 KiB boundary.
+    ulong bp = pmmAllocContiguousZeroed(XHCI_MSC_BOUNCE_PAGES, XHCI_MSC_BOUNCE_PAGES, PMM_LIMIT_4G);
+    if (bp == 0)
+        return false;
+    m.bounce = cast(ubyte*)pmmPhysToVirt(bp);
+    m.bouncePhys = bp;
+
+    uint inDci = (m.inAddr & 0x0F) * 2 + 1;
+    uint outDci = (m.outAddr & 0x0F) * 2;
+    m.inDci = cast(ubyte)inDci;
+    m.outDci = cast(ubyte)outDci;
+    uint maxDci = inDci > outDci ? inDci : outDci;
+
+    memset(d.inCtx, 0, 4096);
+    xhciCtxW32(d.inCtx, 0, 1, 1 | (1u << inDci) | (1u << outDci));
+    xhciCtxW32(d.inCtx, 1, 0, (maxDci << 27) | (cast(uint)d.speed << 20));
+    xhciCtxW32(d.inCtx, 1, 1, cast(uint)d.port << 16);
+    xhciFillBulkCtx(d, inDci, 6 /* bulk IN */, m.inMps, &m.inRing);
+    xhciFillBulkCtx(d, outDci, 2 /* bulk OUT */, m.outMps, &m.outRing);
+
+    if (!xhciCommand(d.inCtxPhys, (TRB_CMD_CONFIGURE_EP << 10) | (cast(uint)d.slotId << 24), null))
+        return false;
+
+    m.active = true;
+    return true;
+}
+
+// Endpoint context for a bulk endpoint (no interval, no max ESIT payload).
+void xhciFillBulkCtx(XhciUsbDevice* d, uint dci, uint epType, uint mps, XhciRing* ring) @nogc nothrow
+{
+    uint ci = dci + 1;
+    xhciCtxW32(d.inCtx, ci, 0, 0);
+    xhciCtxW32(d.inCtx, ci, 1, (3 << 1) | (epType << 3) | (mps << 16));    // CErr=3, max burst 0
+    xhciCtxW32(d.inCtx, ci, 2, cast(uint)(ring.phys) | 1);                 // DCS=1
+    xhciCtxW32(d.inCtx, ci, 3, cast(uint)(ring.phys >> 32));
+    xhciCtxW32(d.inCtx, ci, 4, 1024);                                      // average TRB length
+}
+
+/// Point the xHCI at controller `index` (see xhciControllers).
+public void xhciSelect(uint index) @nogc nothrow
+{
+    if (index < XHCI_MAX_CONTROLLERS)
+        xhci = &xhciControllers[index];
+}
+
+/// The nth storage device across all controllers (selects its controller). Null when there is none.
+public XhciUsbDevice* xhciFindStorage(uint nth, uint* controller) @nogc nothrow
+{
+    uint seen = 0;
+    for (uint c = 0; c < xhciCount; c++)
+    {
+        for (uint s = 1; s <= XHCI_MAX_SLOTS; s++)
+        {
+            XhciUsbDevice* d = &xhciControllers[c].devs[s];
+            if (d.present && d.msc.active)
+            {
+                if (seen == nth)
+                {
+                    *controller = c;
+                    xhciSelect(c);
+                    return d;
+                }
+                seen++;
+            }
+        }
+    }
+    return null;
+}
+
+// After a failed or timed-out transfer: stop/reset the endpoint and move its ring's
+// dequeue pointer to where we will enqueue next, so the ring is usable again.
+void xhciRecoverEp(XhciUsbDevice* d, XhciRing* ring, uint dci, bool halted) @nogc nothrow
+{
+    uint ctl = (dci << 16) | (cast(uint)d.slotId << 24);
+    xhciCommand(0, ((halted ? TRB_CMD_RESET_EP : TRB_CMD_STOP_EP) << 10) | ctl, null);
+    ulong deq = ring.phys + cast(ulong)ring.enq * XhciTrb.sizeof;
+    xhciCommand(deq | ring.cycle, (TRB_CMD_SET_TR_DEQ << 10) | ctl, null);
+}
+
+/// One synchronous bulk transfer of `len` bytes (<= 64 KiB, not crossing a 64 KiB
+/// boundary) at `bufPhys`. Returns BULK_OK / BULK_STALL / BULK_ERROR / BULK_TIMEOUT;
+/// on any failure the endpoint ring has already been recovered. `actual` gets the
+/// number of bytes that were really transferred.
+public int xhciBulkXfer(XhciUsbDevice* d, bool dirIn, ulong bufPhys, uint len, uint* actual) @nogc nothrow
+{
+    XhciMsc* m = &d.msc;
+    XhciRing* ring = dirIn ? &m.inRing : &m.outRing;
+    uint dci = dirIn ? m.inDci : m.outDci;
+
+    *actual = 0;
+    m.xferDone = false;
+    m.xferWait = xhciRingPush(ring, bufPhys, len, (TRB_NORMAL << 10) | TRB_IOC | TRB_ISP);
+    xhciRingDoorbell(d.slotId, dci);
+
+    ulong dl = xhciDeadline(5000);
+    while (!m.xferDone)
+    {
+        xhciPollEvents();
+        if (clockNowNs() > dl)
+        {
+            kprintf("USB: bulk transfer timed out\n");
+            xhciRecoverEp(d, ring, dci, false);
+            return BULK_TIMEOUT;
+        }
+    }
+
+    if (m.xferCode == CC_SUCCESS || m.xferCode == CC_SHORT_PACKET)
+    {
+        *actual = len - m.xferResidual;
+        return BULK_OK;
+    }
+
+    bool stall = m.xferCode == CC_STALL;
+    xhciRecoverEp(d, ring, dci, true);
+    return stall ? BULK_STALL : BULK_ERROR;
+}
+
+/// CLEAR_FEATURE(ENDPOINT_HALT) on the device side.
+public bool xhciClearHalt(XhciUsbDevice* d, bool dirIn) @nogc nothrow
+{
+    ubyte addr = dirIn ? d.msc.inAddr : d.msc.outAddr;
+    return xhciControl(d, 0x02, 1, 0, addr, 0, 0);
+}
+
 bool xhciSetupDevice(uint port, uint speed) @nogc nothrow
 {
     uint slot;
@@ -1059,9 +1285,21 @@ bool xhciSetupDevice(uint port, uint speed) @nogc nothrow
         return false;
     xhciParseConfig(d, d.dma, total);
 
+    if (d.msc.found)
+    {
+        kprintf("  USB mass storage (bulk-only): iface %u, in %x, out %x, mps %u/%u\n",
+                cast(uint)d.msc.ifaceNum, cast(uint)d.msc.inAddr, cast(uint)d.msc.outAddr,
+                d.msc.inMps, d.msc.outMps);
+        if (xhciSetupStorage(d))
+            kprintf("  storage endpoints running\n");
+        else
+            kprintf("  storage setup failed\n");
+    }
+
     if (!d.hasMouse && !d.kbd.found)
     {
-        kprintf("  not a HID boot mouse or keyboard, ignoring\n");
+        if (!d.msc.found)
+            kprintf("  not a HID boot mouse or keyboard or storage device, ignoring\n");
         return true;
     }
 
@@ -1160,6 +1398,7 @@ void xhciEnumeratePorts() @nogc nothrow
     }
 }
 
+// Does the controller we are working on drive anything we use?
 public bool xhciMouseRunning() @nogc nothrow
 {
     for (uint s = 1; s <= XHCI_MAX_SLOTS; s++)
@@ -1176,6 +1415,24 @@ public bool xhciKeyboardRunning() @nogc nothrow
     return false;
 }
 
+public bool xhciStorageRunning() @nogc nothrow
+{
+    for (uint s = 1; s <= XHCI_MAX_SLOTS; s++)
+        if (xhci.devs[s].msc.active)
+            return true;
+    return false;
+}
+
+/// Is a USB keyboard running on any controller?
+public bool xhciAnyKeyboard() @nogc nothrow
+{
+    for (uint c = 0; c < xhciCount; c++)
+        for (uint s = 1; s <= XHCI_MAX_SLOTS; s++)
+            if (xhciControllers[c].devs[s].kbd.active)
+                return true;
+    return false;
+}
+
 // Stop the controller (used when it has nothing useful so the next one can be tried).
 public void xhciShutdown() @nogc nothrow
 {
@@ -1184,6 +1441,8 @@ public void xhciShutdown() @nogc nothrow
     xhciWr32(xhci.op, OP_USBCMD, xhciRd32(xhci.op, OP_USBCMD) & ~CMD_RUN);
     xhciWaitReg(xhci.op, OP_USBSTS, STS_HCH, STS_HCH, 500);
     xhci.running = false;
+    if (cast(uint)xhci.index + 1 == xhciCount)      // the most recently started one: forget it
+        xhciCount--;
 }
 
 // controller bring-up
@@ -1220,9 +1479,11 @@ void xhciLegacyHandoff() @nogc nothrow
 // mmio: virtual address of the capability registers (BAR0).
 public bool xhciInit(void* mmio) @nogc nothrow
 {
-    if (mmio is null)
+    if (mmio is null || xhciCount >= XHCI_MAX_CONTROLLERS)
         return false;
-    xhci = XhciController.init;
+    xhci = &xhciControllers[xhciCount];
+    *xhci = XhciController.init;
+    xhci.index = cast(ubyte)xhciCount;
 
     xhci.cap = cast(ubyte*)mmio;
     uint capLength = volatileLoad(xhci.cap) & 0xFF;
@@ -1322,6 +1583,7 @@ public bool xhciInit(void* mmio) @nogc nothrow
         { kprintf("xHCI: No-Op command failed\n"); return false; }
     kprintf("xHCI: running\n");
 
+    xhciCount++;                                // from here on usbPoll() services this controller
     xhciEnumeratePorts();
     return true;
 }

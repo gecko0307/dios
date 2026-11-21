@@ -26,11 +26,13 @@ DEALINGS IN THE SOFTWARE.
 module dios.core.shell;
 
 import dios.core.clock;
-import dios.core.datetime;
 import dios.core.acpi;
 import dios.core.console;
 import dios.core.cpu;
+import dios.core.blockdev;
 import dios.core.diag;
+import dios.core.exfat;
+import dios.core.fs;
 import dios.core.interrupts;
 import dios.core.keyboard;
 import dios.core.mem;
@@ -38,16 +40,19 @@ import dios.core.paging;
 import dios.core.proc;
 import dios.core.pci;
 import dios.core.stdio;
+import dios.core.datetime;
+import dios.core.usbstor;
 
 /// Fixed-size input and history storage: the kernel shell must not allocate.
 enum size_t SHELL_LINE_CAPACITY = 128;
 enum size_t SHELL_HISTORY_CAPACITY = 16;
 
-immutable string[22] SHELL_COMMANDS = [
+immutable string[28] SHELL_COMMANDS = [
     "help", "about", "mem", "uptime", "clock",
     "irq", "pci", "history", "echo", "poweroff",
     "reboot", "clear", "cpuinfo", "acpi", "irqstat",
-    "sleep", "hexdump", "crash", "version", "ls", "run", "memmap"
+    "sleep", "hexdump", "crash", "version", "ls", "run", "memmap",
+    "programs", "disk", "mount", "cd", "pwd", "cat"
 ];
 
 __gshared char[SHELL_LINE_CAPACITY] shellLine;
@@ -198,6 +203,290 @@ void shellListPrograms() @nogc nothrow
         kprintf("  %s  (%llu bytes)\n", programs[i].name.ptr, programs[i].size);
 }
 
+// ---------------------------------------------------------------------------
+// disks and files
+// ---------------------------------------------------------------------------
+
+__gshared ubyte[4096] shellIo;
+__gshared ExfatEntry shellProbe;
+
+void shellPad(ulong v, uint width) @nogc nothrow
+{
+    char[20] d;
+    uint n = 0;
+    do
+    {
+        d[n++] = cast(char)('0' + v % 10);
+        v /= 10;
+    }
+    while (v != 0);
+    for (uint i = n; i < width; i++)
+        consolePrintChar(' ');
+    while (n > 0)
+        consolePrintChar(d[--n]);
+}
+
+void shellPad2(uint v) @nogc nothrow
+{
+    consolePrintChar(cast(char)('0' + (v / 10) % 10));
+    consolePrintChar(cast(char)('0' + v % 10));
+}
+
+struct ShellListCtx
+{
+    uint files, dirs;
+    ulong bytes;
+}
+
+extern(C) bool shellListCb(const(ExfatEntry)* e, void* ctx) @nogc nothrow
+{
+    ShellListCtx* c = cast(ShellListCtx*)ctx;
+    uint t = e.mtime;
+    shellPad(1980 + (t >> 25), 4);
+    consolePrintChar('-');
+    shellPad2((t >> 21) & 0xF);
+    consolePrintChar('-');
+    shellPad2((t >> 16) & 0x1F);
+    consolePrintChar(' ');
+    shellPad2((t >> 11) & 0x1F);
+    consolePrintChar(':');
+    shellPad2((t >> 5) & 0x3F);
+    consolePrintString("  ");
+    if (e.isDir)
+    {
+        consolePrintString("     <DIR>  ");
+        c.dirs++;
+    }
+    else
+    {
+        shellPad(e.size, 10);
+        consolePrintString("  ");
+        c.files++;
+        c.bytes += e.size;
+    }
+    kprintf("%s\n", e.name.ptr);
+    return true;
+}
+
+bool shellNeedVolume() @nogc nothrow
+{
+    if (!rootMount.mounted)
+    {
+        kprintf("No volume mounted. 'disk' shows what was found, 'mount N' mounts a partition.\n");
+        return false;
+    }
+    return true;
+}
+
+void shellLs(const(char)* path) @nogc nothrow
+{
+    if (!shellNeedVolume())
+        return;
+    if (path[0] == 0)
+        path = ".";
+
+    ExfatEntry e;
+    if (!fsStat(path, &e))
+    {
+        kprintf("Not found: %s\n", path);
+        return;
+    }
+
+    ShellListCtx ctx;
+    if (e.isDir)
+    {
+        if (!exfatIterate(&rootMount.vol, &e, &shellListCb, &ctx))
+            kprintf("Read error while listing the directory.\n");
+    }
+    else
+    {
+        shellListCb(&e, &ctx);
+    }
+    kprintf("%u file(s), %llu bytes, %u director%s\n", ctx.files, ctx.bytes, ctx.dirs,
+            ctx.dirs == 1 ? "y".ptr : "ies".ptr);
+}
+
+void shellCat(const(char)* path) @nogc nothrow
+{
+    if (!shellNeedVolume())
+        return;
+    ExfatEntry e;
+    if (path[0] == 0)
+    {
+        kprintf("Usage: cat FILE\n");
+        return;
+    }
+    if (!fsStat(path, &e) || e.isDir)
+    {
+        kprintf("Not a file: %s\n", path);
+        return;
+    }
+
+    enum ulong LIMIT = 65536;
+    ExfatFile f;
+    exfatOpen(&f, &e);
+    ulong off = 0;
+    while (off < e.size && off < LIMIT)
+    {
+        ulong want = e.size - off;
+        if (want > shellIo.length)
+            want = shellIo.length;
+        if (off + want > LIMIT)
+            want = LIMIT - off;
+        ulong got = exfatRead(&rootMount.vol, &f, off, shellIo.ptr, want);
+        if (got == 0)
+        {
+            kprintf("\n[read error]\n");
+            return;
+        }
+        for (ulong i = 0; i < got; i++)
+        {
+            ubyte c = shellIo[i];
+            if (c == '\n' || (c >= 32 && c < 127))
+                consolePrintChar(cast(char)c);
+            else if (c == '\t')
+                consolePrintString("    ");
+            else if (c != '\r')
+                consolePrintChar('.');
+        }
+        off += got;
+    }
+    if (console.print_x != 0)
+        consoleNewline();
+    if (off < e.size)
+        kprintf("[output stopped after %llu of %llu bytes]\n", off, e.size);
+}
+
+void shellDisk() @nogc nothrow
+{
+    if (blockDevCount == 0)
+    {
+        kprintf("No disks. Only USB mass storage is supported, and the stick has to be plugged in at boot.\n");
+        return;
+    }
+    for (uint d = 0; d < blockDevCount; d++)
+    {
+        BlockDev* b = &blockDevs[d];
+        kprintf("%s: %s, %llu MiB, %u-byte sectors\n", b.name.ptr, b.model.ptr,
+                (b.sectors * b.sectorSize) >> 20, b.sectorSize);
+        uint shown = 0;
+        for (uint i = 0; i < partitionCount; i++)
+        {
+            Partition* p = &partitions[i];
+            if (p.dev != d)
+                continue;
+            kprintf("  [%u] partition %u: start %llu, %llu MiB, %s%s\n", i, cast(uint)p.number,
+                    p.startLba, (p.sectors * b.sectorSize) >> 20, p.kind.ptr,
+                    (rootMount.mounted && rootMount.partition == i) ? "   <- mounted as /".ptr : "".ptr);
+            shown++;
+        }
+        if (shown == 0)
+            kprintf("  no partitions found\n");
+    }
+}
+
+void shellMount(const(char)* args) @nogc nothrow
+{
+    if (args[0] == 0)
+    {
+        if (!fsAutoMount())
+            kprintf("No exFAT volume found ('disk' lists the partitions).\n");
+        return;
+    }
+    ulong n;
+    if (diagParseNumber(args, &n) is null || n >= partitionCount)
+    {
+        kprintf("Usage: mount [PARTITION-NUMBER]   (numbers in brackets in 'disk')\n");
+        return;
+    }
+    if (!fsMountPartition(cast(uint)n))
+        kprintf("Partition %llu is not a readable exFAT volume.\n", n);
+    else
+        kprintf("Mounted exFAT volume '%s' as /\n", rootMount.vol.label.ptr);
+}
+
+// Run an ELF file from the mounted volume. Tries `path`, then `path.elf`.
+void shellRunFile(const(char)* path, const(char)* args) @nogc nothrow
+{
+    ExfatEntry e;
+    char[FS_PATH_MAX + 8] withExt;
+
+    bool found = fsStat(path, &e) && !e.isDir;
+    if (!found)
+    {
+        uint n = 0;
+        while (path[n] != 0 && n < FS_PATH_MAX)
+        {
+            withExt[n] = path[n];
+            n++;
+        }
+        const(char)* ext = ".elf";
+        for (uint i = 0; i < 5; i++)
+            withExt[n + i] = ext[i];
+        found = fsStat(withExt.ptr, &e) && !e.isDir;
+        if (found)
+            path = withExt.ptr;
+    }
+    if (!found)
+    {
+        kprintf("No such program: %s\n", path);
+        return;
+    }
+
+    enum ulong MAX_IMAGE = 4UL * 1024 * 1024;
+    if (e.size == 0 || e.size > MAX_IMAGE)
+    {
+        kprintf("%s: size %llu is not acceptable for a program (max 4 MiB)\n", path, e.size);
+        return;
+    }
+
+    ulong pages = (e.size + 4095) / 4096;
+    ulong phys = pmmAllocContiguousZeroed(pages, 1, 0);
+    if (phys == 0)
+    {
+        kprintf("Out of memory.\n");
+        return;
+    }
+    ubyte* image = cast(ubyte*)pmmPhysToVirt(phys);
+
+    ExfatFile f;
+    exfatOpen(&f, &e);
+    ulong off = 0;
+    while (off < e.size)
+    {
+        ulong want = e.size - off;
+        if (want > 65536)
+            want = 65536;
+        ulong got = exfatRead(&rootMount.vol, &f, off, image + off, want);
+        if (got == 0)
+            break;
+        off += got;
+    }
+
+    if (off != e.size)
+    {
+        kprintf("Read error while loading %s\n", path);
+    }
+    else
+    {
+        char[PROC_NAME_MAX] name;
+        procMakeName(path, name.ptr);
+        long code = 0;
+        if (!procLaunchImage(name.ptr, image, e.size, args, &code))
+        {
+            kprintf("Could not start '%s'.\n", name.ptr);
+        }
+        else
+        {
+            if (console.print_x != 0)
+                consoleNewline();
+            if (code != 0)
+                kprintf("[%s exited with code %llu]\n", name.ptr, cast(ulong)code);
+        }
+    }
+    pmmFreePages(phys, pages);
+}
+
 void shellExecute() @nogc nothrow
 {
     // Split command and arguments in-place. Quoting is intentionally not
@@ -231,8 +520,13 @@ void shellExecute() @nogc nothrow
         kprintf("  history          Show recent commands\n");
         kprintf("  echo TEXT        Print TEXT\n");
         kprintf("  sleep SECONDS    Wait (Ctrl+C aborts)\n");
-        kprintf("  ls               List programs on the boot media\n");
-        kprintf("  run NAME [ARGS]  Run a program (or just type its name)\n");
+        kprintf("  programs         List programs on the boot media\n");
+        kprintf("  disk             Show USB disks and partitions\n");
+        kprintf("  mount [N]        Mount an exFAT partition as /\n");
+        kprintf("  ls [PATH]        List a directory on the mounted volume\n");
+        kprintf("  cat FILE         Print a text file\n");
+        kprintf("  cd [DIR], pwd    Change / show the current directory\n");
+        kprintf("  run NAME [ARGS]  Run a boot program or an ELF from the disk\n");
         kprintf("  clear            Clear the screen\n");
         kprintf("  crash pf|ud|div|gp  Trigger a CPU exception (kernel halts)\n");
         kprintf("  reboot           Restart the computer\n");
@@ -242,7 +536,7 @@ void shellExecute() @nogc nothrow
     }
     else if (shellEquals(shellLine.ptr, "about"))
     {
-        kprintf("D Incomplete Operating System 0.3.0 for x86_64\n");
+        kprintf("D Incomplete Operating System 0.2.0 for x86_64\n");
     }
     else if (shellEquals(shellLine.ptr, "mem"))
     {
@@ -396,29 +690,57 @@ void shellExecute() @nogc nothrow
     }
     else if (shellEquals(shellLine.ptr, "ls"))
     {
+        shellLs(args);
+    }
+    else if (shellEquals(shellLine.ptr, "programs"))
+    {
         shellListPrograms();
+    }
+    else if (shellEquals(shellLine.ptr, "disk"))
+    {
+        shellDisk();
+    }
+    else if (shellEquals(shellLine.ptr, "mount"))
+    {
+        shellMount(args);
+    }
+    else if (shellEquals(shellLine.ptr, "cat"))
+    {
+        shellCat(args);
+    }
+    else if (shellEquals(shellLine.ptr, "pwd"))
+    {
+        if (shellNeedVolume())
+            kprintf("%s\n", fsCwd.ptr);
+    }
+    else if (shellEquals(shellLine.ptr, "cd"))
+    {
+        if (shellNeedVolume() && !fsChdir(args[0] == 0 ? "/".ptr : args))
+            kprintf("Not a directory: %s\n", args);
     }
     else if (shellEquals(shellLine.ptr, "run"))
     {
         // First word of the arguments is the program name, the rest is passed on.
-        char[PROC_NAME_MAX] name;
+        char[FS_PATH_MAX] name;
         uint n = 0;
         const(char)* p = args;
-        while (*p != 0 && *p != ' ' && *p != '\t' && n + 1 < PROC_NAME_MAX)
+        while (*p != 0 && *p != ' ' && *p != '\t' && n + 1 < FS_PATH_MAX)
             name[n++] = *p++;
         name[n] = 0;
         while (*p == ' ' || *p == '\t')
             p++;
 
         if (n == 0)
-            kprintf("Usage: run NAME [ARGS]  (see 'ls')\n");
+            kprintf("Usage: run NAME [ARGS]  (see 'programs')\n");
         else
         {
             int index = procFind(name.ptr);
-            if (index < 0)
-                kprintf("No such program: %s\n", name.ptr);
-            else
+            if (index >= 0)
                 shellRunProgram(cast(uint)index, p);
+            else if (rootMount.mounted)
+                shellRunFile(name.ptr, p);          // a path on the mounted volume
+            else
+                kprintf("No such program: %s\n", name.ptr);
         }
     }
     else if (shellEquals(shellLine.ptr, "poweroff"))
@@ -433,6 +755,10 @@ void shellExecute() @nogc nothrow
         if (index >= 0)
         {
             shellRunProgram(cast(uint)index, args);
+        }
+        else if (rootMount.mounted && (fsStat(shellLine.ptr, &shellProbe) && !shellProbe.isDir))
+        {
+            shellRunFile(shellLine.ptr, args);          // "./hello" or "/bin/hello" on the disk
         }
         else
         {
@@ -508,8 +834,10 @@ void shellInit() @nogc nothrow
     shellPrompt();
 }
 
+// --------------------------------------------------------------------------
 // Line editing. The console cursor and shellCursor always move together; the
 // helpers below keep them in step (the console follows soft-wrapped rows).
+// --------------------------------------------------------------------------
 
 void shellClearLine() @nogc nothrow
 {

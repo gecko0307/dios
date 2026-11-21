@@ -50,6 +50,8 @@ import dios.core.error;
 import dios.core.mouse;
 import dios.core.gfx;
 import dios.core.xhci;
+import dios.core.usbstor;
+import dios.core.fs;
 import dios.core.datetime;
 import dios.bootloader.limine;
 
@@ -61,12 +63,15 @@ struct BootInfo
     Framebuffer videoBuffer;
 }
 
-__gshared string EMPTY_STR = "\0";
-__gshared string BOOTLOADER_LIMINE = "Limine\0";
-__gshared BootInfo bootInfo;
-
 enum size_t MAX_MEM_RANGES = 64;
-__gshared MemRange[MAX_MEM_RANGES] memRanges;
+
+__gshared
+{
+    string EMPTY_STR = "\0";
+    string BOOTLOADER_LIMINE = "Limine\0";
+    BootInfo bootInfo;
+    __gshared MemRange[MAX_MEM_RANGES] memRanges;
+}
 
 extern(C):
 
@@ -217,7 +222,7 @@ void run() @nogc nothrow
     if (havePs2 && interruptStatus.ioapic)
         ps2StartIrq(interruptStatus.apicId);
 
-    kprintf("DIOS 0.3.0\n");
+    kprintf("DIOS 0.2.0\n");
     kprintf("---------------\n");
     DateTime t;
     datetimeNow(&t);
@@ -240,6 +245,8 @@ void run() @nogc nothrow
 
     // Enumerate PCI; this also brings up the xHCI controller(s) and any USB mouse
     pciScan();
+    usbStorageProbe();
+    fsAutoMount();
     procInit();
     shellInit();
 
