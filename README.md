@@ -37,6 +37,7 @@ After successful initialization, the kernel immediately starts an interactive sh
 - `about` - kernel version information
 - `cpuinfo` - CPU identification and features
 - `mem` - physical memory statistics
+- `memmap` - show the memory map
 - `uptime` - time since boot
 - `clock` - clock source and timer status
 - `irq` - interrupt controller status

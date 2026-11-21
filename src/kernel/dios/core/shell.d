@@ -32,6 +32,7 @@ import dios.core.cpu;
 import dios.core.diag;
 import dios.core.interrupts;
 import dios.core.keyboard;
+import dios.core.mem;
 import dios.core.paging;
 import dios.core.proc;
 import dios.core.pci;
@@ -41,11 +42,11 @@ import dios.core.stdio;
 enum size_t SHELL_LINE_CAPACITY = 128;
 enum size_t SHELL_HISTORY_CAPACITY = 16;
 
-immutable string[21] SHELL_COMMANDS = [
+immutable string[22] SHELL_COMMANDS = [
     "help", "about", "mem", "uptime", "clock",
     "irq", "pci", "history", "echo", "poweroff",
     "reboot", "clear", "cpuinfo", "acpi", "irqstat",
-    "sleep", "hexdump", "crash", "version", "ls", "run"
+    "sleep", "hexdump", "crash", "version", "ls", "run", "memmap"
 ];
 
 __gshared char[SHELL_LINE_CAPACITY] shellLine;
@@ -216,6 +217,7 @@ void shellExecute() @nogc nothrow
         kprintf("  help             Show this command list\n");
         kprintf("  about            Kernel version information\n");
         kprintf("  mem              Physical memory statistics\n");
+        kprintf("  memmap           Show the physical memory map\n");
         kprintf("  uptime           Time since boot\n");
         kprintf("  clock            Clock source and timer status\n");
         kprintf("  irq              Interrupt controller status\n");
@@ -252,6 +254,27 @@ void shellExecute() @nogc nothrow
             usedPages * MEM_PAGE_SIZE / (1024 * 1024), usedPages);
         kprintf("  Free:  %llu MiB (%llu pages)\n",
             freePages * MEM_PAGE_SIZE / (1024 * 1024), freePages);
+    }
+    else if (shellEquals(shellLine.ptr, "memmap"))
+    {
+        immutable string[8] types = [
+            "usable", "reserved", "ACPI reclaimable", "ACPI NVS",
+            "bad memory", "bootloader reclaimable", "kernel/modules", "framebuffer"
+        ];
+        kprintf("Physical memory map (%u entr%s):\n",
+            cast(uint)memMapCount, memMapCount == 1 ? "y".ptr : "ies".ptr);
+        kprintf("  Base                Length              Type\n");
+        for (size_t i = 0; i < memMapCount; i++)
+        {
+            auto entry = memMapEntries[i];
+            const(char)* typeName = "unknown".ptr;
+            if (entry.type < types.length)
+                typeName = types[entry.type].ptr;
+            kprintf("  %llx  %llx  %s\n",
+                entry.base, entry.length, typeName);
+        }
+        if (memMapTruncated)
+            kprintf("  (map truncated at %u entries)\n", cast(uint)MEMMAP_MAX_ENTRIES);
     }
     else if (shellEquals(shellLine.ptr, "uptime"))
     {

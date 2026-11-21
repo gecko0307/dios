@@ -25,6 +25,20 @@ DEALINGS IN THE SOFTWARE.
 */
 module dios.core.mem;
 
+/// A physical memory range reported by the bootloader.
+struct MemMapEntry
+{
+    ulong base;
+    ulong length;
+    ulong type;
+}
+
+enum size_t MEMMAP_MAX_ENTRIES = 128;
+
+__gshared MemMapEntry[MEMMAP_MAX_ENTRIES] memMapEntries;
+__gshared size_t memMapCount;
+__gshared bool memMapTruncated;
+
 struct RAMInfo
 {
     size_t availMemBase;

@@ -99,6 +99,16 @@ void kmain() @nogc nothrow
     auto memmap = memmapRequest.response;
     size_t numRanges = 0;
     ulong totalUsable = 0;
+    memMapTruncated = memmap.entry_count > MEMMAP_MAX_ENTRIES;
+    memMapCount = memMapTruncated ? MEMMAP_MAX_ENTRIES : cast(size_t)memmap.entry_count;
+    for (size_t i = 0; i < memMapCount; i++)
+    {
+        auto entry = memmap.entries[i];
+        memMapEntries[i].base = entry.base;
+        memMapEntries[i].length = entry.length;
+        memMapEntries[i].type = entry.type;
+    }
+
     for (ulong i = 0; i < memmap.entry_count; i++)
     {
         auto entry = memmap.entries[i];
