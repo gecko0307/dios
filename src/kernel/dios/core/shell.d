@@ -240,7 +240,7 @@ void shellExecute() @nogc nothrow
     }
     else if (shellEquals(shellLine.ptr, "about"))
     {
-        kprintf("D Incomplete Operating System 0.2.0 for x86_64\n");
+        kprintf("D Incomplete Operating System 0.3.0 for x86_64\n");
     }
     else if (shellEquals(shellLine.ptr, "mem"))
     {
@@ -498,10 +498,8 @@ void shellInit() @nogc nothrow
     shellPrompt();
 }
 
-// --------------------------------------------------------------------------
 // Line editing. The console cursor and shellCursor always move together; the
 // helpers below keep them in step (the console follows soft-wrapped rows).
-// --------------------------------------------------------------------------
 
 void shellClearLine() @nogc nothrow
 {
