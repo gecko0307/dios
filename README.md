@@ -22,8 +22,8 @@ DIOS is an ELF kernel that requires a bootloader to run. Default setup in this r
 - PCI enumeration
 - xHCI driver
 - USB and PS/2 keyboard and mouse
-- A simple shell with built-in kernel commands
-- Basic userspace programs support.
+- A shell with built-in kernel commands
+- Basic userspace.
 
 DIOS is planned as a graphical OS: all rendering features are built into the kernel (but there's no full-featured GUI yet).
 
@@ -31,7 +31,7 @@ DIOS is now 64-bit only, x86 support was dropped.
 
 ## Kernel Shell Commands
 
-After successful initialization, the kernel immediately starts an interactive shell session. All available commands currently are built-in functions (there's no userspace yet).
+After successful initialization, the kernel immediately starts an interactive shell session.
 
 - `help` - show the command list
 - `about` - kernel version information
@@ -55,7 +55,12 @@ After successful initialization, the kernel immediately starts an interactive sh
 
 ## Programs
 
-TODO
+These are currently simple examples of what can be done in DIOS userspace.
+
+- `hello` - "Hello, World!" program that prints its arguments
+- `count` - counts once a second. Ctrl+C stops it (the kernel handles that)
+- `rev` - reads lines and prints them reversed. An empty line ends the program
+- `fault` - deliberately crashes by dereferencing a null pointer. The kernel reports it and keeps running.
 
 ## Code Structure
 
