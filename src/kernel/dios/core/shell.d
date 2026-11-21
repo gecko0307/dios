@@ -525,7 +525,8 @@ void shellExecute() @nogc nothrow
         kprintf("  mount [N]        Mount an exFAT partition as /\n");
         kprintf("  ls [PATH]        List a directory on the mounted volume\n");
         kprintf("  cat FILE         Print a text file\n");
-        kprintf("  cd [DIR], pwd    Change / show the current directory\n");
+        kprintf("  cd [DIR], pwd    Change the current directory\n");
+        kprintf("  pwd              Show the current directory\n");
         kprintf("  run NAME [ARGS]  Run a boot program or an ELF from the disk\n");
         kprintf("  clear            Clear the screen\n");
         kprintf("  crash pf|ud|div|gp  Trigger a CPU exception (kernel halts)\n");

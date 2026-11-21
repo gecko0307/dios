@@ -11,12 +11,13 @@ OBJ = ROOT / "o-elf-x86_64"
 OBJ_KERNEL = OBJ / "kernel"
 OBJ_USER = OBJ / "user"
 CDROOT = ROOT / "cdroot"
+USBSTICK = ROOT / "usbstick"
 KERNEL_LINKER_SCRIPT = SRC_KERNEL / "linker.ld"
 
 # User-space layout (src/user):
 #   object.d, ulib.d, ulib.s   runtime shared by every program
 #   linker.ld                  linker script for programs
-#   anything else *.d          one program each -> cdroot/<name>.elf
+#   anything else *.d          one program each -> usbstick/<name>.elf
 USER_RUNTIME = {"object.d", "ulib.d", "ulib.s"}
 USER_LINKER_SCRIPT = SRC_USER / "linker.ld"
 
@@ -142,11 +143,11 @@ def compile_kernel():
     ])
 
 def compile_userspace():
-    """Build every program in src/user into cdroot/<name>.elf. Returns the program names."""
+    """Build every program in src/user into usbstick/<name>.elf. Returns the program names."""
     if not SRC_USER.is_dir():
         return []
 
-    output = CDROOT / "user"
+    output = USBSTICK
     output.mkdir(parents=True, exist_ok=True)
 
     # The runtime is compiled once and linked into every program.
@@ -194,7 +195,7 @@ def check_boot_modules(programs):
 def main():
     compile_kernel()
     programs = compile_userspace()
-    check_boot_modules(programs)
+    #check_boot_modules(programs)
 
     run([
         XORRISO,

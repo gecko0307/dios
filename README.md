@@ -24,7 +24,9 @@ DIOS is an ELF kernel that requires a bootloader to run. Default setup in this r
 - USB and PS/2 keyboard and mouse
 - CMOS date-time reading
 - A shell with built-in kernel commands
-- Basic single-tasking userspace in Ring 3; system calls.
+- Basic single-tasking userspace in Ring 3; system calls
+- A single-mount read-only filesystem
+- USB mass storage devices; exFAT.
 
 DIOS is planned as a graphical OS: all rendering features are built into the kernel (but there's no full-featured GUI yet).
 
@@ -39,6 +41,7 @@ After successful initialization, the kernel immediately starts an interactive sh
 - `cpuinfo` - CPU identification and features
 - `mem` - physical memory statistics
 - `memmap` - show the memory map
+- `time` - print current date and time
 - `uptime` - time since boot
 - `clock` - clock source and timer status
 - `irq` - interrupt controller status
@@ -48,8 +51,14 @@ After successful initialization, the kernel immediately starts an interactive sh
 - `history` - show recent commands
 - `echo TEXT` - print TEXT
 - `sleep SECONDS` - wait (Ctrl+C aborts)
-- `ls` - list programs on the boot media
-- `run NAME [ARGS]` - run a program (or just type its name)
+- `programs` - list programs on the boot media
+- `disk` - show USB disks and partitions
+- `mount [N]` - mount an exFAT partition as `/`
+- `ls [PATH]` - list a directory on the mounted volume
+- `cd [DIR]` - change the current directory
+- `pwd` - show the current directory
+- `cat FILE` - print a text file
+- `run NAME [ARGS]` - run a boot program or an ELF from the disk
 - `clear` - clear the screen
 - `crash pf|ud|div|gp` - trigger a CPU exception (kernel halts)
 - `reboot` - restart the computer
@@ -64,7 +73,7 @@ These are currently simple examples of what can be done in DIOS userspace.
 - `rev` - reads lines and prints them reversed. An empty line ends the program
 - `fault` - deliberately crashes by dereferencing a null pointer. The kernel reports it and keeps running.
 
-Programs are also written in D and compiled with the kernel to *.elf files. At runtime they are currently loaded by Limine as kernel modules (the kernel itself doesn't have a file system).
+Programs are also written in D and compiled to *.elf files. They can be loaded by Limine as kernel modules, or placed to Ventoy USB stick alongside with the DIOS image.
 
 ## Code Structure
 
