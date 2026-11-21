@@ -26,6 +26,7 @@ DEALINGS IN THE SOFTWARE.
 module dios.core.shell;
 
 import dios.core.clock;
+import dios.core.datetime;
 import dios.core.acpi;
 import dios.core.console;
 import dios.core.cpu;
@@ -218,6 +219,7 @@ void shellExecute() @nogc nothrow
         kprintf("  about            Kernel version information\n");
         kprintf("  mem              Physical memory statistics\n");
         kprintf("  memmap           Show the physical memory map\n");
+        kprintf("  time             Print current date and time\n");
         kprintf("  uptime           Time since boot\n");
         kprintf("  clock            Clock source and timer status\n");
         kprintf("  irq              Interrupt controller status\n");
@@ -275,6 +277,14 @@ void shellExecute() @nogc nothrow
         }
         if (memMapTruncated)
             kprintf("  (map truncated at %u entries)\n", cast(uint)MEMMAP_MAX_ENTRIES);
+    }
+    else if (shellEquals(shellLine.ptr, "time"))
+    {
+        DateTime t;
+        datetimeNow(&t);
+        kprintf("UTC %02d.%02d.%d %02d:%02d:%02d\n",
+            t.day, t.month, t.year,
+            t.hour, t.minute, t.second);
     }
     else if (shellEquals(shellLine.ptr, "uptime"))
     {

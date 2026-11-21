@@ -50,7 +50,7 @@ import dios.core.error;
 import dios.core.mouse;
 import dios.core.gfx;
 import dios.core.xhci;
-import dios.core.cmos;
+import dios.core.datetime;
 import dios.bootloader.limine;
 
 struct BootInfo
@@ -165,8 +165,6 @@ void* allocBuffer(size_t bytes) @nogc nothrow
 __gshared
 {
     Framebuffer sceneBuffer;
-    CMOS cmos;
-    DateTime startTime;
 }
 
 // Milliseconds since boot: the tick counter if the timer interrupt runs, else the clock
@@ -180,8 +178,7 @@ ulong nowMs() @nogc nothrow
 /// Starts graphics; initializes memory manager and boot peripherals; runs the shell
 void run() @nogc nothrow
 {
-    cmosRead(&cmos);
-    startTime = cmosGetDateTime(&cmos);
+    datetimeInit();
     
     size_t hhdmOffset = bootInfo.ramInfo.hhdmOffset;
     Framebuffer* frontBuffer = &bootInfo.videoBuffer;
@@ -222,9 +219,11 @@ void run() @nogc nothrow
 
     kprintf("DIOS 0.3.0\n");
     kprintf("---------------\n");
-    kprintf("%d.%d.%d %d:%d.%d\n",
-        startTime.day, startTime.month, startTime.year,
-        startTime.hour, startTime.minute, startTime.second);
+    DateTime t;
+    datetimeNow(&t);
+    kprintf("UTC %02d.%02d.%d %02d:%02d:%02d\n",
+        t.day, t.month, t.year,
+        t.hour, t.minute, t.second);
     if (!limineBaseRevisionSupported())
         kprintf("Warning: bootloader does not support base revision 3\n");
     kprintf("Bootloader: %s\n", bootInfo.bootloaderName);

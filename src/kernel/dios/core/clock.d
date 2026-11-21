@@ -48,7 +48,7 @@ import dios.core.vmem;
 enum ulong NS_PER_SEC = 1_000_000_000UL;
 enum uint TICK_HZ = 1000;
 
-enum : uint
+enum: uint
 {
     HPET_REG_CAPS    = 0x00,
     HPET_REG_CONFIG  = 0x10,
@@ -119,7 +119,7 @@ ulong clockNowNs() @nogc nothrow
     if (hpetOk)
         return clockTicksToNs(hpetReadTicks(), hpetFreq);
 
-    ulong flags = cpuIrqSave();         // pitTimeTicks() keeps state; the tick IRQ calls it too
+    ulong flags = cpuIrqSave(); // pitTimeTicks() keeps state; the tick IRQ calls it too
     ulong t = pitTimeTicks();
     cpuIrqRestore(flags);
     return clockTicksToNs(t, PIT_FREQUENCY);

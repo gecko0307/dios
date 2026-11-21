@@ -374,166 +374,278 @@ void consoleNewline() @nogc nothrow
         consoleCursorXor();
 }
 
+alias ConsolePutChar = extern(C) void function(char) @nogc nothrow;
+
 immutable char[16] HEXMAP = [
-    '0', '1', '2', '3', 
-    '4', '5', '6', '7', 
-    '8', '9', 'A', 'B', 
+    '0', '1', '2', '3',
+    '4', '5', '6', '7',
+    '8', '9', 'A', 'B',
     'C', 'D', 'E', 'F'
 ];
 
-void consolePrintStringFmt(string fmt, va_list ap) @nogc nothrow
+// Print an integer with optional sign, prefix, width and padding.
+void consoleFormatNumber(
+    ConsolePutChar putChar,
+    ulong value,
+    bool negative,
+    uint base,
+    uint minDigits,
+    uint width,
+    char pad,
+    const(char)* prefix,
+    uint prefixLen
+) @nogc nothrow
 {
-    uint f;
-    for (int i = 0; i < fmt.length; i++)
+    char[20] digits;
+    uint count = 0;
+
+    do
+    {
+        digits[count++] = HEXMAP[value % base];
+        value /= base;
+    }
+    while (value != 0);
+
+    while (count < minDigits)
+        digits[count++] = '0';
+
+    uint totalLen = count + prefixLen + (negative ? 1 : 0);
+    uint padding = (width > totalLen) ? width - totalLen : 0;
+
+    // Space padding goes before the number.
+    if (pad != '0')
+    {
+        while (padding > 0)
+        {
+            putChar(pad);
+            padding--;
+        }
+    }
+
+    // Prefix.
+    for (uint i = 0; i < prefixLen; i++)
+        putChar(prefix[i]);
+
+    // Sign.
+    if (negative)
+        putChar('-');
+
+    // Zero padding goes after prefix and sign.
+    if (pad == '0')
+    {
+        while (padding > 0)
+        {
+            putChar('0');
+            padding--;
+        }
+    }
+
+    // Digits in reverse order.
+    while (count > 0)
+        putChar(digits[--count]);
+}
+
+// Shared printf-like formatter.
+void consoleFormat(
+    ConsolePutChar putChar,
+    string fmt,
+    va_list ap
+) @nogc nothrow
+{
+    for (size_t i = 0; i < fmt.length; i++)
     {
         char c = fmt[i];
-        if (c == '%')
-        {
-            if (++i >= fmt.length)
-                break;
-            
-            // %llx
-            if (fmt[i] == 'l' && i + 1 < fmt.length && fmt[i + 1] == 'l')
-            {
-                i++;
-                if (++i >= fmt.length)
-                    break;
 
-                if (fmt[i] == 'x')
-                {
-                    ulong u = va_arg!(ulong)(ap);
-                    consolePrintString("0x");
-                    char[16] digits;
-                    for (int j = 15; j >= 0; j--)
-                    {
-                        digits[j] = HEXMAP[u & 0x0F];
-                        u >>= 4;
-                    }
-                    foreach (char d; digits)
-                        consolePrintChar(d);
-                    continue;
-                }
-                else if (fmt[i] == 'u')
-                {
-                    ulong u = va_arg!(ulong)(ap);
-                    char[20] d;
-                    int k = 19;
-                    do
-                    {
-                        d[k] = cast(char)((u % 10) + '0');
-                        u /= 10;
-                        k--;
-                    }
-                    while (u && k >= 0);
-                    while (++k < 20)
-                        consolePrintChar(d[k]);
-                    continue;
-                }
-            }
-            if (fmt[i] == 's')
+        if (c != '%')
+        {
+            putChar(c);
+            continue;
+        }
+
+        if (++i >= fmt.length)
+            break;
+
+        // Parse flags and field width.
+        char pad = ' ';
+        uint width = 0;
+
+        if (fmt[i] == '0')
+        {
+            pad = '0';
+            i++;
+        }
+
+        while (i < fmt.length &&
+               fmt[i] >= '0' &&
+               fmt[i] <= '9')
+        {
+            width = width * 10 + (fmt[i] - '0');
+
+            // Protect against unreasonable field widths.
+            if (width > 64)
+                width = 64;
+
+            i++;
+        }
+
+        if (i >= fmt.length)
+            break;
+
+        // Length modifier: ll
+        bool isLongLong = false;
+
+        if (fmt[i] == 'l' &&
+            i + 1 < fmt.length &&
+            fmt[i + 1] == 'l')
+        {
+            isLongLong = true;
+            i += 2;
+
+            if (i >= fmt.length)
+                break;
+        }
+
+        // String.
+        if (fmt[i] == 's')
+        {
+            char* str = va_arg!(char*)(ap);
+
+            if (str != null)
             {
-                char* t = va_arg!(char*)(ap);
-                for(char n = *t; n != 0; t++)
-                {
-                    n = *t;
-                    consolePrintChar(n);
-                }
-            }
-            else if (fmt[i] == 'c')
-            {
-                consolePrintChar(va_arg!(char)(ap));
-            }
-            else if (fmt[i] == 'x')
-            {
-                uint u = va_arg!(uint)(ap);
-                consolePrintString("0x");
-                char[8] digits;
-                for (int j = 7; j >= 0; j--)
-                {
-                    digits[j] = HEXMAP[u & 0x0F];
-                    u >>= 4;
-                }
-                foreach(char d; digits)
-                    consolePrintChar(d);
-            }
-            else if (fmt[i] == 'k')
-            {
-                ushort u = va_arg!(ushort)(ap);
-                consolePrintString("0x");
-                char[4] digits;
-                for (int j = 3; j >= 0; j--)
-                {
-                    digits[j] = HEXMAP[u & 0x0F];
-                    u >>= 4;
-                }
-                foreach(char d; digits)
-                    consolePrintChar(d);
-            }
-            else if (fmt[i] == 'd')
-            {
-                int w = va_arg!(int)(ap);
-                if (w < 0)
-                {
-                    f = -w;
-                    consolePrintChar('-');
-                }
-                else
-                {
-                    f = w;
-                }
-                goto u2;
-            }
-            else if (fmt[i] == 'u')
-            {
-                f = va_arg!(uint)(ap);
-                u2:
-                {
-                    char[10] d;
-                    int k = 9;
-                    do
-                    {
-                        d[k] = (f % 10) + '0';
-                        f /= 10;
-                        k--;
-                    }
-                    while(f && k >= 0);
-                    while(++k < 10)
-                    {
-                        consolePrintChar(d[k]);
-                    }
-                }
-            }
-            else if (fmt[i] == 'X')
-            {
-                ubyte b = va_arg!(ubyte)(ap);
-                consolePrintString("0x");
-                consolePrintChar(HEXMAP[(b & 0xF0) >> 4]);
-                consolePrintChar(HEXMAP[b & 0x0F]);
+                while (*str != 0)
+                    putChar(*str++);
             }
             else
             {
-                consolePrintChar(fmt[i]);
+                foreach (char ch; "(null)")
+                    putChar(ch);
             }
         }
+        // Character.
+        else if (fmt[i] == 'c')
+        {
+            putChar(va_arg!(char)(ap));
+        }
+        // Signed decimal.
+        else if (fmt[i] == 'd')
+        {
+            int value = va_arg!int(ap);
+            bool negative = value < 0;
+
+            ulong magnitude = negative
+                ? cast(ulong)(-(cast(long)value))
+                : cast(ulong)value;
+
+            consoleFormatNumber(
+                putChar,
+                magnitude,
+                negative,
+                10,
+                1,
+                width,
+                pad,
+                null,
+                0
+            );
+        }
+        // Unsigned decimal.
+        else if (fmt[i] == 'u')
+        {
+            ulong value = isLongLong
+                ? va_arg!ulong(ap)
+                : va_arg!uint(ap);
+
+            consoleFormatNumber(
+                putChar,
+                value,
+                false,
+                10,
+                1,
+                width,
+                pad,
+                null,
+                0
+            );
+        }
+        // Hexadecimal.
+        else if (fmt[i] == 'x')
+        {
+            ulong value = isLongLong
+                ? va_arg!ulong(ap)
+                : va_arg!uint(ap);
+
+            uint digits = isLongLong ? 16 : 8;
+
+            consoleFormatNumber(
+                putChar,
+                value,
+                false,
+                16,
+                digits,
+                width,
+                pad,
+                "0x".ptr,
+                2
+            );
+        }
+        // 16-bit hexadecimal.
+        else if (fmt[i] == 'k')
+        {
+            ushort value = va_arg!ushort(ap);
+
+            consoleFormatNumber(
+                putChar,
+                value,
+                false,
+                16,
+                4,
+                width,
+                pad,
+                "0x".ptr,
+                2
+            );
+        }
+        // 8-bit hexadecimal.
+        else if (fmt[i] == 'X')
+        {
+            ubyte value = va_arg!ubyte(ap);
+
+            consoleFormatNumber(
+                putChar,
+                value,
+                false,
+                16,
+                2,
+                width,
+                pad,
+                "0x".ptr,
+                2
+            );
+        }
+        // Unknown specifier: print it literally.
         else
         {
-            consolePrintChar(c);
+            putChar(fmt[i]);
         }
     }
 }
 
-// VGA text mode fallback
+// Framebuffer console.
+void consolePrintStringFmt(string fmt, va_list ap) @nogc nothrow
+{
+    consoleFormat(&consolePrintChar, fmt, ap);
+}
+
+// VGA adapter.
+void vgaConsolePutChar(char c) @nogc nothrow
+{
+    VGAText.putChar(c);
+}
+
+// VGA text mode fallback.
 struct VGAConsole
 {
     public static:
-
-    const char[] hexmap = 
-    [
-        '0', '1', '2', '3', 
-        '4', '5', '6', '7', 
-        '8', '9', 'A', 'B', 
-        'C', 'D', 'E', 'F'
-    ];
 
     void init() @nogc nothrow
     {
@@ -543,105 +655,6 @@ struct VGAConsole
 
     void writef(string fmt, va_list ap) @nogc nothrow
     {
-        uint f;
-        for (int i = 0; i < fmt.length; i++)
-        {
-            char c = fmt[i];
-            if (c == '%')
-            {
-                if (++i >= fmt.length)
-                    break;
-
-                if (fmt[i] == 's')
-                {
-                    char* t = va_arg!(char*)(ap);
-                    for(char n = *t; n != 0; t++)
-                    {
-                        n = *t;
-                        VGAText.putChar(n);
-                    }
-                }
-                else if (fmt[i] == 'c')
-                {
-                    VGAText.putChar(va_arg!(char)(ap));
-                }
-                else if (fmt[i] == 'x')
-                {
-                    uint u = va_arg!(uint)(ap);
-                    VGAText.putString("0x");
-                    char[8] digits;
-                    for (int j = 7; j >= 0; j--)
-                    {
-                        digits[j] = hexmap[u & 0x0F];
-                        u >>= 4;
-                    }
-                    foreach(char d; digits)
-                        VGAText.putChar(d);
-                }
-                else if (fmt[i] == 'k')
-                {
-                    ushort u = va_arg!(ushort)(ap);
-                    VGAText.putString("0x");
-                    char[4] digits;
-                    for (int j = 3; j >= 0; j--)
-                    {
-                        digits[j] = hexmap[u & 0x0F];
-                        u >>= 4;
-                    }
-                    foreach(char d; digits)
-                        VGAText.putChar(d);
-                }
-                else if (fmt[i] == 'd')
-                {
-                    //case 'd': // signed integer
-                        int w = va_arg!(int)(ap);
-                        if (w < 0)
-                        {
-                            f = -w;
-                            VGAText.putChar('-');
-                        }
-                        else
-                        {
-                            f = w;
-                        }
-                        goto u2;
-                }
-                else if (fmt[i] == 'u')
-                {
-                    f = va_arg!(uint)(ap);
-                    u2:
-                    {
-                        char[10] d;
-                        int k = 9;
-                        do
-                        {
-                            d[k] = (f % 10) + '0';
-                            f /= 10;
-                            k--;
-                        }
-                        while(f && k >= 0);
-                        while(++k < 10)
-                        {
-                            VGAText.putChar(d[k]);
-                        }
-                    }
-                }
-                else if (fmt[i] == 'X')
-                {
-                    ubyte b = va_arg!(ubyte)(ap);
-                    VGAText.putString("0x");
-                    VGAText.putChar(hexmap[(b & 0xF0) >> 4]);
-                    VGAText.putChar(hexmap[b & 0x0F]);
-                }
-                else
-                {
-                    VGAText.putChar(fmt[i]);
-                }
-            }
-            else
-            {
-                VGAText.putChar(c);
-            }
-        }
+        consoleFormat(&vgaConsolePutChar, fmt, ap);
     }
 }

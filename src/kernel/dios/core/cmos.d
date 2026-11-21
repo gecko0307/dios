@@ -59,17 +59,6 @@ enum CMOSRegister: ubyte
     Century       = 0x32 // Standard ACPI default (verify via ACPI FADT if available)
 }
 
-struct DateTime
-{
-    ushort year;
-    ubyte month;
-    ubyte day;
-    ubyte weekday;
-    ubyte hour;
-    ubyte minute;
-    ubyte second;
-}
-
 extern(C):
 
 void cmosRead(CMOS* cmos) @nogc nothrow
@@ -101,70 +90,4 @@ void cmosRead(CMOS* cmos) @nogc nothrow
         push flags;
         popfq;
     }
-}
-
-ubyte bcdToBin(ubyte val) pure @nogc nothrow
-{
-    return cast(ubyte)((val & 0x0F) + ((val >> 4) * 10));
-}
-
-DateTime cmosGetDateTime(const(CMOS)* cmos) pure @nogc nothrow
-{
-    DateTime dt;
-
-    ubyte sec   = cmos.data[CMOSRegister.Seconds];
-    ubyte min   = cmos.data[CMOSRegister.Minutes];
-    ubyte hour  = cmos.data[CMOSRegister.Hours];
-    ubyte wday  = cmos.data[CMOSRegister.Weekday];
-    ubyte day   = cmos.data[CMOSRegister.DayOfMonth];
-    ubyte month = cmos.data[CMOSRegister.Month];
-    ubyte year  = cmos.data[CMOSRegister.Year];
-    ubyte century = cmos.data[CMOSRegister.Century];
-
-    ubyte regB  = cmos.data[CMOSRegister.StatusB];
-    bool isBinary = (regB & 0x04) != 0;
-    bool is24Hour = (regB & 0x02) != 0;
-
-    // Extract PM flag before converting hours from BCD
-    bool isPM = !is24Hour && ((hour & 0x80) != 0);
-    if (!is24Hour)
-    {
-        hour &= 0x7F; // Clear PM bit
-    }
-
-    if (!isBinary)
-    {
-        sec   = bcdToBin(sec);
-        min   = bcdToBin(min);
-        hour  = bcdToBin(hour);
-        wday  = bcdToBin(wday);
-        day   = bcdToBin(day);
-        month = bcdToBin(month);
-        year  = bcdToBin(year);
-        century = bcdToBin(century);
-    }
-
-    // Convert 12-hour clock to 24-hour clock
-    if (!is24Hour)
-    {
-        if (isPM && hour < 12)
-            hour += 12;
-        else if (!isPM && hour == 12)
-            hour = 0;
-    }
-
-    dt.second  = sec;
-    dt.minute  = min;
-    dt.hour    = hour;
-    dt.weekday = wday;
-    dt.day     = day;
-    dt.month   = month;
-
-    // Fallback to 2000s if century register (0x32) is unpopulated (0 or 0xFF)
-    if (century >= 19 && century <= 21)
-        dt.year = cast(ushort)(century * 100 + year);
-    else
-        dt.year = cast(ushort)(2000 + year);
-
-    return dt;
 }
