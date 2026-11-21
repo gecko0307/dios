@@ -203,7 +203,7 @@ enum ulong[4] LIMINE_RSDP_REQUEST = [
 struct LimineRsdpResponse
 {
     ulong revision;
-    void* address;   // physical with base revision 3, HHDM-virtual before: acpi.d accepts both
+    void* address; // physical with base revision 3, HHDM-virtual before: acpi.d accepts both
 };
 
 struct LimineRsdpRequest
@@ -234,10 +234,12 @@ struct LimineModuleRequest
     LimineModuleResponse* response;
 };
 
-// Base revision tag. The bootloader looks for these exact magic values; with
-// zeros here it silently falls back to revision 0 (identity map of the first
-// 4 GiB, which hid the fact that the kernel dereferenced physical addresses).
-// The bootloader sets limine_base_revision[2] to 0 if it accepts revision 3.
+/*
+ * Base revision tag. The bootloader looks for these exact magic values; with
+ * zeros here it silently falls back to revision 0 (identity map of the first
+ * 4 GiB, which hid the fact that the kernel dereferenced physical addresses).
+ * The bootloader sets limine_base_revision[2] to 0 if it accepts revision 3.
+ */
 @(section(".limine_requests"))
 __gshared ulong[3] limine_base_revision = [0xf9562b2d5c95a6c8, 0x6a7b384944536bdc, 3];
 

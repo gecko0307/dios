@@ -1,6 +1,6 @@
 DIOS 0.2.0 - TBD
 ----------------
-- Basic userspace programs support
+- Basic ELF64 userspace programs support. They are currently loaded by Limine as kernel modules (the kernel itself doesn't have a file system)
 - More kernel shell commands
 - Switch to Python for building.
 
