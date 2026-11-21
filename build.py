@@ -145,6 +145,9 @@ def compile_userspace():
     if not SRC_USER.is_dir():
         return []
 
+    output = CDROOT / "user"
+    output.mkdir(parents=True, exist_ok=True)
+
     # The runtime is compiled once and linked into every program.
     runtime = []
     for name in sorted(USER_RUNTIME):
@@ -161,7 +164,7 @@ def compile_userspace():
     names = []
     for path in programs:
         obj = compile_d(path, SRC_USER, OBJ_USER, D_FLAGS_USER)
-        elf = CDROOT / f"{path.stem}.elf"
+        elf = output / f"{path.stem}.elf"
         run([
             LD, *LD_FLAGS_USER,
             "-o", str(elf.relative_to(ROOT)),

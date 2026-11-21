@@ -180,6 +180,12 @@ void consolePutChar(char c) @nogc nothrow
             
             uint offset = (baseY + y) * (console.fb.pitch / console.fb.bytesPerPixel) + (baseX + x);
             uint pix = FONT[(charY + y) * FONT_ATLAS_WIDTH + (charX + x)];
+
+            // Blank the cell first (its advance width only: glyphs are CHAR_WIDTH wide
+            // but cells are h_stride apart), otherwise a character drawn over an old
+            // one - inserting in the middle of a line - shows both glyphs mixed.
+            if (x < console.h_stride)
+                console.fb.ptr[offset] = console.clear_color;
             if (pix != 0x00FF00FF)
                 console.fb.ptr[offset] = pix;
         }
