@@ -1,10 +1,11 @@
 ; -------------------------
-; src/dios/core/cpu.s
+; dios/core/cpu.s
 ; CPU-level primitives: descriptor table loading, MSRs, cpuid, interrupt
 ; flag helpers and the interrupt entry stubs.
 ; -------------------------
 bits 64
 
+global sseEnable
 global gdtFlush
 global idtLoad
 global tssLoad
@@ -28,6 +29,20 @@ extern isrDispatch
 extern syscallDispatch
 
 section .text
+
+; Limine hands over with CR4.OSFXSR/OSXMMEXCPT cleared (CR4 = 0x20), so ANY
+; SSE instruction raises #UD. The compiler emits SSE for things as innocent as
+; zero-initialising a struct. Call this first thing in kmain.
+sseEnable:
+    mov rax, cr0
+    btr rax, 2              ; CR0.EM = 0 (no x87 emulation)
+    bts rax, 1              ; CR0.MP = 1
+    mov cr0, rax
+    mov rax, cr4
+    or rax, 0x600           ; OSFXSR (bit 9) | OSXMMEXCPT (bit 10)
+    mov cr4, rax
+    fninit
+    ret
 
 ; void gdtFlush(const void* gdtr)
 ; Loads the GDT, then reloads every segment register: CS through a far

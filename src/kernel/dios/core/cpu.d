@@ -29,6 +29,8 @@ module dios.core.cpu;
 
 extern(C):
 
+void sseEnable() @nogc nothrow;
+
 void gdtFlush(const(void)* gdtr) @nogc nothrow;
 void idtLoad(const(void)* idtr) @nogc nothrow;
 void tssLoad(ushort selector) @nogc nothrow;

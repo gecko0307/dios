@@ -1,4 +1,7 @@
-BITS 64
+; -------------------------
+; dios/core/mem.s
+; -------------------------
+bits 64
 
 global getCR3
 global setCR3
@@ -8,7 +11,6 @@ global memcpy
 global memmove
 global memset
 global memcmp
-global enableSSE
 
 section .text
 
@@ -101,18 +103,4 @@ memcmp:
     dec rcx
     jnz .next
 .done:
-    ret
-
-; Limine hands over with CR4.OSFXSR/OSXMMEXCPT cleared (CR4 = 0x20), so ANY
-; SSE instruction raises #UD. The compiler emits SSE for things as innocent as
-; zero-initialising a struct. Call this first thing in kmain.
-enableSSE:
-    mov rax, cr0
-    btr rax, 2              ; CR0.EM = 0 (no x87 emulation)
-    bts rax, 1              ; CR0.MP = 1
-    mov cr0, rax
-    mov rax, cr4
-    or rax, 0x600           ; OSFXSR (bit 9) | OSXMMEXCPT (bit 10)
-    mov cr4, rax
-    fninit
     ret

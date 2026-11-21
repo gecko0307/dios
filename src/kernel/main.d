@@ -69,11 +69,11 @@ __gshared MemRange[MAX_MEM_RANGES] memRanges;
 
 extern(C):
 
-/// Kernel entry point.
+/// Kernel entry point. Early init
 void kmain() @nogc nothrow
 {
-    // MUST be first: the bootloader leaves SSE disabled
-    enableSSE();
+    // The bootloader does not guarantee that SSE is enabled
+    sseEnable();
 
     // Every Limine response can be null (request not understood)
     if (hhdmRequest.response is null ||
@@ -171,6 +171,7 @@ ulong nowMs() @nogc nothrow
     return clockNowNs() / 1_000_000;
 }
 
+/// Starts graphics; initializes memory manager and boot peripherals; runs the shell
 void run() @nogc nothrow
 {
     size_t hhdmOffset = bootInfo.ramInfo.hhdmOffset;
