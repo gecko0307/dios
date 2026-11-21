@@ -11,13 +11,14 @@ OBJ = ROOT / "o-elf-x86_64"
 OBJ_KERNEL = OBJ / "kernel"
 OBJ_USER = OBJ / "user"
 CDROOT = ROOT / "cdroot"
+KERNEL_LINKER_SCRIPT = SRC_KERNEL / "linker.ld"
 
 # User-space layout (src/user):
 #   object.d, ulib.d, ulib.s   runtime shared by every program
-#   user.ld                    linker script for programs
+#   linker.ld                  linker script for programs
 #   anything else *.d          one program each -> cdroot/<name>.elf
 USER_RUNTIME = {"object.d", "ulib.d", "ulib.s"}
-USER_LINKER_SCRIPT = SRC_USER / "user.ld"
+USER_LINKER_SCRIPT = SRC_USER / "linker.ld"
 
 LDC = shutil.which("ldc2")
 NASM = shutil.which("nasm")
@@ -64,7 +65,7 @@ D_FLAGS_USER = [
 
 LD_FLAGS_KERNEL = [
     "-m", "elf_x86_64",
-    "-T", "linker.ld",
+    "-T", str(KERNEL_LINKER_SCRIPT.relative_to(ROOT)),
     "-z", "max-page-size=0x1000",
     "-static",
     "--gc-sections",
