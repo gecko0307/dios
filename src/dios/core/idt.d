@@ -46,6 +46,12 @@ static assert(InterruptFrame.sizeof == 22 * 8);
 
 alias IrqHandler = extern(C) void function(InterruptFrame*) @nogc nothrow;
 
+// Set by proc.d. Both are only called when the interrupted code was in ring 3.
+//   userFaultHook: a CPU exception in a user program (must not return)
+//   userTickHook:  a timer tick that interrupted a user program (may not return)
+__gshared IrqHandler userFaultHook;
+__gshared IrqHandler userTickHook;
+
 struct IdtEntry
 {
     ushort offsetLow;
@@ -222,7 +228,11 @@ void isrDispatch(InterruptFrame* f) @nogc nothrow
     }
 
     if (v < 32)
-        exceptionDump(f);               // does not return
+    {
+        if ((f.cs & 3) == 3 && userFaultHook !is null && v != 8 && v != 18)
+            userFaultHook(f);           // kills the program, does not return
+        exceptionDump(f);               // kernel fault: does not return
+    }
 
     if (v == VEC_SPURIOUS)
         return;                         // spurious: by definition no EOI
@@ -235,6 +245,9 @@ void isrDispatch(InterruptFrame* f) @nogc nothrow
         h(f);
     else
         irqUnhandled[v]++;
+
+    if (v == VEC_TIMER && (f.cs & 3) == 3 && userTickHook !is null)
+        userTickHook(f);
 
     lapicEoi();
 }

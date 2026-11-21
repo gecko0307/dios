@@ -20,6 +20,7 @@ import dios.core.font;
 import dios.core.console;
 import dios.core.stdio;
 import dios.core.shell;
+import dios.core.proc;
 import dios.core.error;
 import dios.core.mouse;
 import dios.core.gfx;
@@ -192,6 +193,7 @@ void run() @nogc nothrow
 
     // Enumerate PCI; this also brings up the xHCI controller(s) and any USB mouse
     pciScan();
+    procInit();
     shellInit();
 
     enum ulong BLINK_MS = 100;

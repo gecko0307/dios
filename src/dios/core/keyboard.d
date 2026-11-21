@@ -207,3 +207,22 @@ char keyEventChar(const(KeyEvent)* ev) @nogc nothrow
     bool useShift = letter ? (ev.shift != ev.caps) : ev.shift;
     return cast(char)(useShift ? scancodeToAsciiShift[ev.scancode] : lower);
 }
+
+/// Is a Ctrl+C waiting in the queue? (Used to interrupt a running program
+/// without consuming the other keys.)
+bool keyQueueHasCtrlC() @nogc nothrow
+{
+    for (uint i = keyQueue.tail; i != keyQueue.head; i++)
+    {
+        ushort e = keyQueue.keys[i & (KEYQ_SIZE - 1)];
+        if ((e & KEYF_CTRL) != 0 && (e & KEYF_EXT) == 0 && (e & 0xFF) == 0x2E)   // 0x2E = C
+            return true;
+    }
+    return false;
+}
+
+/// Throw away everything that is queued.
+void keyQueueClear() @nogc nothrow
+{
+    keyQueue.tail = keyQueue.head;
+}

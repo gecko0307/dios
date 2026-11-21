@@ -1,0 +1,622 @@
+module dios.core.proc;
+
+/**
+ * User programs: ELF64 images delivered as bootloader modules, run one at a
+ * time in ring 3 with their own address space, talking to the kernel through
+ * SYSCALL.
+ *
+ * Address space of a program (PML4 slot 0 is private, everything else is the
+ * kernel's, shared):
+ *   0x0000000000400000 - 0x0000000040000000   program image (PT_LOAD segments)
+ *   0x000000007FFF0000 - 0x0000000080000000   stack (64 KiB), arguments at its top
+ * The kernel keeps running on the program's page tables during a syscall; user
+ * pointers are validated page by page (present + user + writable if written).
+ *
+ * A program ends by calling exit, by faulting (the kernel prints what happened
+ * and carries on) or by Ctrl+C (checked on every timer tick that interrupts the
+ * program, and inside the blocking syscalls). All three paths leave through
+ * userResume(), which returns from userEnter() inside procLaunch().
+ *
+ * System calls (rax = number; rdi, rsi, rdx = arguments; result in rax):
+ *   0 exit(code)              1 write(buf, len)       2 getkey(block)
+ *   3 sleep(ms)               4 ticks() -> ms         5 clear()
+ */
+import dios.bootloader.limine;
+import dios.core.clock;
+import dios.core.console;
+import dios.core.cpu;
+import dios.core.error;
+import dios.core.gdt;
+import dios.core.gfx;
+import dios.core.idt;
+import dios.core.keyboard;
+import dios.core.lapic;
+import dios.core.mem;
+import dios.core.paging;
+import dios.core.ps2;
+import dios.core.stdio;
+import dios.core.vmem;
+import dios.core.xhci;
+
+enum ulong USER_IMAGE_MIN = 0x400000;
+enum ulong USER_IMAGE_MAX = 0x40000000;
+enum ulong USER_STACK_TOP = 0x80000000;
+enum uint  USER_STACK_PAGES = 16;
+enum ulong USER_ARGS_MAX = 256;
+
+enum uint PROC_MAX_PROGRAMS = 16;
+enum uint PROC_NAME_MAX = 32;
+
+enum ulong SYS_EXIT = 0;
+enum ulong SYS_WRITE = 1;
+enum ulong SYS_GETKEY = 2;
+enum ulong SYS_SLEEP = 3;
+enum ulong SYS_TICKS = 4;
+enum ulong SYS_CLEAR = 5;
+
+enum uint MSR_EFER = 0xC0000080;
+enum uint MSR_STAR = 0xC0000081;
+enum uint MSR_LSTAR = 0xC0000082;
+enum uint MSR_SFMASK = 0xC0000084;
+
+struct Elf64Ehdr
+{
+    ubyte[16] ident;
+    ushort type;
+    ushort machine;
+    uint version_;
+    ulong entry;
+    ulong phoff;
+    ulong shoff;
+    uint flags;
+    ushort ehsize;
+    ushort phentsize;
+    ushort phnum;
+    ushort shentsize;
+    ushort shnum;
+    ushort shstrndx;
+}
+static assert(Elf64Ehdr.sizeof == 64);
+
+struct Elf64Phdr
+{
+    uint type;
+    uint flags;
+    ulong offset;
+    ulong vaddr;
+    ulong paddr;
+    ulong filesz;
+    ulong memsz;
+    ulong align_;
+}
+static assert(Elf64Phdr.sizeof == 56);
+
+struct Program
+{
+    char[PROC_NAME_MAX] name;
+    const(ubyte)* image;
+    ulong size;
+}
+
+struct Process
+{
+    bool active;
+    ulong pml4Phys;
+    ulong entry;
+    ulong stackPointer;
+    ulong argsAddr;
+    uint program;
+}
+
+__gshared Program[PROC_MAX_PROGRAMS] programs;
+__gshared uint programCount;
+__gshared Process proc;
+__gshared uint tickDivider;
+
+extern(C):
+
+void syscallSetStack(ulong top) @nogc nothrow;
+void* syscallEntryAddress() @nogc nothrow;
+long userEnter(ulong entry, ulong stackTop, ulong arg0) @nogc nothrow;
+void userResume(long code) @nogc nothrow;
+
+// ---------------------------------------------------------------------------
+// program table
+// ---------------------------------------------------------------------------
+
+// "boot():/dir/hello.elf" -> "hello"
+void procMakeName(const(char)* path, char* dst) @nogc nothrow
+{
+    const(char)* base = path;
+    for (const(char)* p = path; *p != 0; p++)
+        if (*p == '/' || *p == ':')
+            base = p + 1;
+
+    uint n = 0;
+    while (base[n] != 0 && base[n] != '.' && n + 1 < PROC_NAME_MAX)
+    {
+        dst[n] = base[n];
+        n++;
+    }
+    dst[n] = 0;
+}
+
+bool procNameEq(const(char)* a, const(char)* b) @nogc nothrow
+{
+    uint i = 0;
+    while (a[i] != 0 && a[i] == b[i])
+        i++;
+    return a[i] == b[i];
+}
+
+/// Set up SYSCALL/SYSRET and collect the programs the bootloader loaded.
+void procInit() @nogc nothrow
+{
+    // SYSRET64: CS = STAR[63:48] + 16, SS = STAR[63:48] + 8  -> 0x20 / 0x18 (our user selectors)
+    // SYSCALL:  CS = STAR[47:32],      SS = STAR[47:32] + 8  -> 0x08 / 0x10
+    cpuWriteMsr(MSR_EFER, cpuReadMsr(MSR_EFER) | 1);                 // SCE
+    cpuWriteMsr(MSR_STAR, (0x10UL << 48) | (0x08UL << 32));
+    cpuWriteMsr(MSR_LSTAR, cast(ulong)syscallEntryAddress());
+    cpuWriteMsr(MSR_SFMASK, 0x40700);                                // clear IF, TF, DF, AC on entry
+    syscallSetStack(cast(ulong)ring0Stack.ptr + IST_STACK_SIZE);
+
+    userFaultHook = &procUserFault;
+    userTickHook = &procUserTick;
+
+    programCount = 0;
+    if (moduleRequest.response is null)
+        return;
+
+    ulong n = moduleRequest.response.module_count;
+    for (ulong i = 0; i < n && programCount < PROC_MAX_PROGRAMS; i++)
+    {
+        LimineFile* f = moduleRequest.response.modules[i];
+        if (f is null || f.address is null || f.path is null)
+            continue;
+        Program* p = &programs[programCount++];
+        procMakeName(f.path, p.name.ptr);
+        p.image = cast(const(ubyte)*)f.address;
+        p.size = f.size;
+    }
+}
+
+int procFind(const(char)* name) @nogc nothrow
+{
+    for (uint i = 0; i < programCount; i++)
+        if (procNameEq(programs[i].name.ptr, name))
+            return cast(int)i;
+    return -1;
+}
+
+// ---------------------------------------------------------------------------
+// address space
+// ---------------------------------------------------------------------------
+
+// Find (and with `create`, build the path to) the 4 KiB page-table entry for a
+// user address. Intermediate tables get the USER bit; only slot 0 of the PML4 is
+// ever touched, so the kernel's shared tables are never modified.
+ulong* procPte(ulong pml4Phys, ulong vaddr, bool create) @nogc nothrow
+{
+    ulong* table = cast(ulong*)vmemPhysToVirt(pml4Phys);
+    for (uint lvl = 0; lvl < 3; lvl++)
+    {
+        size_t ix = cast(size_t)((vaddr >> (39 - 9 * lvl)) & 0x1FF);
+        ulong e = table[ix];
+        if (!(e & PTE_PRESENT))
+        {
+            if (!create)
+                return null;
+            ulong phys;
+            if (vmemAllocTable(&phys) is null)
+                return null;
+            e = phys | PTE_PRESENT | PTE_RW | PTE_USER;
+            table[ix] = e;
+        }
+        table = cast(ulong*)vmemPhysToVirt(e & PTE_ADDR_MASK);
+    }
+    return &table[idx_pt(vaddr)];
+}
+
+// Give back every page of a program: data pages, tables, and the PML4 itself.
+void procFreeSpace(ulong pml4Phys) @nogc nothrow
+{
+    if (pml4Phys == 0)
+        return;
+
+    ulong* pml4 = cast(ulong*)vmemPhysToVirt(pml4Phys);
+    ulong e0 = pml4[0];
+    if (e0 & PTE_PRESENT)
+    {
+        ulong* pdpt = cast(ulong*)vmemPhysToVirt(e0 & PTE_ADDR_MASK);
+        for (uint i = 0; i < 512; i++)
+        {
+            ulong e1 = pdpt[i];
+            if (!(e1 & PTE_PRESENT))
+                continue;
+            ulong* pd = cast(ulong*)vmemPhysToVirt(e1 & PTE_ADDR_MASK);
+            for (uint j = 0; j < 512; j++)
+            {
+                ulong e2 = pd[j];
+                if (!(e2 & PTE_PRESENT))
+                    continue;
+                ulong* pt = cast(ulong*)vmemPhysToVirt(e2 & PTE_ADDR_MASK);
+                for (uint k = 0; k < 512; k++)
+                    if (pt[k] & PTE_PRESENT)
+                        pmmFreePage(pt[k] & PTE_ADDR_MASK);
+                pmmFreePage(e2 & PTE_ADDR_MASK);
+            }
+            pmmFreePage(e1 & PTE_ADDR_MASK);
+        }
+        pmmFreePage(e0 & PTE_ADDR_MASK);
+    }
+    pmmFreePage(pml4Phys);
+}
+
+// Map one fresh zeroed page at `vaddr` (or reuse the page already there, which
+// happens when two segments share a page). Returns its kernel-visible address.
+ubyte* procMapPage(ulong pml4Phys, ulong vaddr, bool writable) @nogc nothrow
+{
+    ulong* pte = procPte(pml4Phys, vaddr, true);
+    if (pte is null)
+        return null;
+
+    if (*pte & PTE_PRESENT)
+    {
+        if (writable)
+            *pte |= PTE_RW;
+        return cast(ubyte*)vmemPhysToVirt(*pte & PTE_ADDR_MASK);
+    }
+
+    ulong phys = pmmAllocPage();
+    if (phys == 0)
+        return null;
+    ubyte* page = cast(ubyte*)vmemPhysToVirt(phys);
+    memset(page, 0, 4096);
+    *pte = phys | PTE_PRESENT | PTE_USER | (writable ? PTE_RW : 0);
+    return page;
+}
+
+bool procLoadElf(Program* prog, ulong pml4Phys, ulong* entry) @nogc nothrow
+{
+    if (prog.size < Elf64Ehdr.sizeof)
+    {
+        kprintf("run: '%s' is too small to be an ELF file\n", prog.name.ptr);
+        return false;
+    }
+
+    const(Elf64Ehdr)* eh = cast(const(Elf64Ehdr)*)prog.image;
+    if (eh.ident[0] != 0x7F || eh.ident[1] != 'E' || eh.ident[2] != 'L' || eh.ident[3] != 'F' ||
+        eh.ident[4] != 2 || eh.ident[5] != 1 || eh.type != 2 || eh.machine != 0x3E)
+    {
+        kprintf("run: '%s' is not an x86-64 ELF executable\n", prog.name.ptr);
+        return false;
+    }
+    if (eh.phentsize != Elf64Phdr.sizeof || eh.phnum == 0 || eh.phnum > 16 ||
+        eh.phoff > prog.size || prog.size - eh.phoff < cast(ulong)eh.phnum * Elf64Phdr.sizeof)
+    {
+        kprintf("run: '%s' has a bad program header table\n", prog.name.ptr);
+        return false;
+    }
+    if (eh.entry < USER_IMAGE_MIN || eh.entry >= USER_IMAGE_MAX)
+    {
+        kprintf("run: '%s' entry point %llx is outside the user range\n", prog.name.ptr, eh.entry);
+        return false;
+    }
+
+    uint loaded = 0;
+    for (uint i = 0; i < eh.phnum; i++)
+    {
+        const(Elf64Phdr)* ph = cast(const(Elf64Phdr)*)(prog.image + eh.phoff + i * Elf64Phdr.sizeof);
+        if (ph.type != 1 || ph.memsz == 0)          // PT_LOAD only
+            continue;
+
+        bool ok = ph.filesz <= ph.memsz &&
+                  ph.vaddr >= USER_IMAGE_MIN && ph.memsz <= USER_IMAGE_MAX &&
+                  ph.vaddr <= USER_IMAGE_MAX - ph.memsz &&
+                  ph.offset <= prog.size && ph.filesz <= prog.size - ph.offset;
+        if (!ok)
+        {
+            kprintf("run: '%s' has a segment outside the allowed range\n", prog.name.ptr);
+            return false;
+        }
+
+        bool writable = (ph.flags & 2) != 0;
+        ulong first = ph.vaddr & ~0xFFFUL;
+        ulong last = (ph.vaddr + ph.memsz - 1) & ~0xFFFUL;
+        for (ulong page = first; page <= last; page += 4096)
+        {
+            ubyte* dst = procMapPage(pml4Phys, page, writable);
+            if (dst is null)
+            {
+                kprintf("run: out of memory while loading '%s'\n", prog.name.ptr);
+                return false;
+            }
+
+            // File bytes that land in this page: [vaddr, vaddr + filesz) intersected with it.
+            ulong lo = (ph.vaddr > page) ? ph.vaddr : page;
+            ulong fileEnd = ph.vaddr + ph.filesz;
+            ulong hi = (fileEnd < page + 4096) ? fileEnd : page + 4096;
+            if (hi > lo)
+                memcpy(dst + (lo - page), prog.image + ph.offset + (lo - ph.vaddr), cast(size_t)(hi - lo));
+        }
+        loaded++;
+    }
+
+    if (loaded == 0)
+    {
+        kprintf("run: '%s' has nothing to load\n", prog.name.ptr);
+        return false;
+    }
+    *entry = eh.entry;
+    return true;
+}
+
+bool procBuildSpace(uint index, const(char)* args) @nogc nothrow
+{
+    ulong pml4Phys;
+    void* pml4 = vmemAllocTable(&pml4Phys);
+    if (pml4 is null)
+    {
+        kprintf("run: out of memory\n");
+        return false;
+    }
+
+    // Share the kernel half; slot 0 (low half) is the program's own.
+    memcpy(pml4, cast(void*)vmemPhysToVirt(PML4_PHYS), 4096);
+    (cast(ulong*)pml4)[0] = 0;
+    proc.pml4Phys = pml4Phys;
+
+    if (!procLoadElf(&programs[index], pml4Phys, &proc.entry))
+        return false;
+
+    for (uint i = 0; i < USER_STACK_PAGES; i++)
+    {
+        ulong va = USER_STACK_TOP - cast(ulong)(i + 1) * 4096;
+        if (procMapPage(pml4Phys, va, true) is null)
+        {
+            kprintf("run: out of memory for the stack\n");
+            return false;
+        }
+    }
+
+    // Arguments: a NUL-terminated copy at the very top of the stack.
+    ulong n = 0;
+    while (args[n] != 0 && n + 1 < USER_ARGS_MAX)
+        n++;
+    ulong argsVa = USER_STACK_TOP - USER_ARGS_MAX;
+    ubyte* top = cast(ubyte*)vmemPhysToVirt((*procPte(pml4Phys, USER_STACK_TOP - 4096, false)) & PTE_ADDR_MASK);
+    ubyte* dst = top + (4096 - USER_ARGS_MAX);
+    for (ulong i = 0; i < n; i++)
+        dst[i] = cast(ubyte)args[i];
+    dst[n] = 0;
+
+    proc.argsAddr = argsVa;
+    proc.stackPointer = argsVa - 64;        // some headroom below the arguments
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// running and ending programs
+// ---------------------------------------------------------------------------
+
+void procInputPoll() @nogc nothrow
+{
+    usbPoll();
+    if (ps2State.irqMode)
+        ps2Drain();
+    else
+        ps2Poll();
+}
+
+/// Leave the running program immediately. Never returns.
+void procKill(long code) @nogc nothrow
+{
+    if (!proc.active)
+        hcf();
+    userResume(code);
+    for (;;)
+        cpuHlt();
+}
+
+void procAbort() @nogc nothrow
+{
+    kprintf("^C\n");
+    procKill(130);
+}
+
+extern(C) void procUserFault(InterruptFrame* f) @nogc nothrow
+{
+    uint v = cast(uint)f.vector;
+    kprintf("\nProgram '%s' crashed: %s (vector %u) at %llx",
+        programs[proc.program].name.ptr, exceptionNames[v & 31].ptr, v, f.rip);
+    if (v == 14)
+        kprintf(", address %llx", cpuReadCr2());
+    kprintf("\n");
+    procKill(128 + v);
+}
+
+// Timer tick that interrupted ring 3. Every 8th one: poll the keyboards (the
+// main loop is not running) and watch for Ctrl+C so a stuck program can be stopped.
+extern(C) void procUserTick(InterruptFrame* f) @nogc nothrow
+{
+    if (!proc.active)
+        return;
+    if (++tickDivider < 8)
+        return;
+    tickDivider = 0;
+
+    procInputPoll();
+    if (keyQueueHasCtrlC())
+    {
+        keyQueueClear();
+        lapicEoi(); // we are not going to return through isrDispatch
+        procAbort();
+    }
+}
+
+/// Run program `index` to completion. Returns false if it could not be started;
+/// otherwise stores its exit code (128+vector if it crashed, 130 for Ctrl+C).
+bool procLaunch(uint index, const(char)* args, long* exitCode) @nogc nothrow
+{
+    if (proc.active || index >= programCount)
+        return false;
+
+    proc.program = index;
+    proc.pml4Phys = 0;
+    if (!procBuildSpace(index, args))
+    {
+        procFreeSpace(proc.pml4Phys);
+        proc.pml4Phys = 0;
+        return false;
+    }
+
+    keyQueueClear(); // keys typed before the program started are not its input
+    tickDivider = 0;
+    proc.active = true;
+    setCR3(proc.pml4Phys);
+    long rc = userEnter(proc.entry, proc.stackPointer, proc.argsAddr);
+
+    // Back from userResume(): kernel page tables first, then clean up.
+    setCR3(PML4_PHYS);
+    proc.active = false;
+    procFreeSpace(proc.pml4Phys);
+    proc.pml4Phys = 0;
+    keyQueueClear();
+    cpuSti(); // we may have been entered from an ISR or syscall context
+    *exitCode = rc;
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// system calls
+// ---------------------------------------------------------------------------
+
+// May the program read (or write) [addr, addr + len)?
+bool procUserOk(ulong addr, ulong len, bool write) @nogc nothrow
+{
+    if (len == 0)
+        return true;
+    if (addr < USER_IMAGE_MIN || addr + len < addr || addr + len > USER_STACK_TOP)
+        return false;
+
+    for (ulong page = addr & ~0xFFFUL; page < addr + len; page += 4096)
+    {
+        ulong* pte = procPte(proc.pml4Phys, page, false);
+        if (pte is null)
+            return false;
+        ulong e = *pte;
+        if (!(e & PTE_PRESENT) || !(e & PTE_USER) || (write && !(e & PTE_RW)))
+            return false;
+    }
+    return true;
+}
+
+// Key press -> value for the program: ASCII for text keys (Enter = 10), 0x101..0x107
+// for Up, Down, Left, Right, Home, End, Delete. -1: nothing useful.
+long procKeyCode(const(KeyEvent)* ev) @nogc nothrow
+{
+    if (ev.extended)
+    {
+        switch (ev.scancode)
+        {
+            case 0x48: return 0x101;
+            case 0x50: return 0x102;
+            case 0x4B: return 0x103;
+            case 0x4D: return 0x104;
+            case 0x47: return 0x105;
+            case 0x4F: return 0x106;
+            case 0x53: return 0x107;
+            default: return -1;
+        }
+    }
+    char c = keyEventChar(ev);
+    if (c == 13)
+        return 10;
+    return (c != 0) ? c : -1;
+}
+
+long sysGetKey(bool block) @nogc nothrow
+{
+    for (;;)
+    {
+        procInputPoll();
+        KeyEvent ev;
+        while (keyPopEvent(&ev))
+        {
+            if (ev.ctrl && keyEventChar(&ev) == 3)
+                procAbort();
+            long k = procKeyCode(&ev);
+            if (k >= 0)
+                return k;
+        }
+        if (!block)
+            return -1;
+        gfxPresent();
+        cpuHlt();
+    }
+}
+
+long sysSleep(ulong ms) @nogc nothrow
+{
+    ulong deadline = clockNowNs() + ms * 1_000_000UL;
+    while (clockNowNs() < deadline)
+    {
+        procInputPoll();
+        KeyEvent ev;
+        while (keyPopEvent(&ev))
+            if (ev.ctrl && keyEventChar(&ev) == 3)
+                procAbort();
+        gfxPresent();
+        cpuHlt();
+    }
+    return 0;
+}
+
+long sysWrite(ulong buf, ulong len) @nogc nothrow
+{
+    if (len > 65536)
+        len = 65536;
+    if (!procUserOk(buf, len, false))
+        return -1;
+
+    const(ubyte)* p = cast(const(ubyte)*)buf;
+    for (ulong i = 0; i < len; i++)
+    {
+        ubyte c = p[i];
+        if (c == 8)
+            consoleBack();
+        else if (c == 9)
+            consolePrintString("    ");
+        else if (c == '\n' || c == '\r' || (c >= 32 && c < 127))
+            consolePrintChar(cast(char)c);
+        else
+            consolePrintChar('?');
+    }
+    gfxPresent();
+    return cast(long)len;
+}
+
+// Called from the SYSCALL entry stub (cpu.s) on the ring-0 stack, interrupts off.
+long syscallDispatch(ulong nr, ulong a0, ulong a1, ulong a2) @nogc nothrow
+{
+    switch (nr)
+    {
+        case SYS_EXIT:
+            procKill(cast(long)a0);
+            return 0;
+        case SYS_WRITE:
+            return sysWrite(a0, a1);
+        case SYS_GETKEY:
+            return sysGetKey(a0 != 0);
+        case SYS_SLEEP:
+            return sysSleep(a0);
+        case SYS_TICKS:
+            return cast(long)(clockNowNs() / 1_000_000UL);
+        case SYS_CLEAR:
+            consoleClear();
+            gfxPresent();
+            return 0;
+        default:
+            return -1;
+    }
+}

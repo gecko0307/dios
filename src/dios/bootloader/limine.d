@@ -213,6 +213,27 @@ struct LimineRsdpRequest
     LimineRsdpResponse* response;
 };
 
+enum ulong[4] LIMINE_MODULE_REQUEST = [
+    LIMINE_COMMON_MAGIC1,
+    LIMINE_COMMON_MAGIC2,
+    0x3e7e279702be32af,
+    0xca1c4f3bd1280cee
+];
+
+struct LimineModuleResponse
+{
+    ulong revision;
+    ulong module_count;
+    LimineFile** modules;
+}
+
+struct LimineModuleRequest
+{
+    ulong[4] id;
+    ulong revision;
+    LimineModuleResponse* response;
+};
+
 // Base revision tag. The bootloader looks for these exact magic values; with
 // zeros here it silently falls back to revision 0 (identity map of the first
 // 4 GiB, which hid the fact that the kernel dereferenced physical addresses).
@@ -242,6 +263,9 @@ __gshared LimineKernelAddressRequest kernelAddressRequest = LimineKernelAddressR
 
 @(section(".limine_requests"))
 __gshared LimineRsdpRequest rsdpRequest = LimineRsdpRequest(LIMINE_RSDP_REQUEST, 0, null);
+
+@(section(".limine_requests"))
+__gshared LimineModuleRequest moduleRequest = LimineModuleRequest(LIMINE_MODULE_REQUEST, 0, null);
 
 @(section(".limine_requests_start"))
 __gshared ulong[4] limineRequestsStart = [0xf6b8f4b39de7d1ae, 0xfab91a6940fcb9cf, 0x785c6ed015d3e316, 0x181e920a7852b9d9];

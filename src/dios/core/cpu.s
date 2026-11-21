@@ -18,9 +18,14 @@ global cpuSti
 global cpuCli
 global cpuHlt
 global cpuTripleFault
+global syscallEntryAddress
+global syscallSetStack
+global userEnter
+global userResume
 global isrStubAddress
 
 extern isrDispatch
+extern syscallDispatch
 
 section .text
 
@@ -60,6 +65,95 @@ cpuTripleFault:
 .hang:
     hlt
     jmp .hang
+
+; ---------------------------------------------------------------------------
+; Ring 3 support
+;
+; SYSCALL convention (user side): rax = number, rdi/rsi/rdx = arguments, result
+; in rax; rcx and r11 are clobbered (hardware). SFMASK clears IF/TF/DF, so the
+; handler starts with interrupts off on the shared ring-0 stack.
+; ---------------------------------------------------------------------------
+
+; void* syscallEntryAddress()
+syscallEntryAddress:
+    lea rax, [rel syscallEntry]
+    ret
+
+; void syscallSetStack(ulong top)
+syscallSetStack:
+    mov [rel sys_kstack_top], rdi
+    ret
+
+syscallEntry:
+    mov [rel sys_user_rsp], rsp
+    mov rsp, [rel sys_kstack_top]
+    push qword [rel sys_user_rsp]   ; user RSP
+    push rcx                        ; user RIP
+    push r11                        ; user RFLAGS
+    sub rsp, 8                      ; keep the call site 16-byte aligned
+    ; syscallDispatch(nr, a0, a1, a2)
+    mov rcx, rdx
+    mov rdx, rsi
+    mov rsi, rdi
+    mov rdi, rax
+    cld
+    call syscallDispatch
+    add rsp, 8
+    pop r11
+    pop rcx
+    pop rsp                         ; back on the user stack
+    o64 sysret
+
+; long userEnter(ulong entry, ulong userStackTop, ulong arg0)
+; Saves the kernel context, then drops to ring 3 with an iretq frame. Returns
+; (as if from this call) when userResume() is invoked, with its argument in rax.
+userEnter:
+    push rbx
+    push rbp
+    push r12
+    push r13
+    push r14
+    push r15
+    mov [rel user_resume_rsp], rsp
+    mov rax, rdx
+    push qword 0x1B                 ; SS  = user data | 3
+    push rsi                        ; RSP
+    push qword 0x202                ; RFLAGS: IF
+    push qword 0x23                 ; CS  = user code | 3
+    push rdi                        ; RIP
+    mov rdi, rax                    ; arg0 reaches the program in rdi
+    xor eax, eax
+    xor ebx, ebx
+    xor ecx, ecx
+    xor edx, edx
+    xor esi, esi
+    xor ebp, ebp
+    xor r8d, r8d
+    xor r9d, r9d
+    xor r10d, r10d
+    xor r11d, r11d
+    xor r12d, r12d
+    xor r13d, r13d
+    xor r14d, r14d
+    xor r15d, r15d
+    iretq
+
+; void userResume(long code)   - never returns to its caller
+; Abandons whatever stack we are on (syscall, exception or IRQ) and returns
+; from userEnter() to the kernel code that started the program.
+userResume:
+    mov rsp, [rel user_resume_rsp]
+    mov ax, 0x10
+    mov ds, ax
+    mov es, ax
+    mov rax, rdi
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbp
+    pop rbx
+    ret
 
 ; void tssLoad(ushort selector)
 tssLoad:
@@ -215,3 +309,9 @@ isr_stub_table:
     dq isr_stub_ %+ i
 %assign i i+1
 %endrep
+
+section .bss
+align 8
+sys_kstack_top:   resq 1
+sys_user_rsp:     resq 1
+user_resume_rsp:  resq 1

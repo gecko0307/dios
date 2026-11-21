@@ -89,6 +89,9 @@ def compile_asm(path):
 
     return output
 
+#def compile_kernel():
+    
+
 def main():
     d_files = sorted(SRC.rglob("*.d"))
     asm_files = sorted(SRC.rglob("*.s"))

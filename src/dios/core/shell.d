@@ -8,6 +8,7 @@ import dios.core.diag;
 import dios.core.interrupts;
 import dios.core.keyboard;
 import dios.core.paging;
+import dios.core.proc;
 import dios.core.pci;
 import dios.core.stdio;
 
@@ -15,11 +16,11 @@ import dios.core.stdio;
 enum size_t SHELL_LINE_CAPACITY = 128;
 enum size_t SHELL_HISTORY_CAPACITY = 16;
 
-immutable string[19] SHELL_COMMANDS = [
+immutable string[21] SHELL_COMMANDS = [
     "help", "about", "mem", "uptime", "clock",
     "irq", "pci", "history", "echo", "poweroff",
     "reboot", "clear", "cpuinfo", "acpi", "irqstat",
-    "sleep", "hexdump", "crash", "version"
+    "sleep", "hexdump", "crash", "version", "ls", "run"
 ];
 
 __gshared char[SHELL_LINE_CAPACITY] shellLine;
@@ -144,6 +145,32 @@ void shellShowPci() @nogc nothrow
     kprintf("%u PCI function(s) found.\n", found);
 }
 
+// Start program `index` and report how it ended.
+void shellRunProgram(uint index, const(char)* args) @nogc nothrow
+{
+    long code = 0;
+    if (!procLaunch(index, args, &code))
+    {
+        kprintf("Could not start '%s'.\n", programs[index].name.ptr);
+        return;
+    }
+    if (console.print_x != 0)
+        consoleNewline();                   // the program's last line had no newline
+    if (code != 0)
+        kprintf("[%s exited with code %llu]\n", programs[index].name.ptr, cast(ulong)code);
+}
+
+void shellListPrograms() @nogc nothrow
+{
+    if (programCount == 0)
+    {
+        kprintf("No programs found. Add them as boot modules (see PROGRAMS.txt).\n");
+        return;
+    }
+    for (uint i = 0; i < programCount; i++)
+        kprintf("  %s  (%llu bytes)\n", programs[i].name.ptr, programs[i].size);
+}
+
 void shellExecute() @nogc nothrow
 {
     // Split command and arguments in-place. Quoting is intentionally not
@@ -175,6 +202,8 @@ void shellExecute() @nogc nothrow
         kprintf("  history          Show recent commands\n");
         kprintf("  echo TEXT        Print TEXT\n");
         kprintf("  sleep SECONDS    Wait (Ctrl+C aborts)\n");
+        kprintf("  ls               List programs on the boot media\n");
+        kprintf("  run NAME [ARGS]  Run a program (or just type its name)\n");
         kprintf("  clear            Clear the screen\n");
         kprintf("  crash pf|ud|div|gp  Trigger a CPU exception (kernel halts)\n");
         kprintf("  reboot           Restart the computer\n");
@@ -307,6 +336,33 @@ void shellExecute() @nogc nothrow
         else
             kprintf("Usage: crash pf|ud|div|gp\n");
     }
+    else if (shellEquals(shellLine.ptr, "ls"))
+    {
+        shellListPrograms();
+    }
+    else if (shellEquals(shellLine.ptr, "run"))
+    {
+        // First word of the arguments is the program name, the rest is passed on.
+        char[PROC_NAME_MAX] name;
+        uint n = 0;
+        const(char)* p = args;
+        while (*p != 0 && *p != ' ' && *p != '\t' && n + 1 < PROC_NAME_MAX)
+            name[n++] = *p++;
+        name[n] = 0;
+        while (*p == ' ' || *p == '\t')
+            p++;
+
+        if (n == 0)
+            kprintf("Usage: run NAME [ARGS]  (see 'ls')\n");
+        else
+        {
+            int index = procFind(name.ptr);
+            if (index < 0)
+                kprintf("No such program: %s\n", name.ptr);
+            else
+                shellRunProgram(cast(uint)index, p);
+        }
+    }
     else if (shellEquals(shellLine.ptr, "poweroff"))
     {
         kprintf("Powering off...\n");
@@ -315,8 +371,16 @@ void shellExecute() @nogc nothrow
     }
     else if (shellLine[0] != 0)
     {
-        kprintf("Unknown command: %s\n", shellLine.ptr);
-        kprintf("Type 'help' for available commands.\n");
+        int index = procFind(shellLine.ptr);
+        if (index >= 0)
+        {
+            shellRunProgram(cast(uint)index, args);
+        }
+        else
+        {
+            kprintf("Unknown command: %s\n", shellLine.ptr);
+            kprintf("Type 'help' for available commands.\n");
+        }
     }
 
     shellClearLine();
