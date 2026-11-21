@@ -23,7 +23,7 @@ DIOS is an ELF kernel that requires a bootloader to run. Default setup in this r
 - xHCI driver
 - USB and PS/2 keyboard and mouse
 - A shell with built-in kernel commands
-- Basic userspace.
+- Basic single-tasking userspace in Ring 3; system calls.
 
 DIOS is planned as a graphical OS: all rendering features are built into the kernel (but there's no full-featured GUI yet).
 
@@ -61,6 +61,8 @@ These are currently simple examples of what can be done in DIOS userspace.
 - `count` - counts once a second. Ctrl+C stops it (the kernel handles that)
 - `rev` - reads lines and prints them reversed. An empty line ends the program
 - `fault` - deliberately crashes by dereferencing a null pointer. The kernel reports it and keeps running.
+
+Programs are also written in D and compiled with the kernel to *.elf files. At runtime they are currently loaded by Limine as kernel modules (the kernel itself doesn't have a file system).
 
 ## Code Structure
 
