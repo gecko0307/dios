@@ -1,3 +1,8 @@
+DIOS 0.4.0 - TBD
+----------------
+- **ulib**:
+  - Runtime entry point that allocates an arguments array and calls compiler-generated `_Dmain`.
+
 DIOS 0.3.1 - 22 Nov, 2026
 -------------------------
 - USB hot-plug support
