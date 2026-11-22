@@ -238,3 +238,210 @@ void* ubrk(void* newBreak) @nogc nothrow
     long result = sys_call(SYS_BRK, cast(ulong)newBreak, 0, 0);
     return result < 0 ? null : cast(void*)result;
 }
+
+// Allocator
+
+private enum USER_IMAGE_MAX = 0x40000000;
+private enum USER_HEAP_BASE = USER_IMAGE_MAX;
+
+private enum size_t ALIGNMENT = 16;
+private enum size_t HEADER_SIZE = 32;
+
+private enum ulong BLOCK_USED = 0x554D454D55534544UL;
+private enum ulong BLOCK_FREE = 0x554D454D46524545UL;
+
+private struct Block
+{
+    size_t size; // Payload size
+    Block* prev;
+    Block* next;
+    ulong tag;
+}
+
+static assert(Block.sizeof == HEADER_SIZE);
+
+private __gshared Block* firstBlock;
+private __gshared Block* lastBlock;
+private __gshared void* heapEnd;
+private __gshared bool initialized;
+
+private size_t alignSize(size_t size) @nogc nothrow
+{
+    return (size + ALIGNMENT - 1) & ~(ALIGNMENT - 1);
+}
+
+private bool initHeap() @nogc nothrow
+{
+    if (initialized)
+        return true;
+
+    heapEnd = ubrk(null);
+    if (heapEnd is null)
+        return false;
+
+    initialized = true;
+    return true;
+}
+
+/// Extend the heap and append a free block.
+private bool extendHeap(size_t size) @nogc nothrow
+{
+    bool reuseLast = lastBlock !is null &&
+                     lastBlock.tag == BLOCK_FREE;
+
+    size_t extra = size;
+    if (!reuseLast)
+        extra += HEADER_SIZE;
+
+    ulong oldBreak = cast(ulong)heapEnd;
+
+    if (extra > ulong.max - oldBreak)
+        return false;
+
+    void* newBreak = ubrk(cast(void*)(oldBreak + extra));
+    if (newBreak is null)
+        return false;
+
+    if (reuseLast)
+    {
+        lastBlock.size += size;
+    }
+    else
+    {
+        Block* block = cast(Block*)heapEnd;
+
+        block.size = size;
+        block.prev = lastBlock;
+        block.next = null;
+        block.tag = BLOCK_FREE;
+
+        if (lastBlock !is null)
+            lastBlock.next = block;
+        else
+            firstBlock = block;
+
+        lastBlock = block;
+    }
+
+    heapEnd = newBreak;
+    return true;
+}
+
+/// Split a free block if the remainder can hold another block.
+private void splitBlock(Block* block, size_t size) @nogc nothrow
+{
+    size_t remaining = block.size - size;
+
+    if (remaining < HEADER_SIZE + ALIGNMENT)
+        return;
+
+    Block* next = cast(Block*)(
+        cast(ubyte*)(block + 1) + size
+    );
+
+    next.size = remaining - HEADER_SIZE;
+    next.prev = block;
+    next.next = block.next;
+    next.tag = BLOCK_FREE;
+
+    if (next.next !is null)
+        next.next.prev = next;
+    else
+        lastBlock = next;
+
+    block.next = next;
+    block.size = size;
+}
+
+/// Allocate a block of memory.
+void* umalloc(size_t size) @nogc nothrow
+{
+    if (size == 0)
+        size = 1;
+
+    if (size > ulong.max - (ALIGNMENT - 1))
+        return null;
+
+    size = alignSize(size);
+
+    if (!initHeap())
+        return null;
+
+    // First-fit search.
+    for (Block* block = firstBlock;
+         block !is null;
+         block = block.next)
+    {
+        if (block.tag == BLOCK_FREE && block.size >= size)
+        {
+            splitBlock(block, size);
+            block.tag = BLOCK_USED;
+            return block + 1;
+        }
+    }
+
+    // No suitable block: extend the heap.
+    if (!extendHeap(size))
+        return null;
+
+    Block* block = lastBlock;
+    block.tag = BLOCK_USED;
+
+    return block + 1;
+}
+
+/// Release a previously allocated block.
+void ufree(void* ptr) @nogc nothrow
+{
+    if (ptr is null || !initialized)
+        return;
+
+    ulong address = cast(ulong)ptr;
+    ulong base = cast(ulong)USER_HEAP_BASE;
+    ulong end = cast(ulong)heapEnd;
+
+    if (address < base + HEADER_SIZE || address >= end)
+        return;
+
+    if ((address - base) & (ALIGNMENT - 1))
+        return;
+
+    Block* block = cast(Block*)(
+        cast(ubyte*)ptr - HEADER_SIZE
+    );
+
+    if (block.tag != BLOCK_USED)
+        return;
+
+    block.tag = BLOCK_FREE;
+
+    // Merge with the next free block.
+    if (block.next !is null &&
+        block.next.tag == BLOCK_FREE)
+    {
+        Block* next = block.next;
+
+        block.size += HEADER_SIZE + next.size;
+        block.next = next.next;
+
+        if (block.next !is null)
+            block.next.prev = block;
+        else
+            lastBlock = block;
+    }
+
+    // Merge with the previous free block.
+    if (block.prev !is null &&
+        block.prev.tag == BLOCK_FREE)
+    {
+        Block* prev = block.prev;
+
+        prev.size += HEADER_SIZE + block.size;
+        prev.next = block.next;
+
+        if (prev.next !is null)
+            prev.next.prev = prev;
+        else
+            lastBlock = prev;
+    }
+}
