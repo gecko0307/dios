@@ -6,7 +6,8 @@ DIOS 0.3.0 - TBD
 - Running programs from a USB stick
 - FS syscalls
 - New date-time module; `time` shell command
-- Kernel log; `dmesg` shell command.
+- Kernel log; `dmesg` shell command
+- New workflow for building userspace applications.
 
 DIOS 0.2.0 - 21 Nov, 2026
 -------------------------

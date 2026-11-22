@@ -75,7 +75,7 @@ Simple examples of what can be done in DIOS userspace.
 - `dir.elf [PATH]` - lists a directory
 - `memtest.elf` - dynamic memory allocation test.
 
-Programs are also written in D (in fact, they can be written in any language that outputs ELF64). When running on a real hardware, they are meant to be copied to USB stick alongside with the DIOS kernel. When testing in QEMU, it is recommended to make a separate USB stick using fstool (`makestick.bat`) and run the VM via `run_usbstick.bat`.
+Programs are also written in D (in fact, they can be written in any language that outputs ELF64).
 
 ## Code Structure
 
@@ -104,6 +104,12 @@ Prerequisites:
 Run `python build.py` to compile the kernel (`cdroot/kernel64.bin`) and generate `dios64.iso`.
 
 Run `buildlib.bat` to compile ulib and generate `libulib.a`. This is necessary to build sample programs.
+
+All sample programs are built with DUB:
+
+`dub build`
+
+Binaries are automatically copied to `usbstick` directory. When running on a real hardware, they are meant to be copied to USB stick alongside with the DIOS kernel. When testing in QEMU, it is recommended to make a USB stick image using fstool (`makestick.bat`) and run the VM via `run_usbstick.bat`.
 
 ## Boot Disc Structure
 
