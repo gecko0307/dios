@@ -25,7 +25,7 @@ For more information, please refer to <https://unlicense.org>
 */
 module main;
 
-import dios.ulib;
+import ulib.dios;
 
 // file FILE [OFFSET] - print a text file, optionally starting at a byte offset
 int main(string[] args)

@@ -30,7 +30,7 @@ module umain;
  * Allocates an arguments array and calls compiler-generated `_Dmain`.
  */
 
-import dios.ulib;
+import ulib.dios;
 
 private bool isSpace(char c) @nogc nothrow
 {

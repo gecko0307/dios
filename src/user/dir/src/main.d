@@ -25,7 +25,7 @@ For more information, please refer to <https://unlicense.org>
 */
 module main;
 
-import dios.ulib;
+import ulib.dios;
 
 void putPad(ulong v, uint width)
 {

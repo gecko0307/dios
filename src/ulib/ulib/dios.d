@@ -23,10 +23,10 @@ OTHER DEALINGS IN THE SOFTWARE.
 
 For more information, please refer to <https://unlicense.org>
 */
-module dios.ulib;
+module ulib.dios;
 
 /**
- * DIOS system library.
+ * DIOS kernel API.
  */
 
 enum ulong SYS_EXIT = 0;
