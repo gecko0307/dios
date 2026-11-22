@@ -77,7 +77,7 @@ Simple examples of what can be done in DIOS userspace.
 - `dir.elf [PATH]` - lists a directory
 - `show.elf FILE [OFFSET]`  - print a text file, optionally starting at a byte offset.
 
-Programs are also written in D (in fact, they can be written in any language that outputs ELF64). They can be loaded by Limine as kernel modules, or placed to Ventoy USB stick alongside with the DIOS image.
+Programs are also written in D (in fact, they can be written in any language that outputs ELF64). When running on a real hardware, they are meant to be copied to USB stick alongside with the DIOS kernel. When testing in QEMU, it is recommended to make a separate USB stick using fstool (`makestick.bat`) and run the VM via `run_usbstick.bat`.
 
 ## Code Structure
 
