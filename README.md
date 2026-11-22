@@ -38,7 +38,7 @@ DIOS is now 64-bit only, x86 support was dropped.
 
 After successful initialization, the kernel immediately starts an interactive shell session. Available commands are listed [here](doc/commands.md);
 
-## Programs
+## Applications
 
 Simple examples of what can be done in DIOS userspace.
 
@@ -48,7 +48,7 @@ Simple examples of what can be done in DIOS userspace.
 - `memtest.elf` - dynamic memory allocation test
 - `timer.elf` - a timer that can be run in background (for example, `timer.elf 10s &`).
 
-Programs are also written in D, but they actually can be written in any language that outputs ELF64.
+Applications are also written in D, but they actually can be written in any language that can make platform-independent ELF64 binaries.
 
 ## Code Structure
 
