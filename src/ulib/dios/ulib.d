@@ -582,8 +582,7 @@ bool uheapGetStats(UHeapStats* stats) @nogc nothrow
 
     *stats = UHeapStats.init;
 
-    stats.heapSize =
-        cast(size_t)(cast(ulong)heapEnd - cast(ulong)heapBase);
+    stats.heapSize = cast(size_t)(cast(ulong)heapEnd - cast(ulong)heapBase);
 
     for (Block* block = firstBlock;
          block !is null;
