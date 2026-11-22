@@ -13,7 +13,7 @@ DIOS is an ELF kernel that requires a bootloader to run. Default setup in this r
 ## Features
 
 - Boots using Limine startup protocol; supports both UEFI and legacy BIOS
-- UEFI/GOP framebuffer
+- UEFI GOP (or VESA) framebuffer
 - IDT, GDT
 - Bitmap page-frame allocator
 - HPET timer (plus legacy PIT fallback)
