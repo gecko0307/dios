@@ -68,7 +68,7 @@ After successful initialization, the kernel immediately starts an interactive sh
 
 ## Programs
 
-These are currently simple examples of what can be done in DIOS userspace.
+Simple examples of what can be done in DIOS userspace.
 
 - `hello.elf` - "Hello, World!" program that prints its arguments
 - `count.elf` - counts once a second. Ctrl+C stops it (the kernel handles that)
