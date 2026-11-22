@@ -36,7 +36,7 @@ DIOS is now 64-bit only, x86 support was dropped.
 
 ## Kernel Shell Commands
 
-After successful initialization, the kernel immediately starts an interactive shell session. Available commands are listed [here](doc/commands.md);
+After successful initialization, the kernel immediately starts an interactive shell session. Available commands are listed [here](doc/commands.md).
 
 ## Applications
 
