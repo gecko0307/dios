@@ -1,6 +1,6 @@
 {
-    "name": "dir",
-    "description": "A program that lists a directory",
+    "name": "memtest",
+    "description": "ulib memory test",
     "homepage": "",
     "license": "Unlicense",
     "authors": [
@@ -8,11 +8,11 @@
     ],
     
     "importPaths": [
-        "src", "../../src/ulib"
+        "src", "../../ulib"
     ],
     
     "sourcePaths": [
-        "src", "../../src/ulib"
+        "src", "../../ulib"
     ],
     
     "buildRequirements": [
@@ -20,7 +20,7 @@
     ],
     
     "targetType": "executable",
-    "targetName": "dir.elf",
+    "targetName": "memtest.elf",
     
     "dflags-ldc": [
         "-mtriple=x86_64-none-elf",
@@ -42,12 +42,12 @@
         "-static",
         "--gc-sections",
         "-u", "_start",
-        "../../libulib.a"
+        "../../../libulib.a"
     ],
     
     "postBuildCommands-windows": [
-        "move /Y dir.elf.exe dir.elf",
-        "if not exist ..\\..\\usbstick mkdir ..\\..\\usbstick",
-        "copy /Y dir.elf ..\\..\\usbstick\\dir.elf"
+        "move /Y memtest.elf.exe memtest.elf",
+        "if not exist ..\\..\\..\\usbstick mkdir ..\\..\\..\\usbstick",
+        "copy /Y memtest.elf ..\\..\\..\\usbstick\\memtest.elf"
     ]
 }

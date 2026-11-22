@@ -1,6 +1,6 @@
 {
-    "name": "hello",
-    "description": "Simple DIOS application",
+    "name": "dir",
+    "description": "A program that lists a directory",
     "homepage": "",
     "license": "Unlicense",
     "authors": [
@@ -8,11 +8,11 @@
     ],
     
     "importPaths": [
-        "src", "../../src/ulib"
+        "src", "../../ulib"
     ],
     
     "sourcePaths": [
-        "src", "../../src/ulib"
+        "src", "../../ulib"
     ],
     
     "buildRequirements": [
@@ -20,7 +20,7 @@
     ],
     
     "targetType": "executable",
-    "targetName": "hello.elf",
+    "targetName": "dir.elf",
     
     "dflags-ldc": [
         "-mtriple=x86_64-none-elf",
@@ -42,12 +42,12 @@
         "-static",
         "--gc-sections",
         "-u", "_start",
-        "../../libulib.a"
+        "../../../libulib.a"
     ],
     
     "postBuildCommands-windows": [
-        "move /Y hello.elf.exe hello.elf",
-        "if not exist ..\\..\\usbstick mkdir ..\\..\\usbstick",
-        "copy /Y hello.elf ..\\..\\usbstick\\hello.elf"
+        "move /Y dir.elf.exe dir.elf",
+        "if not exist ..\\..\\..\\usbstick mkdir ..\\..\\..\\usbstick",
+        "copy /Y dir.elf ..\\..\\..\\usbstick\\dir.elf"
     ]
 }

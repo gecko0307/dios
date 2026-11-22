@@ -8,11 +8,11 @@
     ],
     
     "importPaths": [
-        "src", "../../src/ulib"
+        "src", "../../ulib"
     ],
     
     "sourcePaths": [
-        "src", "../../src/ulib"
+        "src", "../../ulib"
     ],
     
     "buildRequirements": [
@@ -42,12 +42,12 @@
         "-static",
         "--gc-sections",
         "-u", "_start",
-        "../../libulib.a"
+        "../../../libulib.a"
     ],
     
     "postBuildCommands-windows": [
         "move /Y file.elf.exe file.elf",
-        "if not exist ..\\..\\usbstick mkdir ..\\..\\usbstick",
-        "copy /Y file.elf ..\\..\\usbstick\\file.elf"
+        "if not exist ..\\..\\..\\usbstick mkdir ..\\..\\..\\usbstick",
+        "copy /Y file.elf ..\\..\\..\\usbstick\\file.elf"
     ]
 }
