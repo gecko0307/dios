@@ -86,7 +86,7 @@ DIOS project consists of a several structural layers, each with its own workflow
   - `src/kernel/dios/core` - kernel modules, including core drivers necessary to run the main I/O loop
   - `src/kernel/main.d` - the kernel entry point
 - `src/ulib` contains the ulib runtime library code:
-  - `src/ulib/dios` - implements basic functionality on top of DIOS syscalls
+  - `src/ulib/dios` - implements basic libc-like functionality on top of DIOS syscalls
 - `src/user` contains sample userspace programs:
   - `src/user/hello`
   - `src/user/file`
