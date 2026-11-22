@@ -1,13 +1,14 @@
-DIOS 0.3.0 - TBD
-----------------
+DIOS 0.3.0 - 22 Nov, 2026
+-------------------------
 - Kernel heap allocator
+- Userspace heap alloactor
 - A single-mount read-only filesystem
 - USB mass storage devices; FAT32 and exFAT support
 - Running programs from a USB stick
 - FS syscalls
 - New date-time module; `time` shell command
 - Kernel log; `dmesg` shell command
-- New workflow for building userspace applications.
+- New workflow for building sample applications.
 
 DIOS 0.2.0 - 21 Nov, 2026
 -------------------------
