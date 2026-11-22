@@ -76,7 +76,7 @@ Simple examples of what can be done in DIOS userspace.
 - `dir.elf [PATH]` - lists a directory
 - `memtest.elf` - dynamic memory allocation test.
 
-Programs are also written in D (in fact, they can be written in any language that outputs ELF64).
+Programs are also written in D, but they actually can be written in any language that outputs ELF64.
 
 ## Code Structure
 
@@ -112,4 +112,4 @@ All sample programs are built with DUB:
 dub build
 ```
 
-Binaries are automatically copied to `usbstick` directory. When running on a real hardware, they are meant to be copied to USB stick alongside with the DIOS kernel. When testing in QEMU, it is recommended to make a USB stick image using fstool (`makestick.bat`) and run the VM via `run_usbstick.bat`.
+*.elf binaries are automatically copied to `usbstick` directory. When running on a real hardware, they are meant to be copied to USB stick alongside with the DIOS kernel. When testing in QEMU, it is recommended to make a USB stick image using fstool (`makestick.bat`) and run the VM via `run_usbstick.bat`.
