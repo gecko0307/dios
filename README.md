@@ -12,7 +12,7 @@ DIOS is an ELF kernel that requires a bootloader to run. Default setup in this r
 
 ## Features
 
-- Boots using Limine startup protocol
+- Boots using Limine startup protocol; supports both UEFI and legacy BIOS
 - UEFI/GOP framebuffer
 - IDT, GDT
 - Bitmap page-frame allocator
@@ -108,10 +108,8 @@ Run `buildlib.bat` to compile ulib and generate `libulib.a`. This is necessary t
 
 All sample programs are built with DUB:
 
-`dub build`
+```
+dub build
+```
 
 Binaries are automatically copied to `usbstick` directory. When running on a real hardware, they are meant to be copied to USB stick alongside with the DIOS kernel. When testing in QEMU, it is recommended to make a USB stick image using fstool (`makestick.bat`) and run the VM via `run_usbstick.bat`.
-
-## Boot Disc Structure
-
-TODO
