@@ -1,5 +1,5 @@
-DIOS 0.4.0 - TBD
-----------------
+DIOS 0.3.1 - 22 Nov, 2026
+-------------------------
 - USB hot-plug support
 - USB hubs support.
 
