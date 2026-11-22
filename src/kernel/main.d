@@ -222,7 +222,7 @@ void run() @nogc nothrow
     if (havePs2 && interruptStatus.ioapic)
         ps2StartIrq(interruptStatus.apicId);
 
-    kprintf("DIOS 0.2.0\n");
+    kprintf("DIOS 0.3.0\n");
     kprintf("---------------\n");
     DateTime t;
     datetimeNow(&t);

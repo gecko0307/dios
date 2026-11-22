@@ -26,7 +26,8 @@ DIOS is an ELF kernel that requires a bootloader to run. Default setup in this r
 - A shell with built-in kernel commands
 - Basic single-tasking userspace in Ring 3; system calls
 - A single-mount read-only filesystem
-- USB mass storage devices; exFAT support
+- USB mass storage devices
+- FAT32, exFAT
 - Running programs from a USB stick.
 
 DIOS is planned as a graphical OS: all rendering features are built into the kernel (but there's no full-featured GUI yet).
@@ -52,6 +53,7 @@ After successful initialization, the kernel immediately starts an interactive sh
 - `history` - show recent commands
 - `echo TEXT` - print TEXT
 - `sleep SECONDS` - wait (Ctrl+C aborts)
+- `dmesg [N [SKIP]]` - kernel log (last N lines, SKIP lines before the end)
 - `programs` - list programs on the boot media
 - `disk` - show USB disks and partitions
 - `mount [N]` - mount an exFAT partition as `/`

@@ -49,7 +49,7 @@ enum size_t SHELL_LINE_CAPACITY = 128;
 enum size_t SHELL_HISTORY_CAPACITY = 16;
 
 immutable string[29] SHELL_COMMANDS = [
-    "help", "about", "mem", "uptime", "clock",
+    "help", "about", "mem", "time", "uptime", "clock",
     "irq", "pci", "history", "echo", "poweroff",
     "reboot", "clear", "cpuinfo", "acpi", "irqstat",
     "sleep", "hexdump", "crash", "version", "ls", "run", "memmap",
@@ -680,7 +680,7 @@ void shellExecute() @nogc nothrow
     }
     else if (shellEquals(shellLine.ptr, "version"))
     {
-        cprintf("DIOS 0.2.0 for x86_64\n");
+        cprintf("DIOS 0.3.0 for x86_64\n");
     }
     else if (shellEquals(shellLine.ptr, "clear"))
     {
@@ -900,10 +900,8 @@ void shellInit() @nogc nothrow
     shellPrompt();
 }
 
-// --------------------------------------------------------------------------
 // Line editing. The console cursor and shellCursor always move together; the
 // helpers below keep them in step (the console follows soft-wrapped rows).
-// --------------------------------------------------------------------------
 
 void shellClearLine() @nogc nothrow
 {
