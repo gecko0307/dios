@@ -8,11 +8,11 @@
     ],
     
     "importPaths": [
-        "src", "../../lib"
+        "src", "../../src/ulib"
     ],
     
     "sourcePaths": [
-        "src", "../../lib"
+        "src", "../../src/ulib"
     ],
     
     "buildRequirements": [
