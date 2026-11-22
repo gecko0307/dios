@@ -99,7 +99,7 @@ DIOS project consists of a several structural layers, each with its own workflow
 ## "Hello, World" application in D
 
 ```d
-import dios.ulib;
+import ulib.dios;
 
 void main(string[] args)
 {
