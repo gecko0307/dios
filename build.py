@@ -5,21 +5,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).parent.resolve()
 
-SRC_KERNEL = ROOT / "src" / "kernel"
-SRC_USER = ROOT / "src" / "user"
+SRC_KERNEL = ROOT / "src"
 OBJ = ROOT / "o-elf-x86_64"
 OBJ_KERNEL = OBJ / "kernel"
-OBJ_USER = OBJ / "user"
 CDROOT = ROOT / "cdroot"
 USBSTICK = ROOT / "usbstick"
 KERNEL_LINKER_SCRIPT = SRC_KERNEL / "linker.ld"
-
-# User-space layout (src/user):
-#   object.d, ulib.d, ulib.s   runtime shared by every program
-#   linker.ld                  linker script for programs
-#   anything else *.d          one program each -> usbstick/<name>.elf
-USER_RUNTIME = {"object.d", "ulib.d", "ulib.s"}
-USER_LINKER_SCRIPT = SRC_USER / "linker.ld"
 
 LDC = shutil.which("ldc2")
 NASM = shutil.which("nasm")
@@ -38,7 +29,7 @@ if not LD:
 if not XORRISO:
     raise RuntimeError("xorriso not found")
 
-D_FLAGS_COMMON = [
+D_FLAGS_KERNEL = [
     "-c",
     "-mtriple=x86_64-none-elf",
     "-release",
@@ -49,33 +40,13 @@ D_FLAGS_COMMON = [
     "--fno-exceptions",
     "--nogc",
     "-O0",
-]
-
-D_FLAGS_KERNEL = [
-    *D_FLAGS_COMMON,
-    "-I=src/kernel",
+    "-I=src",
     "-code-model=medium",
-]
-
-# User programs live low in the address space (0x400000), so the default
-# (small) code model is right; the kernel's "medium" model is for its high half.
-D_FLAGS_USER = [
-    *D_FLAGS_COMMON,
-    "-I=src/user",
 ]
 
 LD_FLAGS_KERNEL = [
     "-m", "elf_x86_64",
     "-T", str(KERNEL_LINKER_SCRIPT.relative_to(ROOT)),
-    "-z", "max-page-size=0x1000",
-    "-static",
-    "--gc-sections",
-    "-nostdlib",
-]
-
-LD_FLAGS_USER = [
-    "-m", "elf_x86_64",
-    "-T", str(USER_LINKER_SCRIPT.relative_to(ROOT)),
     "-z", "max-page-size=0x1000",
     "-static",
     "--gc-sections",
@@ -142,61 +113,8 @@ def compile_kernel():
         *[str(obj.relative_to(ROOT)) for obj in objects],
     ])
 
-def compile_userspace():
-    """Build every program in src/user into usbstick/<name>.elf. Returns the program names."""
-    if not SRC_USER.is_dir():
-        return []
-
-    output = USBSTICK
-    output.mkdir(parents=True, exist_ok=True)
-
-    # The runtime is compiled once and linked into every program.
-    runtime = []
-    for name in sorted(USER_RUNTIME):
-        path = SRC_USER / name
-        if not path.exists():
-            raise RuntimeError(f"user runtime file missing: {path.relative_to(ROOT)}")
-        if path.suffix == ".d":
-            runtime.append(compile_d(path, SRC_USER, OBJ_USER, D_FLAGS_USER))
-        else:
-            runtime.append(compile_asm(path, SRC_USER, OBJ_USER))
-
-    programs = [p for p in sorted(SRC_USER.glob("*.d")) if p.name not in USER_RUNTIME]
-
-    names = []
-    for path in programs:
-        obj = compile_d(path, SRC_USER, OBJ_USER, D_FLAGS_USER)
-        elf = output / f"{path.stem}.elf"
-        run([
-            LD, *LD_FLAGS_USER,
-            "-o", str(elf.relative_to(ROOT)),
-            *[str(o.relative_to(ROOT)) for o in runtime],
-            str(obj.relative_to(ROOT)),
-        ])
-        names.append(path.stem)
-
-    return names
-
-def check_boot_modules(programs):
-    """The kernel only sees programs that limine.conf lists as modules."""
-    conf = CDROOT / "limine.conf"
-    if not programs or not conf.exists():
-        return
-
-    text = conf.read_text(errors="replace")
-    missing = [name for name in programs if f"{name}.elf" not in text]
-    if missing:
-        print()
-        print("WARNING: not listed in cdroot/limine.conf (the kernel will not see them):")
-        for name in missing:
-            print(f"    module_path: boot():/{name}.elf")
-        print()
-
 def main():
     compile_kernel()
-    #programs = compile_userspace()
-    #check_boot_modules(programs)
-
     run([
         XORRISO,
         "-as", "mkisofs",
