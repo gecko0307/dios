@@ -32,6 +32,27 @@ module ulib.math.base;
 import ulib.core.traits;
 import ulib.math.constants;
 
+version(X86)
+    version = UseX87Math;
+version(X86_64)
+    version = UseX87Math;
+
+/// Returns true is the input is NaN.
+pragma(inline, true)
+bool isNaN(T)(T x) pure nothrow @nogc
+    if (isFloatingPoint!T)
+{
+    return x != x;
+}
+
+/// Returns true is the input is infinity.
+pragma(inline, true)
+int isInfinity(T)(T x) pure nothrow @nogc
+    if (isFloatingPoint!T)
+{
+    return !isNaN(x) && isNaN(x - x);
+}
+
 private template SignLayout(T)
 {
     static if (T.mant_dig == 24) // IEEE binary32
@@ -147,6 +168,62 @@ T rint(T)(T x) pure nothrow @nogc
     return copysign(r, x);            // keeps -0.0
 }
 
+T sqrt(T)(T x) pure nothrow @nogc
+    if (isFloatingPoint!T)
+{
+    version(UseX87Math)
+    {
+        T result;
+        
+        static if (isSingleFloat!T)
+        {
+            asm pure nothrow @nogc
+            {
+                fld dword ptr x;
+                fsqrt;
+                fstp dword ptr result;
+            }
+        }
+        else
+        {
+            asm pure nothrow @nogc
+            {
+                fld qword ptr x;
+                fsqrt;
+                fstp qword ptr result;
+            }
+        }
+        
+        return result;
+    }
+    else
+    {
+        double z = cast(double)(x > 1.0) ? x * 0.5 : x + 1.0;
+        for (uint i = 1; i <= 10; i++)
+        {
+            z -= (z * z - x) / (2.0 * z);
+        }
+        return cast(T)z;
+    }
+}
+
+T cbrt(T)(T x) pure nothrow @nogc
+    if (isFloatingPoint!T)
+{
+    enum OneOverThree = 1.0 / 3.0;
+    if (x < 0) return -cbrt(-x);
+    if (isNaN(x) || isInfinity(x)) return x;
+    if (x == 0) return 0;
+    T a = sqrt(x);
+    T b = T.infinity;
+    while (a < b)
+    {
+        b = a;
+        a = (2.0 * a + (x / (b * b))) * OneOverThree;
+    }
+    return a;
+}
+
 // x = n*pi/2 + (y0 + y1), |y0| <= pi/4. Returns n mod 4.
 // Accurate for |x| < 2^20 * pi/2 (~1.6e6); beyond that you need Payne-Hanek.
 private int reducePio2(double x, out double y0, out double y1) pure nothrow @nogc
@@ -239,4 +316,78 @@ T cos(T)(T x) pure nothrow @nogc
         case 2:  return cast(T) -cosKernel(y0, y1);
         default: return cast(T)  sinKernel(y0, y1);
     }
+}
+
+pragma(inline, true)
+T tan(T)(T x) pure nothrow @nogc
+    if (isFloatingPoint!T)
+{
+    return sin(x) / cos(x);
+}
+
+pragma(inline, true)
+T asin(T)(T x) pure nothrow @nogc
+    if (isFloatingPoint!T)
+{
+    return atan2(x, sqrt(1.0 - x * x));
+}
+
+pragma(inline, true)
+T acos(T)(T x) pure nothrow @nogc
+    if (isFloatingPoint!T)
+{
+    return atan2(sqrt(1.0 - x * x), x);
+}
+
+T atan(T)(T x) pure nothrow @nogc
+    if (isFloatingPoint!T)
+{
+    // Implementation from Algol 60
+    const T        R1 =  0x1.9310cfe85307cp+3;
+    const T        R2 = -0x1.58beca04f1805p+6;
+    const T        R3 = -0x1.46d547fed8a3dp+0;
+    const T        R4 = -0x1.57bd961f06c89p-4;
+    const T        S1 =  0x1.b189e39236635p+4;
+    const T        S2 =  0x1.a3b86f7830dc0p+2;
+    const T        S3 =  0x1.1273f9e5eff20p+1;
+    const T        S4 =  0x1.44831dafbf542p+0;
+    const T       RT3 =  0x1.bb67ae8584caap+0;
+    const T     PIBY6 =  0x1.0c152382d7365p-1;
+    const T   PIBY2M1 =  0x1.243f6a8885a30p-1;
+    const T     RT3M1 =  0x1.76cf5d0b09955p-1;
+    const T TANPIBY12 =  0x1.126145e9ecd56p-2;
+    const T       ONE =  0x1.0000000000000p+0;
+
+    double XX1, XSQ, CONSTANT = 0.0;
+    int SIGN = 0, INV = 0;
+
+    if (x < 0) { SIGN = 1; XX1 = -x; } else XX1 = x;
+    if (XX1 > ONE) { XX1 = 1.0 / XX1; INV = 1; }
+    if (XX1 > TANPIBY12) { XX1 = (RT3M1 * XX1 - 1.0 + XX1) / (XX1 + RT3); CONSTANT = PIBY6; }
+
+    XSQ = XX1 * XX1;
+    XX1 = XX1 * (R1 / (XSQ + S1 + R2 / (XSQ + S2 + R3 / (XSQ + S3 + R4 / (XSQ + S4)))));
+    XX1 = XX1 + CONSTANT;
+
+    if (INV) XX1 = 1.0 - XX1 + PIBY2M1;
+    if (SIGN) XX1 = -XX1;
+     
+    return XX1;
+}
+
+T atan2(T)(T y, T x) pure nothrow @nogc
+    if (isFloatingPoint!T)
+{
+    if (x > 0)
+        return atan(y / x);
+    else if (x < 0 && y >= 0)
+        return atan(y / x) + PI;
+    else if (x < 0 && y < 0)
+        return atan(y / x) - PI;
+    else if (x == 0 && y > 0)
+        return HALFPI;
+    else if (x == 0 && y < 0)
+        return -HALFPI;
+    else
+        return 0; // Undefined
 }
