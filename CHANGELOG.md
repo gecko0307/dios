@@ -1,5 +1,6 @@
 DIOS 0.3.0 - TBD
 ----------------
+- Kernel heap allocator
 - A single-mount read-only filesystem
 - USB mass storage devices; FAT32 and exFAT support
 - Running programs from a USB stick
