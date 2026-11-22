@@ -93,7 +93,7 @@ DIOS project consists of a several structural layers, each with its own workflow
   - `src/user/dir`
   - `src/user/memtest`
 
-## Hello, World application in D
+## "Hello, World" application in D
 
 ```d
 import dios.ulib;
