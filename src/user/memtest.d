@@ -4,57 +4,91 @@ import ulib;
 
 extern(C) int umain(const(char)* args) @nogc nothrow
 {
-    uputs("Allocating blocks...\n");
+    // calloc: memory must be zeroed
+    ubyte* a = cast(ubyte*)ucalloc(32, 1);
 
-    void* a = umalloc(100);
-    void* b = umalloc(100);
-    void* c = umalloc(100);
-
-    if (a is null || b is null || c is null)
+    if (a is null)
     {
-        uputs("Allocation failed\n");
-        return 1;
+        uputs("calloc failed\n");
+        uexit(1);
     }
 
-    uputs("A: ");
-    uputhex(cast(ulong)a);
-    uputs("\nB: ");
-    uputhex(cast(ulong)b);
-    uputs("\nC: ");
-    uputhex(cast(ulong)c);
-    uputs("\n");
+    bool zeroed = true;
 
-    // Write some data.
-    (cast(ubyte*)a)[0] = 0x11;
-    (cast(ubyte*)b)[0] = 0x22;
-    (cast(ubyte*)c)[0] = 0x33;
+    for (size_t i = 0; i < 32; i++)
+        if (a[i] != 0)
+            zeroed = false;
 
-    uputs("Freeing A and B...\n");
+    if (!zeroed)
+    {
+        uputs("calloc zeroing failed\n");
+        uexit(2);
+    }
 
-    ufree(a);
+    uputs("calloc: OK\n");
+
+    // Force realloc to move the allocation.
+    void* b = umalloc(32);
+
+    if (b is null)
+    {
+        uputs("malloc failed\n");
+        uexit(3);
+    }
+
+    for (size_t i = 0; i < 32; i++)
+        a[i] = cast(ubyte)(i + 1);
+
+    ubyte* resized = cast(ubyte*)urealloc(a, 128);
+
+    if (resized is null)
+    {
+        uputs("realloc failed\n");
+        uexit(4);
+    }
+
+    for (size_t i = 0; i < 32; i++)
+    {
+        if (resized[i] != i + 1)
+        {
+            uputs("realloc data corruption\n");
+            uexit(5);
+        }
+    }
+
+    uputs("realloc: OK\n");
+
+    // Shrink
+    resized = cast(ubyte*)urealloc(resized, 16);
+
+    if (resized is null)
+    {
+        uputs("realloc shrink failed\n");
+        uexit(6);
+    }
+
+    uputs("realloc shrink: OK\n");
+
     ufree(b);
+    ufree(resized);
 
-    // The two adjacent free blocks should be merged.
-    void* d = umalloc(180);
+    UHeapStats stats;
 
-    if (d != a)
+    if (!uheapGetStats(&stats))
     {
-        uputs("Block reuse/coalescing failed\n");
-        return 2;
+        uputs("heap stats failed\n");
+        uexit(7);
     }
 
-    uputs("Merged block reused: ");
-    uputhex(cast(ulong)d);
+    uputs("Heap size: ");
+    uputu(stats.heapSize);
+    uputs("\nAllocated: ");
+    uputu(stats.allocatedBytes);
+    uputs("\nFree: ");
+    uputu(stats.freeBytes);
+    uputs("\nBlocks: ");
+    uputu(stats.allocatedBlocks + stats.freeBlocks);
     uputs("\n");
-
-    if ((cast(ubyte*)c)[0] != 0x33)
-    {
-        uputs("Data corruption!\n");
-        return 3;
-    }
-
-    ufree(c);
-    ufree(d);
 
     uputs("All tests passed\n");
     return 0;
