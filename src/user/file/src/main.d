@@ -27,62 +27,87 @@ module main;
 
 import dios.ulib;
 
-// show FILE [OFFSET]  - print a text file, optionally starting at a byte offset
-extern(C) int umain(const(char)* args) @nogc nothrow
+// file FILE [OFFSET] - print a text file, optionally starting at a byte offset
+int main(string[] args)
 {
-    char[256] name;
-    uint n = 0;
-    while (args[n] != 0 && args[n] != ' ' && n + 1 < name.length)
+    if (args.length == 0)
     {
-        name[n] = args[n];
-        n++;
-    }
-    name[n] = 0;
-    if (n == 0)
-    {
-        uputs("usage: show FILE [OFFSET]\n");
+        uputs("usage: file FILE [OFFSET]\n");
         return 1;
     }
 
-    const(char)* rest = args + n;
-    while (*rest == ' ')
-        rest++;
+    string name = args[0];
+
     long offset = 0;
-    while (*rest >= '0' && *rest <= '9')
-        offset = offset * 10 + (*rest++ - '0');
+
+    if (args.length > 1)
+    {
+        string s = args[1];
+
+        if (s.length == 0)
+        {
+            uputs("file: invalid offset\n");
+            return 1;
+        }
+
+        foreach (char c; s)
+        {
+            if (c < '0' || c > '9')
+            {
+                uputs("file: invalid offset\n");
+                return 1;
+            }
+
+            int digit = c - '0';
+
+            if (offset > (long.max - digit) / 10)
+            {
+                uputs("file: invalid offset\n");
+                return 1;
+            }
+
+            offset = offset * 10 + digit;
+        }
+    }
 
     int fd = uopen(name.ptr);
+
     if (fd < 0)
     {
-        uputs("show: cannot open ");
+        uputs("file: cannot open ");
         uputs(name.ptr);
         uputs("\n");
         return 1;
     }
+
     if (offset != 0 && useek(fd, offset, SEEK_SET) < 0)
     {
-        uputs("show: bad offset\n");
+        uputs("file: bad offset\n");
         uclose(fd);
         return 1;
     }
 
     char[512] buf;
-    ulong total = 0;
+
     for (;;)
     {
         long got = uread(fd, buf.ptr, buf.length);
+
         if (got < 0)
         {
-            uputs("\nshow: read error\n");
+            uputs("\nfile: read error\n");
             uclose(fd);
             return 1;
         }
+
         if (got == 0)
             break;
+
         uwrite(buf.ptr, cast(size_t)got);
-        total += cast(ulong)got;
     }
+
     uclose(fd);
     uputc('\n');
+
     return 0;
 }

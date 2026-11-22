@@ -27,14 +27,18 @@ module main;
 
 import dios.ulib;
 
-extern(C) int umain(const(char)* args) @nogc nothrow
+int main(string[] args)
 {
     uputs("Hello, World!\n");
-    uputs("Arguments: ");
-    if (args[0] == 0)
-        uputs("(none)");
-    else
-        uputs(args);
-    uputs("\n");
+    if (args.length)
+    {
+        uputs("Arguments: \n");
+        for (size_t i = 0; i < args.length; ++i)
+        {
+            uputs(args[i].ptr);
+            uputs("\n");
+        }
+        uputs("\n");
+    }
     return 0;
 }

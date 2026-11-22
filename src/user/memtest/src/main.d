@@ -27,7 +27,7 @@ module main;
 
 import dios.ulib;
 
-extern(C) int umain(const(char)* args) @nogc nothrow
+int main(string[] args)
 {
     // calloc: memory must be zeroed
     ubyte* a = cast(ubyte*)ucalloc(32, 1);

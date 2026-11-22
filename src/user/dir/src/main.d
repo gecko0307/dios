@@ -27,7 +27,7 @@ module main;
 
 import dios.ulib;
 
-void putPad(ulong v, uint width) @nogc nothrow
+void putPad(ulong v, uint width)
 {
     char[20] d;
     uint k = 20;
@@ -37,40 +37,43 @@ void putPad(ulong v, uint width) @nogc nothrow
         v /= 10;
     }
     while (v != 0);
+
     for (uint i = 20 - k; i < width; i++)
         uputc(' ');
+
     uwrite(d.ptr + k, 20 - k);
 }
 
-void putTwo(uint v) @nogc nothrow
+void putTwo(uint v)
 {
     uputc(cast(char)('0' + (v / 10) % 10));
     uputc(cast(char)('0' + v % 10));
 }
 
-// dir [PATH]  - list a directory
-extern(C) int umain(const(char)* args) @nogc nothrow
+// dir [PATH] - list a directory
+int main(string[] args)
 {
-    const(char)* path = args[0] == 0 ? "." : args;
-
+    string path = args.length == 0 ? "." : args[0];
+    
     UStat st;
-    if (ustat(path, &st) < 0)
+    if (ustat(path.ptr, &st) < 0)
     {
         uputs("dir: not found: ");
-        uputs(path);
+        uputs(path.ptr);
         uputs("\n");
         return 1;
     }
+
     if (!st.isDir)
     {
         putPad(st.size, 10);
         uputs("  ");
-        uputs(path);
+        uputs(path.ptr);
         uputs("\n");
         return 0;
     }
 
-    int fd = uopen(path);
+    int fd = uopen(path.ptr);
     if (fd < 0)
     {
         uputs("dir: cannot open\n");
@@ -79,15 +82,18 @@ extern(C) int umain(const(char)* args) @nogc nothrow
 
     UDirent e;
     uint files = 0, dirs = 0;
+
     while (ureaddir(fd, &e) > 0)
     {
         uint t = e.mtime;
+
         putPad(1980 + (t >> 25), 4);
         uputc('-');
         putTwo((t >> 21) & 0xF);
         uputc('-');
         putTwo((t >> 16) & 0x1F);
         uputs("  ");
+
         if (e.isDir)
         {
             uputs("     <DIR>  ");
@@ -99,14 +105,17 @@ extern(C) int umain(const(char)* args) @nogc nothrow
             uputs("  ");
             files++;
         }
+
         uputs(e.name.ptr);
         uputc('\n');
     }
+
     uclose(fd);
 
     putPad(files, 1);
     uputs(" file(s), ");
     putPad(dirs, 1);
     uputs(" dir(s)\n");
+
     return 0;
 }
