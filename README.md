@@ -51,10 +51,11 @@ After successful initialization, the kernel immediately starts an interactive sh
 - `history` - show recent commands
 - `echo TEXT` - print TEXT
 - `sleep SECONDS` - wait (Ctrl+C aborts)
+- `programs` - list program modules provided by the bootloader
 - `dmesg [N [SKIP]]` - kernel log (last N lines, SKIP lines before the end)
-- `programs` - list programs on the boot media
+- `usb` - list USB devices (hubs, keyboards, removable disks...)
 - `disk` - show USB disks and partitions
-- `mount [N]` - mount an exFAT partition as `/`
+- `mount [N]` - mount an exFAT partition N as `/`
 - `ls [PATH]` - list a directory on the mounted volume
 - `cd [DIR]` - change the current directory
 - `pwd` - show the current directory
@@ -70,7 +71,7 @@ After successful initialization, the kernel immediately starts an interactive sh
 Simple examples of what can be done in DIOS userspace.
 
 - `hello.elf` - "Hello, World!" program that prints its arguments
-- `file.elf FILE [OFFSET]`  - print a text file, optionally starting at a byte offset.
+- `file.elf FILE [OFFSET]` - print a text file, optionally starting at a byte offset.
 - `dir.elf [PATH]` - lists a directory
 - `memtest.elf` - dynamic memory allocation test.
 
