@@ -86,11 +86,11 @@ Programs are also written in D, but they actually can be written in any language
   - `src/kernel/main.d` - the kernel entry point
 - `src/ulib` contains the ulib runtime library code:
   - `src/ulib/dios` - implements basic functionality on top of DIOS syscalls
-- `src/userspace` contains sample userspace programs:
-  - `src/userspace/hello`
-  - `src/userspace/file`
-  - `src/userspace/dir`
-  - `src/userspace/memtest`
+- `src/user` contains sample userspace programs:
+  - `src/user/hello`
+  - `src/user/file`
+  - `src/user/dir`
+  - `src/user/memtest`
 
 ## Building
 
