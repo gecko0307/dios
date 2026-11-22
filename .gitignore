@@ -3,5 +3,7 @@
 *.dll
 *.bin
 *.elf
+*.a
 *.iso
+*.img
 OVMF.fd
