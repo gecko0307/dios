@@ -629,7 +629,7 @@ void shellExecute() @nogc nothrow
         cprintf("  mount [N]        Mount an exFAT or FAT32 partition as /\n");
         cprintf("  ls [PATH]        List a directory on the mounted volume\n");
         cprintf("  cat FILE         Print a text file\n");
-        cprintf("  cd [DIR], pwd    Change the current directory\n");
+        cprintf("  cd [DIR]         Change the current directory\n");
         cprintf("  pwd              Show the current directory\n");
         cprintf("  run NAME [ARGS] [&]  Run a boot program or an ELF from the disk (& = background)\n");
         cprintf("  ps               List running programs\n");
