@@ -98,7 +98,7 @@ DIOS project consists of a several structural layers, each with its own workflow
 ```d
 import dios.ulib;
 
-void main(const(char)* args)
+void main(string[] args)
 {
     uputs("Hello, World!\n");
 }
