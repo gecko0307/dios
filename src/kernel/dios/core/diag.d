@@ -86,7 +86,7 @@ extern(C):
 /// deliberate triple fault. Does not return.
 void systemReboot() @nogc nothrow
 {
-    kprintf("Rebooting...\n");
+    cprintf("Rebooting...\n");
     gfxPresent();                       // make sure the message is on screen
     cpuCli();
 
@@ -164,7 +164,7 @@ void diagPrintFlags(const(DiagFlag)* table, size_t n, uint value) @nogc nothrow
 {
     for (size_t i = 0; i < n; i++)
         if (value & (1u << table[i].bit))
-            kprintf("%s ", table[i].name.ptr);
+            cprintf("%s ", table[i].name.ptr);
 }
 
 void diagCpuInfo() @nogc nothrow
@@ -198,8 +198,8 @@ void diagCpuInfo() @nogc nothrow
     while (*b == ' ')
         b++;
 
-    kprintf("CPU: %s\n", b);
-    kprintf("  Vendor: %s\n", vendor.ptr);
+    cprintf("CPU: %s\n", b);
+    cprintf("  Vendor: %s\n", vendor.ptr);
 
     uint leaf1Ecx = 0, leaf1Edx = 0;
     if (maxLeaf >= 1)
@@ -214,23 +214,23 @@ void diagCpuInfo() @nogc nothrow
             family += (eax >> 20) & 0xFF;
         if ((((eax >> 8) & 0xF) == 0xF) || (((eax >> 8) & 0xF) == 6))
             model |= ((eax >> 16) & 0xF) << 4;
-        kprintf("  Family %u, model %u, stepping %u\n", family, model, eax & 0xF);
-        kprintf("  Logical CPUs per package: %u (ACPI reports %u CPU(s))\n",
+        cprintf("  Family %u, model %u, stepping %u\n", family, model, eax & 0xF);
+        cprintf("  Logical CPUs per package: %u (ACPI reports %u CPU(s))\n",
             (r[1] >> 16) & 0xFF, acpi.cpuCount);
     }
 
     if (maxExt >= 0x80000008)
     {
         cpuCpuid(0x80000008, 0, r.ptr);
-        kprintf("  Address bits: %u physical, %u virtual\n", r[0] & 0xFF, (r[0] >> 8) & 0xFF);
+        cprintf("  Address bits: %u physical, %u virtual\n", r[0] & 0xFF, (r[0] >> 8) & 0xFF);
     }
     if (maxExt >= 0x80000007)
     {
         cpuCpuid(0x80000007, 0, r.ptr);
-        kprintf("  Invariant TSC: %s\n", (r[3] & (1u << 8)) ? "yes".ptr : "no".ptr);
+        cprintf("  Invariant TSC: %s\n", (r[3] & (1u << 8)) ? "yes".ptr : "no".ptr);
     }
 
-    kprintf("  Features: ");
+    cprintf("  Features: ");
     diagPrintFlags(FLAGS_LEAF1_EDX.ptr, FLAGS_LEAF1_EDX.length, leaf1Edx);
     diagPrintFlags(FLAGS_LEAF1_ECX.ptr, FLAGS_LEAF1_ECX.length, leaf1Ecx);
     if (maxLeaf >= 7)
@@ -243,9 +243,9 @@ void diagCpuInfo() @nogc nothrow
         cpuCpuid(0x80000001, 0, r.ptr);
         diagPrintFlags(FLAGS_EXT1_EDX.ptr, FLAGS_EXT1_EDX.length, r[3]);
         if (r[2] & (1u << 5))
-            kprintf("lzcnt ");
+            cprintf("lzcnt ");
     }
-    kprintf("\n");
+    cprintf("\n");
 
     if (leaf1Ecx & (1u << 31))
     {
@@ -255,7 +255,7 @@ void diagCpuInfo() @nogc nothrow
         diagPutReg(hv.ptr + 4, r[2]);
         diagPutReg(hv.ptr + 8, r[3]);
         hv[12] = 0;
-        kprintf("  Hypervisor: %s\n", hv.ptr);
+        cprintf("  Hypervisor: %s\n", hv.ptr);
     }
 }
 
@@ -267,11 +267,11 @@ void diagAcpi() @nogc nothrow
 {
     if (!acpi.valid)
     {
-        kprintf("ACPI: not available (no RSDP/MADT).\n");
+        cprintf("ACPI: not available (no RSDP/MADT).\n");
         return;
     }
 
-    kprintf("ACPI: RSDP revision %u, root table %s, %u table(s)\n",
+    cprintf("ACPI: RSDP revision %u, root table %s, %u table(s)\n",
         cast(uint)acpi.rsdpRevision, acpi.rootIsXsdt ? "XSDT".ptr : "RSDT".ptr, acpi.numTables);
     for (uint i = 0; i < acpi.numTables; i++)
     {
@@ -279,40 +279,40 @@ void diagAcpi() @nogc nothrow
         for (uint k = 0; k < 4; k++)
             sig[k] = acpi.tables[i].sig[k];
         sig[4] = 0;
-        kprintf("  %s  rev %u  len %u  at %llx\n",
+        cprintf("  %s  rev %u  len %u  at %llx\n",
             sig.ptr, cast(uint)acpi.tables[i].revision, acpi.tables[i].length, acpi.tables[i].phys);
     }
 
-    kprintf("MADT: local APIC at %llx, %u CPU(s), %u I/O APIC(s), %u override(s)%s\n",
+    cprintf("MADT: local APIC at %llx, %u CPU(s), %u I/O APIC(s), %u override(s)%s\n",
         acpi.lapicAddr, acpi.cpuCount, acpi.numIoApics, acpi.numIsos,
         acpi.pcatCompat ? ", dual 8259".ptr : "".ptr);
     for (uint i = 0; i < acpi.numIoApics; i++)
-        kprintf("  I/O APIC %u at %x, GSI base %u\n",
+        cprintf("  I/O APIC %u at %x, GSI base %u\n",
             cast(uint)acpi.ioapics[i].id, acpi.ioapics[i].addr, acpi.ioapics[i].gsiBase);
     for (uint i = 0; i < acpi.numIsos; i++)
-        kprintf("  IRQ %u -> GSI %u (flags %k)\n",
+        cprintf("  IRQ %u -> GSI %u (flags %k)\n",
             cast(uint)acpi.isos[i].source, acpi.isos[i].gsi, acpi.isos[i].flags);
 
     if (acpi.hpetFound)
-        kprintf("HPET: %llx\n", acpi.hpetAddr);
+        cprintf("HPET: %llx\n", acpi.hpetAddr);
     else
-        kprintf("HPET: none\n");
+        cprintf("HPET: none\n");
 
     if (acpi.fadtFound)
     {
-        kprintf("FADT: PM1a control %k, PM1b control %k\n",
+        cprintf("FADT: PM1a control %k, PM1b control %k\n",
             acpi.pm1aControlPort, acpi.pm1bControlPort);
         if (acpi.s5Found)
-            kprintf("  S5 sleep type: %u / %u (poweroff available)\n",
+            cprintf("  S5 sleep type: %u / %u (poweroff available)\n",
                 cast(uint)acpi.sleepTypeA, cast(uint)acpi.sleepTypeB);
         else
-            kprintf("  S5 sleep type not found (poweroff unavailable)\n");
+            cprintf("  S5 sleep type not found (poweroff unavailable)\n");
         if (acpi.resetSupported)
-            kprintf("  Reset register: %s %llx, value %x\n",
+            cprintf("  Reset register: %s %llx, value %x\n",
                 acpi.resetSpace == 1 ? "I/O port".ptr : "memory".ptr,
                 acpi.resetAddr, cast(uint)acpi.resetValue);
         else
-            kprintf("  No ACPI reset register (reboot falls back to the 8042)\n");
+            cprintf("  No ACPI reset register (reboot falls back to the 8042)\n");
     }
 }
 
@@ -341,19 +341,19 @@ string diagVectorName(uint v) @nogc nothrow
 
 void diagIrqStat() @nogc nothrow
 {
-    kprintf("Vector  Count          Unhandled  Name\n");
+    cprintf("Vector  Count          Unhandled  Name\n");
     uint shown = 0;
     for (uint v = 0; v < 256; v++)
     {
         if (irqCount[v] == 0 && irqUnhandled[v] == 0)
             continue;
-        kprintf("0x%x  %llu  %u  %s\n", cast(uint)v & 0xFF, irqCount[v], irqUnhandled[v],
+        cprintf("0x%x  %llu  %u  %s\n", cast(uint)v & 0xFF, irqCount[v], irqUnhandled[v],
             diagVectorName(v).ptr);
         shown++;
     }
     if (shown == 0)
-        kprintf("(no interrupts delivered yet)\n");
-    kprintf("NMIs: %u   key events dropped: %u   PS/2 bytes dropped: %u\n",
+        cprintf("(no interrupts delivered yet)\n");
+    cprintf("NMIs: %u   key events dropped: %u   PS/2 bytes dropped: %u\n",
         nmiCount, keyQueue.dropped, ps2q.rawDropped);
 }
 
@@ -385,11 +385,11 @@ void diagHexdump(ulong addr, ulong len, bool physical) @nogc nothrow
         ulong ph;
         if (!vmemTranslate(row, &ph) || !vmemTranslate(row + 15, &ph))
         {
-            kprintf("%llx: <not mapped>\n", physical ? row - (virt - addr) : row);
+            cprintf("%llx: <not mapped>\n", physical ? row - (virt - addr) : row);
             return;
         }
 
-        kprintf("%llx: ", physical ? row - (virt - addr) : row);
+        cprintf("%llx: ", physical ? row - (virt - addr) : row);
         for (uint i = 0; i < 16; i++)
         {
             ulong a = row + i;

@@ -8,6 +8,7 @@ module dios.core.fs;
  */
 import dios.core.blockdev;
 import dios.core.exfat;
+import dios.core.fat32;
 import dios.core.stdio;
 
 enum uint FS_PATH_MAX = 256;
@@ -24,7 +25,7 @@ __gshared char[FS_PATH_MAX] fsCwd;           // set when a volume is mounted
 
 extern(C):
 
-/// Mount partition `index` (of `partitions`) as "/". Returns false if it is not exFAT.
+/// Mount partition `index` (of `partitions`) as "/". Returns false if it is neither exFAT nor FAT32.
 bool fsMountPartition(uint index) @nogc nothrow
 {
     if (index >= partitionCount || !partitions[index].valid)
@@ -32,7 +33,8 @@ bool fsMountPartition(uint index) @nogc nothrow
     Partition* p = &partitions[index];
 
     ExfatVolume* v = &rootMount.vol;
-    if (!exfatMount(v, &blockDevs[p.dev], p.startLba, p.sectors))
+    if (!exfatMount(v, &blockDevs[p.dev], p.startLba, p.sectors) &&
+        !fat32Mount(v, &blockDevs[p.dev], p.startLba, p.sectors))
         return false;
 
     rootMount.mounted = true;
@@ -42,7 +44,7 @@ bool fsMountPartition(uint index) @nogc nothrow
     return true;
 }
 
-/// Mount the first partition that holds an exFAT volume.
+/// Mount the first partition that holds an exFAT or FAT32 volume.
 bool fsAutoMount() @nogc nothrow
 {
     for (uint i = 0; i < partitionCount; i++)
@@ -50,8 +52,8 @@ bool fsAutoMount() @nogc nothrow
         if (fsMountPartition(i))
         {
             Partition* p = &partitions[i];
-            kprintf("Mounted exFAT volume '%s' (%s partition %u) as /\n",
-                    rootMount.vol.label.ptr, blockDevs[p.dev].name.ptr, cast(uint)p.number);
+            kprintf("Mounted %s volume '%s' (%s partition %u) as /\n",
+                    rootMount.vol.fat32 ? "FAT32".ptr : "exFAT".ptr, rootMount.vol.label.ptr, blockDevs[p.dev].name.ptr, cast(uint)p.number);
             return true;
         }
     }

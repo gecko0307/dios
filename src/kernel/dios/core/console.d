@@ -30,6 +30,7 @@ import dios.core.framebuffer;
 import dios.core.font;
 import dios.core.mem;
 import dios.core.gfx;
+import dios.core.klog;
 
 import core.stdc.stdarg;
 
@@ -636,9 +637,27 @@ void consolePrintStringFmt(string fmt, va_list ap) @nogc nothrow
     consoleFormat(&consolePrintChar, fmt, ap);
 }
 
+// Same, and the text also goes into the kernel log (klog.d).
+void consoleLogChar(char c) @nogc nothrow
+{
+    klogPut(c);
+    consolePrintChar(c);
+}
+
+void consoleLogStringFmt(string fmt, va_list ap) @nogc nothrow
+{
+    consoleFormat(&consoleLogChar, fmt, ap);
+}
+
 // VGA adapter.
 void vgaConsolePutChar(char c) @nogc nothrow
 {
+    VGAText.putChar(c);
+}
+
+void vgaLogChar(char c) @nogc nothrow
+{
+    klogPut(c);
     VGAText.putChar(c);
 }
 
@@ -653,8 +672,8 @@ struct VGAConsole
         VGAText.setColors(VGAColor.Silver, VGAColor.Black);
     }
 
-    void writef(string fmt, va_list ap) @nogc nothrow
+    void writef(string fmt, va_list ap, bool log) @nogc nothrow
     {
-        consoleFormat(&vgaConsolePutChar, fmt, ap);
+        consoleFormat(log ? &vgaLogChar : &vgaConsolePutChar, fmt, ap);
     }
 }

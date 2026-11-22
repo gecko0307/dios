@@ -234,6 +234,16 @@ void blockScanPartitions(BlockDev* b) @nogc nothrow
         return;
     }
 
+    // FAT32 boot sector at LBA 0 (a stick formatted without a partition table).
+    bool fatVbr = sector0[82] == 'F' && sector0[83] == 'A' && sector0[84] == 'T' &&
+                  sector0[85] == '3' && sector0[86] == '2' && sector0[87] == ' ' &&
+                  (sector0[0] == 0xEB || sector0[0] == 0xE9) && sector0[510] == 0x55 && sector0[511] == 0xAA;
+    if (fatVbr)
+    {
+        partAdd(b, 0, b.sectors, false, 0, true, "FAT32 (whole disk)\0");
+        return;
+    }
+
     if (sector0[510] != 0x55 || sector0[511] != 0xAA)
         return;
 

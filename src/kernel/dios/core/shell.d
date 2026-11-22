@@ -35,6 +35,7 @@ import dios.core.exfat;
 import dios.core.fs;
 import dios.core.interrupts;
 import dios.core.keyboard;
+import dios.core.klog;
 import dios.core.mem;
 import dios.core.paging;
 import dios.core.proc;
@@ -47,12 +48,12 @@ import dios.core.usbstor;
 enum size_t SHELL_LINE_CAPACITY = 128;
 enum size_t SHELL_HISTORY_CAPACITY = 16;
 
-immutable string[28] SHELL_COMMANDS = [
+immutable string[29] SHELL_COMMANDS = [
     "help", "about", "mem", "uptime", "clock",
     "irq", "pci", "history", "echo", "poweroff",
     "reboot", "clear", "cpuinfo", "acpi", "irqstat",
     "sleep", "hexdump", "crash", "version", "ls", "run", "memmap",
-    "programs", "disk", "mount", "cd", "pwd", "cat"
+    "programs", "disk", "mount", "cd", "pwd", "cat", "dmesg"
 ];
 
 __gshared char[SHELL_LINE_CAPACITY] shellLine;
@@ -99,7 +100,7 @@ void shellCopy(char* dst, const(char)* src) @nogc nothrow
 
 void shellPrompt() @nogc nothrow
 {
-    kprintf("dios> ");
+    cprintf("dios> ");
 }
 
 void shellRememberCommand() @nogc nothrow
@@ -136,7 +137,7 @@ void shellShowHistory() @nogc nothrow
 {
     if (shellHistoryCount == 0)
     {
-        kprintf("Command history is empty.\n");
+        cprintf("Command history is empty.\n");
         return;
     }
 
@@ -144,7 +145,7 @@ void shellShowHistory() @nogc nothrow
     for (size_t i = 0; i < shellHistoryCount; i++)
     {
         size_t index = (first + i) % SHELL_HISTORY_CAPACITY;
-        kprintf("%u  %s\n", cast(uint)(i + 1), shellHistory[index].ptr);
+        cprintf("%u  %s\n", cast(uint)(i + 1), shellHistory[index].ptr);
     }
 }
 
@@ -168,13 +169,13 @@ void shellShowPci() @nogc nothrow
                 ushort dev = pciReadDeviceID(bus, device, func);
                 ubyte cls = pciReadClass(bus, device, func);
                 ubyte sub = pciReadSubclass(bus, device, func);
-                kprintf("%u:%u.%u  %k:%k  class %X/%X\n",
+                cprintf("%u:%u.%u  %k:%k  class %X/%X\n",
                     bus, device, func, vendor, dev, cls, sub);
                 found++;
             }
         }
     }
-    kprintf("%u PCI function(s) found.\n", found);
+    cprintf("%u PCI function(s) found.\n", found);
 }
 
 // Start program `index` and report how it ended.
@@ -183,24 +184,24 @@ void shellRunProgram(uint index, const(char)* args) @nogc nothrow
     long code = 0;
     if (!procLaunch(index, args, &code))
     {
-        kprintf("Could not start '%s'.\n", programs[index].name.ptr);
+        cprintf("Could not start '%s'.\n", programs[index].name.ptr);
         return;
     }
     if (console.print_x != 0)
         consoleNewline();                   // the program's last line had no newline
     if (code != 0)
-        kprintf("[%s exited with code %llu]\n", programs[index].name.ptr, cast(ulong)code);
+        cprintf("[%s exited with code %llu]\n", programs[index].name.ptr, cast(ulong)code);
 }
 
 void shellListPrograms() @nogc nothrow
 {
     if (programCount == 0)
     {
-        kprintf("No programs found.\n");
+        cprintf("No programs found.\n");
         return;
     }
     for (uint i = 0; i < programCount; i++)
-        kprintf("  %s  (%llu bytes)\n", programs[i].name.ptr, programs[i].size);
+        cprintf("  %s  (%llu bytes)\n", programs[i].name.ptr, programs[i].size);
 }
 
 // ---------------------------------------------------------------------------
@@ -264,7 +265,7 @@ extern(C) bool shellListCb(const(ExfatEntry)* e, void* ctx) @nogc nothrow
         c.files++;
         c.bytes += e.size;
     }
-    kprintf("%s\n", e.name.ptr);
+    cprintf("%s\n", e.name.ptr);
     return true;
 }
 
@@ -272,7 +273,7 @@ bool shellNeedVolume() @nogc nothrow
 {
     if (!rootMount.mounted)
     {
-        kprintf("No volume mounted. 'disk' shows what was found, 'mount N' mounts a partition.\n");
+        cprintf("No volume mounted. 'disk' shows what was found, 'mount N' mounts a partition.\n");
         return false;
     }
     return true;
@@ -288,7 +289,7 @@ void shellLs(const(char)* path) @nogc nothrow
     ExfatEntry e;
     if (!fsStat(path, &e))
     {
-        kprintf("Not found: %s\n", path);
+        cprintf("Not found: %s\n", path);
         return;
     }
 
@@ -296,13 +297,13 @@ void shellLs(const(char)* path) @nogc nothrow
     if (e.isDir)
     {
         if (!exfatIterate(&rootMount.vol, &e, &shellListCb, &ctx))
-            kprintf("Read error while listing the directory.\n");
+            cprintf("Read error while listing the directory.\n");
     }
     else
     {
         shellListCb(&e, &ctx);
     }
-    kprintf("%u file(s), %llu bytes, %u director%s\n", ctx.files, ctx.bytes, ctx.dirs,
+    cprintf("%u file(s), %llu bytes, %u director%s\n", ctx.files, ctx.bytes, ctx.dirs,
             ctx.dirs == 1 ? "y".ptr : "ies".ptr);
 }
 
@@ -313,12 +314,12 @@ void shellCat(const(char)* path) @nogc nothrow
     ExfatEntry e;
     if (path[0] == 0)
     {
-        kprintf("Usage: cat FILE\n");
+        cprintf("Usage: cat FILE\n");
         return;
     }
     if (!fsStat(path, &e) || e.isDir)
     {
-        kprintf("Not a file: %s\n", path);
+        cprintf("Not a file: %s\n", path);
         return;
     }
 
@@ -336,7 +337,7 @@ void shellCat(const(char)* path) @nogc nothrow
         ulong got = exfatRead(&rootMount.vol, &f, off, shellIo.ptr, want);
         if (got == 0)
         {
-            kprintf("\n[read error]\n");
+            cprintf("\n[read error]\n");
             return;
         }
         for (ulong i = 0; i < got; i++)
@@ -354,20 +355,20 @@ void shellCat(const(char)* path) @nogc nothrow
     if (console.print_x != 0)
         consoleNewline();
     if (off < e.size)
-        kprintf("[output stopped after %llu of %llu bytes]\n", off, e.size);
+        cprintf("[output stopped after %llu of %llu bytes]\n", off, e.size);
 }
 
 void shellDisk() @nogc nothrow
 {
     if (blockDevCount == 0)
     {
-        kprintf("No disks. Only USB mass storage is supported, and the stick has to be plugged in at boot.\n");
+        cprintf("No disks. Only USB mass storage is supported, and the stick has to be plugged in at boot.\n");
         return;
     }
     for (uint d = 0; d < blockDevCount; d++)
     {
         BlockDev* b = &blockDevs[d];
-        kprintf("%s: %s, %llu MiB, %u-byte sectors\n", b.name.ptr, b.model.ptr,
+        cprintf("%s: %s, %llu MiB, %u-byte sectors\n", b.name.ptr, b.model.ptr,
                 (b.sectors * b.sectorSize) >> 20, b.sectorSize);
         uint shown = 0;
         for (uint i = 0; i < partitionCount; i++)
@@ -375,13 +376,13 @@ void shellDisk() @nogc nothrow
             Partition* p = &partitions[i];
             if (p.dev != d)
                 continue;
-            kprintf("  [%u] partition %u: start %llu, %llu MiB, %s%s\n", i, cast(uint)p.number,
+            cprintf("  [%u] partition %u: start %llu, %llu MiB, %s%s\n", i, cast(uint)p.number,
                     p.startLba, (p.sectors * b.sectorSize) >> 20, p.kind.ptr,
                     (rootMount.mounted && rootMount.partition == i) ? "   <- mounted as /".ptr : "".ptr);
             shown++;
         }
         if (shown == 0)
-            kprintf("  no partitions found\n");
+            cprintf("  no partitions found\n");
     }
 }
 
@@ -390,19 +391,19 @@ void shellMount(const(char)* args) @nogc nothrow
     if (args[0] == 0)
     {
         if (!fsAutoMount())
-            kprintf("No exFAT volume found ('disk' lists the partitions).\n");
+            cprintf("No exFAT or FAT32 volume found ('disk' lists the partitions).\n");
         return;
     }
     ulong n;
     if (diagParseNumber(args, &n) is null || n >= partitionCount)
     {
-        kprintf("Usage: mount [PARTITION-NUMBER]   (numbers in brackets in 'disk')\n");
+        cprintf("Usage: mount [PARTITION-NUMBER]   (numbers in brackets in 'disk')\n");
         return;
     }
     if (!fsMountPartition(cast(uint)n))
-        kprintf("Partition %llu is not a readable exFAT volume.\n", n);
+        cprintf("Partition %llu is not a readable exFAT or FAT32 volume.\n", n);
     else
-        kprintf("Mounted exFAT volume '%s' as /\n", rootMount.vol.label.ptr);
+        cprintf("Mounted %s volume '%s' as /\n", rootMount.vol.fat32 ? "FAT32".ptr : "exFAT".ptr, rootMount.vol.label.ptr);
 }
 
 // Run an ELF file from the mounted volume. Tries `path`, then `path.elf`.
@@ -429,14 +430,14 @@ void shellRunFile(const(char)* path, const(char)* args) @nogc nothrow
     }
     if (!found)
     {
-        kprintf("No such program: %s\n", path);
+        cprintf("No such program: %s\n", path);
         return;
     }
 
     enum ulong MAX_IMAGE = 4UL * 1024 * 1024;
     if (e.size == 0 || e.size > MAX_IMAGE)
     {
-        kprintf("%s: size %llu is not acceptable for a program (max 4 MiB)\n", path, e.size);
+        cprintf("%s: size %llu is not acceptable for a program (max 4 MiB)\n", path, e.size);
         return;
     }
 
@@ -444,7 +445,7 @@ void shellRunFile(const(char)* path, const(char)* args) @nogc nothrow
     ulong phys = pmmAllocContiguousZeroed(pages, 1, 0);
     if (phys == 0)
     {
-        kprintf("Out of memory.\n");
+        cprintf("Out of memory.\n");
         return;
     }
     ubyte* image = cast(ubyte*)pmmPhysToVirt(phys);
@@ -465,7 +466,7 @@ void shellRunFile(const(char)* path, const(char)* args) @nogc nothrow
 
     if (off != e.size)
     {
-        kprintf("Read error while loading %s\n", path);
+        cprintf("Read error while loading %s\n", path);
     }
     else
     {
@@ -474,17 +475,76 @@ void shellRunFile(const(char)* path, const(char)* args) @nogc nothrow
         long code = 0;
         if (!procLaunchImage(name.ptr, image, e.size, args, &code))
         {
-            kprintf("Could not start '%s'.\n", name.ptr);
+            cprintf("Could not start '%s'.\n", name.ptr);
         }
         else
         {
             if (console.print_x != 0)
                 consoleNewline();
             if (code != 0)
-                kprintf("[%s exited with code %llu]\n", name.ptr, cast(ulong)code);
+                cprintf("[%s exited with code %llu]\n", name.ptr, cast(ulong)code);
         }
     }
     pmmFreePages(phys, pages);
+}
+
+// dmesg [LINES [SKIP]]: LINES lines of the kernel log (default: one screenful),
+// ending SKIP lines before the newest one.
+void shellDmesg(const(char)* args) @nogc nothrow
+{
+    ulong length = klogLength();
+    ulong total = 0;
+    for (ulong i = 0; i < length; i++)
+        if (klogAt(i) == '\n')
+            total++;
+    if (length != 0 && klogAt(length - 1) != '\n')
+        total++;
+
+    ulong rows = console.v_stride != 0 ? console.height / console.v_stride : 25;
+    ulong lines = rows > 3 ? rows - 3 : 1;
+    ulong skip = 0;
+    const(char)* p = args;
+    if (*p != 0)
+    {
+        p = diagParseNumber(p, &lines);
+        if (p is null || lines == 0)
+        {
+            cprintf("Usage: dmesg [LINES [SKIP]]\n");
+            return;
+        }
+        while (*p == ' ' || *p == '\t')
+            p++;
+        if (*p != 0 && diagParseNumber(p, &skip) is null)
+        {
+            cprintf("Usage: dmesg [LINES [SKIP]]\n");
+            return;
+        }
+    }
+    if (skip > total)
+        skip = total;
+    ulong end = total - skip;
+    ulong start = end > lines ? end - lines : 0;
+
+    ulong line = 0;
+    for (ulong i = 0; i < length && line < end; i++)
+    {
+        ubyte c = klogAt(i);
+        if (line >= start)
+        {
+            if (c == '\n')
+                consoleNewline();
+            else if (c >= 32 && c < 127)
+                consolePrintChar(cast(char)c);
+            else if (c == '\t')
+                consolePrintString("    ");
+        }
+        if (c == '\n')
+            line++;
+    }
+    if (console.print_x != 0)
+        consoleNewline();
+    cprintf("[log lines %llu-%llu of %llu%s]\n", start + 1, end, total,
+            klogWrapped() ? ", older text was overwritten".ptr : "".ptr);
 }
 
 void shellExecute() @nogc nothrow
@@ -503,53 +563,54 @@ void shellExecute() @nogc nothrow
 
     if (shellEquals(shellLine.ptr, "help"))
     {
-        kprintf("DIOS kernel shell\n");
-        kprintf("  help             Show this command list\n");
-        kprintf("  about            Kernel version information\n");
-        kprintf("  mem              Physical memory statistics\n");
-        kprintf("  memmap           Show the physical memory map\n");
-        kprintf("  time             Print current date and time\n");
-        kprintf("  uptime           Time since boot\n");
-        kprintf("  clock            Clock source and timer status\n");
-        kprintf("  irq              Interrupt controller status\n");
-        kprintf("  irqstat          Interrupt counts per vector\n");
-        kprintf("  pci              Enumerate PCI functions\n");
-        kprintf("  cpuinfo          CPU identification and features\n");
-        kprintf("  acpi             ACPI tables, MADT, FADT summary\n");
-        kprintf("  hexdump [-p] ADDR [LEN]  Dump memory (-p: physical address)\n");
-        kprintf("  history          Show recent commands\n");
-        kprintf("  echo TEXT        Print TEXT\n");
-        kprintf("  sleep SECONDS    Wait (Ctrl+C aborts)\n");
-        kprintf("  programs         List programs on the boot media\n");
-        kprintf("  disk             Show USB disks and partitions\n");
-        kprintf("  mount [N]        Mount an exFAT partition as /\n");
-        kprintf("  ls [PATH]        List a directory on the mounted volume\n");
-        kprintf("  cat FILE         Print a text file\n");
-        kprintf("  cd [DIR], pwd    Change the current directory\n");
-        kprintf("  pwd              Show the current directory\n");
-        kprintf("  run NAME [ARGS]  Run a boot program or an ELF from the disk\n");
-        kprintf("  clear            Clear the screen\n");
-        kprintf("  crash pf|ud|div|gp  Trigger a CPU exception (kernel halts)\n");
-        kprintf("  reboot           Restart the computer\n");
-        kprintf("  poweroff         Shut down the computer\n");
-        kprintf("Keys: arrows/Home/End/Del edit, Up/Down history, Tab completes,\n");
-        kprintf("      Ctrl+A/E start/end, Ctrl+U clear line, Ctrl+L redraw, Ctrl+C cancel\n");
+        cprintf("DIOS kernel shell\n");
+        cprintf("  help             Show this command list\n");
+        cprintf("  about            Kernel version information\n");
+        cprintf("  mem              Physical memory statistics\n");
+        cprintf("  memmap           Show the physical memory map\n");
+        cprintf("  time             Print current date and time\n");
+        cprintf("  uptime           Time since boot\n");
+        cprintf("  clock            Clock source and timer status\n");
+        cprintf("  irq              Interrupt controller status\n");
+        cprintf("  irqstat          Interrupt counts per vector\n");
+        cprintf("  pci              Enumerate PCI functions\n");
+        cprintf("  cpuinfo          CPU identification and features\n");
+        cprintf("  acpi             ACPI tables, MADT, FADT summary\n");
+        cprintf("  hexdump [-p] ADDR [LEN]  Dump memory (-p: physical address)\n");
+        cprintf("  history          Show recent commands\n");
+        cprintf("  echo TEXT        Print TEXT\n");
+        cprintf("  sleep SECONDS    Wait (Ctrl+C aborts)\n");
+        cprintf("  programs         List programs on the boot media\n");
+        cprintf("  dmesg [N [SKIP]] Kernel log (last N lines, SKIP lines before the end)\n");
+        cprintf("  disk             Show USB disks and partitions\n");
+        cprintf("  mount [N]        Mount an exFAT or FAT32 partition as /\n");
+        cprintf("  ls [PATH]        List a directory on the mounted volume\n");
+        cprintf("  cat FILE         Print a text file\n");
+        cprintf("  cd [DIR], pwd    Change the current directory\n");
+        cprintf("  pwd              Show the current directory\n");
+        cprintf("  run NAME [ARGS]  Run a boot program or an ELF from the disk\n");
+        cprintf("  clear            Clear the screen\n");
+        cprintf("  crash pf|ud|div|gp  Trigger a CPU exception (kernel halts)\n");
+        cprintf("  reboot           Restart the computer\n");
+        cprintf("  poweroff         Shut down the computer\n");
+        cprintf("Keys: arrows/Home/End/Del edit, Up/Down history, Tab completes,\n");
+        cprintf("      Ctrl+A/E start/end, Ctrl+U clear line, Ctrl+L redraw, Ctrl+C cancel\n");
     }
     else if (shellEquals(shellLine.ptr, "about"))
     {
-        kprintf("D Incomplete Operating System 0.2.0 for x86_64\n");
+        cprintf("D Incomplete Operating System 0.2.0 for x86_64\n");
     }
     else if (shellEquals(shellLine.ptr, "mem"))
     {
         ulong freePages = pmmFreeCount();
         ulong totalPages = pmmTotalCount();
         ulong usedPages = totalPages - freePages;
-        kprintf("Physical memory (4 KiB pages):\n");
-        kprintf("  Total: %llu MiB (%llu pages)\n",
+        cprintf("Physical memory (4 KiB pages):\n");
+        cprintf("  Total: %llu MiB (%llu pages)\n",
             totalPages * MEM_PAGE_SIZE / (1024 * 1024), totalPages);
-        kprintf("  Used:  %llu MiB (%llu pages)\n",
+        cprintf("  Used:  %llu MiB (%llu pages)\n",
             usedPages * MEM_PAGE_SIZE / (1024 * 1024), usedPages);
-        kprintf("  Free:  %llu MiB (%llu pages)\n",
+        cprintf("  Free:  %llu MiB (%llu pages)\n",
             freePages * MEM_PAGE_SIZE / (1024 * 1024), freePages);
     }
     else if (shellEquals(shellLine.ptr, "memmap"))
@@ -558,26 +619,26 @@ void shellExecute() @nogc nothrow
             "usable", "reserved", "ACPI reclaimable", "ACPI NVS",
             "bad memory", "bootloader reclaimable", "kernel/modules", "framebuffer"
         ];
-        kprintf("Physical memory map (%u entr%s):\n",
+        cprintf("Physical memory map (%u entr%s):\n",
             cast(uint)memMapCount, memMapCount == 1 ? "y".ptr : "ies".ptr);
-        kprintf("  Base                Length              Type\n");
+        cprintf("  Base                Length              Type\n");
         for (size_t i = 0; i < memMapCount; i++)
         {
             auto entry = memMapEntries[i];
             const(char)* typeName = "unknown".ptr;
             if (entry.type < types.length)
                 typeName = types[entry.type].ptr;
-            kprintf("  %llx  %llx  %s\n",
+            cprintf("  %llx  %llx  %s\n",
                 entry.base, entry.length, typeName);
         }
         if (memMapTruncated)
-            kprintf("  (map truncated at %u entries)\n", cast(uint)MEMMAP_MAX_ENTRIES);
+            cprintf("  (map truncated at %u entries)\n", cast(uint)MEMMAP_MAX_ENTRIES);
     }
     else if (shellEquals(shellLine.ptr, "time"))
     {
         DateTime t;
         datetimeNow(&t);
-        kprintf("UTC %02d.%02d.%d %02d:%02d:%02d\n",
+        cprintf("UTC %02d.%02d.%d %02d:%02d:%02d\n",
             t.day, t.month, t.year,
             t.hour, t.minute, t.second);
     }
@@ -589,17 +650,17 @@ void shellExecute() @nogc nothrow
         ulong hours = (seconds / 3600) % 24;
         ulong minutes = (seconds / 60) % 60;
         ulong secs = seconds % 60;
-        kprintf("Uptime: %llu day(s), %llu hour(s), %llu minute(s), %llu second(s)\n",
+        cprintf("Uptime: %llu day(s), %llu hour(s), %llu minute(s), %llu second(s)\n",
             days, hours, minutes, secs);
     }
     else if (shellEquals(shellLine.ptr, "clock"))
     {
-        kprintf("Clock source: %s\n", clockHasHpet() ? "HPET".ptr : "PIT".ptr);
+        cprintf("Clock source: %s\n", clockHasHpet() ? "HPET".ptr : "PIT".ptr);
         if (clockHasHpet())
-            kprintf("  HPET frequency: %llu Hz\n", hpetFreq);
-        kprintf("  LAPIC tick: %s\n", clockTickActive() ? "active".ptr : "inactive".ptr);
+            cprintf("  HPET frequency: %llu Hz\n", hpetFreq);
+        cprintf("  LAPIC tick: %s\n", clockTickActive() ? "active".ptr : "inactive".ptr);
         if (clockTickActive())
-            kprintf("  Tick count: %llu\n", clockTickMs());
+            cprintf("  Tick count: %llu\n", clockTickMs());
     }
     else if (shellEquals(shellLine.ptr, "irq"))
     {
@@ -615,11 +676,11 @@ void shellExecute() @nogc nothrow
     }
     else if (shellEquals(shellLine.ptr, "echo"))
     {
-        kprintf("%s\n", cast(char*)args);
+        cprintf("%s\n", cast(char*)args);
     }
     else if (shellEquals(shellLine.ptr, "version"))
     {
-        kprintf("DIOS 0.2.0 for x86_64\n");
+        cprintf("DIOS 0.2.0 for x86_64\n");
     }
     else if (shellEquals(shellLine.ptr, "clear"))
     {
@@ -646,11 +707,11 @@ void shellExecute() @nogc nothrow
         ulong secs;
         if (diagParseNumber(args, &secs) is null || secs > 3600)
         {
-            kprintf("Usage: sleep SECONDS (0-3600)\n");
+            cprintf("Usage: sleep SECONDS (0-3600)\n");
         }
         else if (!diagSleep(secs * 1000))
         {
-            kprintf("^C\n");
+            cprintf("^C\n");
         }
     }
     else if (shellEquals(shellLine.ptr, "hexdump"))
@@ -666,7 +727,7 @@ void shellExecute() @nogc nothrow
         p = diagParseNumber(p, &addr);
         if (p is null)
         {
-            kprintf("Usage: hexdump [-p] ADDR [LEN]   (numbers: 0x1F or decimal, LEN max 1024)\n");
+            cprintf("Usage: hexdump [-p] ADDR [LEN]   (numbers: 0x1F or decimal, LEN max 1024)\n");
         }
         else
         {
@@ -687,11 +748,15 @@ void shellExecute() @nogc nothrow
         else if (shellEquals(args, "gp"))
             diagCrash(3);
         else
-            kprintf("Usage: crash pf|ud|div|gp\n");
+            cprintf("Usage: crash pf|ud|div|gp\n");
     }
     else if (shellEquals(shellLine.ptr, "ls"))
     {
         shellLs(args);
+    }
+    else if (shellEquals(shellLine.ptr, "dmesg"))
+    {
+        shellDmesg(args);
     }
     else if (shellEquals(shellLine.ptr, "programs"))
     {
@@ -712,12 +777,12 @@ void shellExecute() @nogc nothrow
     else if (shellEquals(shellLine.ptr, "pwd"))
     {
         if (shellNeedVolume())
-            kprintf("%s\n", fsCwd.ptr);
+            cprintf("%s\n", fsCwd.ptr);
     }
     else if (shellEquals(shellLine.ptr, "cd"))
     {
         if (shellNeedVolume() && !fsChdir(args[0] == 0 ? "/".ptr : args))
-            kprintf("Not a directory: %s\n", args);
+            cprintf("Not a directory: %s\n", args);
     }
     else if (shellEquals(shellLine.ptr, "run"))
     {
@@ -732,7 +797,7 @@ void shellExecute() @nogc nothrow
             p++;
 
         if (n == 0)
-            kprintf("Usage: run NAME [ARGS]  (see 'programs')\n");
+            cprintf("Usage: run NAME [ARGS]  (see 'programs')\n");
         else
         {
             int index = procFind(name.ptr);
@@ -741,14 +806,14 @@ void shellExecute() @nogc nothrow
             else if (rootMount.mounted)
                 shellRunFile(name.ptr, p);          // a path on the mounted volume
             else
-                kprintf("No such program: %s\n", name.ptr);
+                cprintf("No such program: %s\n", name.ptr);
         }
     }
     else if (shellEquals(shellLine.ptr, "poweroff"))
     {
-        kprintf("Powering off...\n");
+        cprintf("Powering off...\n");
         if (!acpiPoweroff())
-            kprintf("ACPI shutdown is unavailable (missing FADT/DSDT _S5_ or PM1a control block).\n");
+            cprintf("ACPI shutdown is unavailable (missing FADT/DSDT _S5_ or PM1a control block).\n");
     }
     else if (shellLine[0] != 0)
     {
@@ -763,8 +828,8 @@ void shellExecute() @nogc nothrow
         }
         else
         {
-            kprintf("Unknown command: %s\n", shellLine.ptr);
-            kprintf("Type 'help' for available commands.\n");
+            cprintf("Unknown command: %s\n", shellLine.ptr);
+            cprintf("Type 'help' for available commands.\n");
         }
     }
 
@@ -818,7 +883,7 @@ void shellComplete() @nogc nothrow
         consoleNewline();
         for (size_t i = 0; i < SHELL_COMMANDS.length; i++)
             if (shellStartsWith(SHELL_COMMANDS[i].ptr, shellLine[0 .. shellLineLength]))
-                kprintf("%s  ", SHELL_COMMANDS[i].ptr);
+                cprintf("%s  ", SHELL_COMMANDS[i].ptr);
         consoleNewline();
         shellPrompt();
         for (size_t j = 0; j < shellLineLength; j++)
@@ -831,7 +896,7 @@ void shellInit() @nogc nothrow
     shellClearLine();
     shellHistoryCount = 0;
     shellHistoryNext = 0;
-    kprintf("\nWelcome to the kernel shell! Type 'help' for available commands.\n");
+    cprintf("\nWelcome to the kernel shell! Type 'help' for available commands.\n");
     shellPrompt();
 }
 

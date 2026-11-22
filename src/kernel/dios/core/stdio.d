@@ -39,16 +39,32 @@ __gshared StdioMode stdioMode;
 
 extern(C):
 
+/// Kernel message: printed on the console and kept in the kernel log (`dmesg`).
 void kprintf(string fmt, ...) @nogc nothrow
 {
     va_list ap;
     va_start!(string)(ap, fmt);
     if (stdioMode == StdioMode.Framebuffer)
     {
-        consolePrintStringFmt(fmt, ap);
+        consoleLogStringFmt(fmt, ap);
         gfxPresent(); // cheap: copies only the characters just printed
     }
     else if (stdioMode == StdioMode.VGATextMode)
-        VGAConsole.writef(fmt, ap);
+        VGAConsole.writef(fmt, ap, true);
+    va_end(ap);
+}
+
+/// Console output that is not logged: the shell's own output (command results, errors).
+void cprintf(string fmt, ...) @nogc nothrow
+{
+    va_list ap;
+    va_start!(string)(ap, fmt);
+    if (stdioMode == StdioMode.Framebuffer)
+    {
+        consolePrintStringFmt(fmt, ap);
+        gfxPresent();
+    }
+    else if (stdioMode == StdioMode.VGATextMode)
+        VGAConsole.writef(fmt, ap, false);
     va_end(ap);
 }

@@ -20,9 +20,14 @@ import dios.core.stdio;
 enum uint EXFAT_NAME_MAX = 256;
 enum uint EXFAT_ATTR_DIR = 0x10;
 
+// Directory walker of a FAT32 volume (fat32.d), same contract as exfatIterate().
+alias FatIterFn = extern(C) bool function(ExfatVolume* v, const(ExfatEntry)* dir, ExfatDirFn fn, void* ctx) @nogc nothrow;
+
 struct ExfatVolume
 {
     bool valid;
+    bool fat32;                 // FAT32 volume (fat32.d): 28-bit FAT entries, 8.3 + long name directories
+    FatIterFn fat32Iter;
     BlockDev* dev;
     ulong partStart;            // device sector of the boot sector
     uint sectorShift;           // file system sector = 1 << sectorShift bytes
@@ -159,6 +164,8 @@ uint exFatNext(ExfatVolume* v, uint cluster) @nogc nothrow
         v.fatCacheSector = sector;
     }
     uint next = exLe32(v.fatCache.ptr + (byteOff & ((1UL << v.sectorShift) - 1)));
+    if (v.fat32)
+        next &= 0x0FFFFFFF;                         // the top 4 bits are reserved
     if (next < 2 || next >= v.clusterCount + 2)
         return 0;
     return next;
@@ -387,6 +394,8 @@ bool exfatMount(ExfatVolume* v, BlockDev* dev, ulong startLba, ulong sectors) @n
 /// returns false to stop. Returns false only on an I/O or structure error.
 bool exfatIterate(ExfatVolume* v, const(ExfatEntry)* dir, ExfatDirFn fn, void* ctx) @nogc nothrow
 {
+    if (v.fat32Iter !is null)
+        return v.fat32Iter(v, dir, fn, ctx);
     if (!dir.isDir)
         return false;
 
