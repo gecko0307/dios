@@ -69,9 +69,17 @@ ulong blkLe64(const(ubyte)* p) @nogc nothrow
 BlockDev* blockRegister(const(char)* name, const(char)* model, ulong sectors, uint sectorSize,
                         BlockReadFn read, void* ctx) @nogc nothrow
 {
-    if (blockDevCount >= BLK_MAX_DEVICES)
-        return null;
-    BlockDev* b = &blockDevs[blockDevCount++];
+    // Reuse the entry of a disk that was unplugged.
+    uint slot = 0;
+    while (slot < blockDevCount && blockDevs[slot].present)
+        slot++;
+    if (slot == blockDevCount)
+    {
+        if (blockDevCount >= BLK_MAX_DEVICES)
+            return null;
+        blockDevCount++;
+    }
+    BlockDev* b = &blockDevs[slot];
     *b = BlockDev.init;
     uint i = 0;
     while (name[i] != 0 && i + 1 < b.name.length)
@@ -105,6 +113,16 @@ bool blockRead(BlockDev* b, ulong lba, uint count, void* dst) @nogc nothrow
     return b.read(b.ctx, lba, count, dst);
 }
 
+/// The disk is gone: its partitions disappear with it.
+void blockUnregister(BlockDev* b) @nogc nothrow
+{
+    uint idx = blockDevIndex(b);
+    for (uint i = 0; i < partitionCount; i++)
+        if (partitions[i].valid && partitions[i].dev == idx)
+            partitions[i].valid = false;
+    b.present = false;
+}
+
 uint blockDevIndex(BlockDev* b) @nogc nothrow
 {
     return cast(uint)(b - blockDevs.ptr);
@@ -112,17 +130,29 @@ uint blockDevIndex(BlockDev* b) @nogc nothrow
 
 Partition* partAdd(BlockDev* b, ulong start, ulong sectors, bool gpt, ubyte mbrType, bool whole, string kind) @nogc nothrow
 {
-    if (partitionCount >= BLK_MAX_PARTS || sectors == 0)
+    if (sectors == 0)
         return null;
     if (start >= b.sectors || sectors > b.sectors - start)
         return null;                    // table points outside the disk: ignore it
 
+    // Entries of partitions on unplugged disks are reused.
+    uint slot = 0;
+    while (slot < partitionCount && partitions[slot].valid)
+        slot++;
+    if (slot == partitionCount)
+    {
+        if (partitionCount >= BLK_MAX_PARTS)
+            return null;
+        partitionCount++;
+    }
+
     uint number = 1;
     for (uint i = 0; i < partitionCount; i++)
-        if (partitions[i].dev == blockDevIndex(b))
+        if (partitions[i].valid && partitions[i].dev == blockDevIndex(b))
             number++;
 
-    Partition* p = &partitions[partitionCount++];
+    Partition* p = &partitions[slot];
+    *p = Partition.init;
     p.valid = true;
     p.dev = cast(ubyte)blockDevIndex(b);
     p.number = cast(ubyte)number;

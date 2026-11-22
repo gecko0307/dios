@@ -39,9 +39,20 @@ __gshared StdioMode stdioMode;
 
 extern(C):
 
+/// If set, called once (and cleared) right before the next kprintf prints anything. The main
+/// loop uses it to get the shell's input line out of the way of messages from hot-plug.
+alias KprintfHookFn = extern(C) void function() @nogc nothrow;
+__gshared KprintfHookFn kprintfHook;
+
 /// Kernel message: printed on the console and kept in the kernel log (`dmesg`).
 void kprintf(string fmt, ...) @nogc nothrow
 {
+    if (kprintfHook !is null)
+    {
+        KprintfHookFn hook = kprintfHook;
+        kprintfHook = null;
+        hook();
+    }
     va_list ap;
     va_start!(string)(ap, fmt);
     if (stdioMode == StdioMode.Framebuffer)

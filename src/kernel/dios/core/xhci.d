@@ -28,8 +28,8 @@ module dios.core.xhci;
 /**
  * xHCI (USB 3.x host controller) driver + USB HID boot-protocol mouse and keyboard.
  *
- * Scope: polling only (no interrupts), devices on ROOT ports only (no hubs),
- * no hot-plug. The flow is the textbook one from the xHCI spec (rev 1.2):
+ * Scope: polling only (no interrupts). Devices on root ports and behind hubs
+ * (hubs are driven with control transfers only), hot-plug by polling port status. The flow is the textbook one from the xHCI spec (rev 1.2):
  *
  *   reset controller -> DCBAA + command ring + event ring -> run
  *   -> per connected port: reset port -> Enable Slot -> Address Device
@@ -52,7 +52,7 @@ import dios.core.usbkbd;
 
 // constants
 
-enum uint XHCI_MAX_SLOTS = 8;       // we only enable this many device slots
+enum uint XHCI_MAX_SLOTS = 32;      // we only enable this many device slots (hubs take one each)
 enum uint XHCI_RING_TRBS = 256;     // one 4 KiB page per ring
 enum uint XHCI_RPT_BUFS = 16;       // report buffers kept queued on the mouse endpoint
 enum uint XHCI_RPT_STRIDE = 64;
@@ -70,7 +70,7 @@ enum : uint
 
     // PORTSC bits
     PORT_CCS = 1 << 0, PORT_PED = 1 << 1, PORT_PR = 1 << 4, PORT_PP = 1 << 9,
-    PORT_PRC = 1 << 21,
+    PORT_CSC = 1 << 17, PORT_PRC = 1 << 21,
     // Bits that must be preserved when we write PORTSC (PP, PIC, wake enables).
     // PED and the *change* bits are write-1-to-clear: writing back what we read
     // would DISABLE the port / clear events by accident.
@@ -95,10 +95,13 @@ enum : uint
 
 enum : uint
 {
-    TRB_CMD_STOP_EP = 15, TRB_CMD_RESET_EP = 14, TRB_CMD_SET_TR_DEQ = 16
+    TRB_CMD_STOP_EP = 15, TRB_CMD_RESET_EP = 14, TRB_CMD_SET_TR_DEQ = 16,
+    TRB_CMD_DISABLE_SLOT = 10
 }
 
 enum uint XHCI_MAX_CONTROLLERS = 4;
+enum uint XHCI_MAX_HUB_DEPTH = 5;           // route strings have room for five tiers
+enum ubyte XHCI_PORT_FAILED = 0xFF;         // marks a port whose device could not be brought up
 enum uint XHCI_MSC_BOUNCE_PAGES = 16;      // 64 KiB data buffer per storage device
 enum uint XHCI_MSC_CBW_OFF = 2048;         // CBW/CSW live in the device's scratch page
 enum uint XHCI_MSC_CSW_OFF = 2560;
@@ -199,6 +202,24 @@ struct XhciUsbDevice
     ubyte port;                 // 1-based root hub port
     ubyte speed;                // PORTSC speed id: 1 FS, 2 LS, 3 HS, 4 SS
     uint ep0Mps;
+    uint serial;                // unique per device instance (a slot number is reused)
+    ushort vid, pid;
+    ubyte devClass;
+
+    // topology: where the device hangs
+    uint route;                 // route string: 4 bits per hub tier, nearest the root first
+    ubyte depth;                // number of hubs between it and the root port
+    ubyte parentSlot;           // slot of the hub it is plugged into (0: a root port)
+    ubyte parentPort;           // port number on that hub
+    ubyte ttSlot, ttPort;       // transaction translator for a LS/FS device below a HS hub (0: none)
+
+    // hub
+    bool isHub;
+    bool hubDead;               // stopped answering: no longer polled
+    ubyte hubPorts;
+    ubyte hubTtt;               // TT think time field of a HS hub
+    ubyte hubPowerGood;         // bPwrOn2PwrGood, in 2 ms units
+    ubyte[16] hubChild;         // per port (1..15): slot of the attached device, 0 none, XHCI_PORT_FAILED
 
     ubyte* devCtx;  ulong devCtxPhys;
     ubyte* inCtx;   ulong inCtxPhys;
@@ -260,6 +281,11 @@ struct XhciController
 
     XhciUsbDevice[XHCI_MAX_SLOTS + 1] devs;   // indexed by slot id (0 unused)
 
+    // hot-plug bookkeeping
+    ubyte[256] rootChild;       // per root port: slot of the attached device, 0 none, XHCI_PORT_FAILED
+    ulong nextRootScan;         // clock (ns) of the next look at the root ports
+    ulong nextHubScan;          // ... and at the hubs
+
     bool running;
 }
 
@@ -270,6 +296,8 @@ struct XhciController
 __gshared XhciController[XHCI_MAX_CONTROLLERS] xhciControllers;
 __gshared XhciController* xhci = &xhciControllers[0];
 __gshared uint xhciCount;
+__gshared uint xhciTopologyGen;      // bumped whenever a device appears or goes away
+__gshared uint xhciDeviceSerial;
 
 // Print the raw bytes of the first mouse reports and a "first report" note.
 // Handy when a new mouse misbehaves, but those lines show up whenever the mouse
@@ -811,6 +839,24 @@ void xhciCtxW32(ubyte* ctx, uint contextIndex, uint dword, uint v) @nogc nothrow
     volatileStore(cast(uint*)(ctx + contextIndex * xhci.ctxSize + dword * 4), v);
 }
 
+// Slot context of the input context: speed, where the device is (route string, root
+// port, hub and transaction translator) and, for a hub, its port count.
+void xhciWriteSlotCtx(XhciUsbDevice* d, uint entries) @nogc nothrow
+{
+    uint dw0 = (d.route & 0xFFFFF) | (cast(uint)d.speed << 20) | (entries << 27);
+    uint dw1 = cast(uint)d.port << 16;
+    uint dw2 = cast(uint)d.ttSlot | (cast(uint)d.ttPort << 8);
+    if (d.isHub)
+    {
+        dw0 |= 1u << 25;
+        dw1 |= cast(uint)d.hubPorts << 24;
+        dw2 |= cast(uint)d.hubTtt << 16;
+    }
+    xhciCtxW32(d.inCtx, 1, 0, dw0);
+    xhciCtxW32(d.inCtx, 1, 1, dw1);
+    xhciCtxW32(d.inCtx, 1, 2, dw2);
+}
+
 // Fill an endpoint context. Index in the input context is dci + 1.
 void xhciFillEpCtx(XhciUsbDevice* d, uint dci, uint epType, uint mps,
                    uint interval, XhciRing* ring, uint avgLen) @nogc nothrow
@@ -1006,8 +1052,7 @@ bool xhciSetupMouse(XhciUsbDevice* d) @nogc nothrow
     // Configure Endpoint: add slot context (A0) and the new endpoint.
     memset(d.inCtx, 0, 4096);
     xhciCtxW32(d.inCtx, 0, 1, 1 | (1u << dci));
-    xhciCtxW32(d.inCtx, 1, 0, (dci << 27) | (cast(uint)d.speed << 20));
-    xhciCtxW32(d.inCtx, 1, 1, cast(uint)d.port << 16);
+    xhciWriteSlotCtx(d, dci);
     xhciFillEpCtx(d, dci, 7 /* interrupt IN */, d.intMps,
                   xhciEncodeInterval(d.speed, d.intInterval), &d.intRing, d.intMps);
 
@@ -1054,8 +1099,7 @@ bool xhciSetupKeyboard(XhciUsbDevice* d) @nogc nothrow
 
     memset(d.inCtx, 0, 4096);
     xhciCtxW32(d.inCtx, 0, 1, 1 | (1u << dci));
-    xhciCtxW32(d.inCtx, 1, 0, (maxDci << 27) | (cast(uint)d.speed << 20));
-    xhciCtxW32(d.inCtx, 1, 1, cast(uint)d.port << 16);
+    xhciWriteSlotCtx(d, maxDci);
     xhciFillEpCtx(d, dci, 7 /* interrupt IN */, k.intMps,
                   xhciEncodeInterval(d.speed, k.intInterval), &k.intRing, k.intMps);
 
@@ -1098,8 +1142,7 @@ bool xhciSetupStorage(XhciUsbDevice* d) @nogc nothrow
 
     memset(d.inCtx, 0, 4096);
     xhciCtxW32(d.inCtx, 0, 1, 1 | (1u << inDci) | (1u << outDci));
-    xhciCtxW32(d.inCtx, 1, 0, (maxDci << 27) | (cast(uint)d.speed << 20));
-    xhciCtxW32(d.inCtx, 1, 1, cast(uint)d.port << 16);
+    xhciWriteSlotCtx(d, maxDci);
     xhciFillBulkCtx(d, inDci, 6 /* bulk IN */, m.inMps, &m.inRing);
     xhciFillBulkCtx(d, outDci, 2 /* bulk OUT */, m.outMps, &m.outRing);
 
@@ -1207,23 +1250,245 @@ public bool xhciClearHalt(XhciUsbDevice* d, bool dirIn) @nogc nothrow
     return xhciControl(d, 0x02, 1, 0, addr, 0, 0);
 }
 
-bool xhciSetupDevice(uint port, uint speed) @nogc nothrow
+// Free the DMA memory of a ring.
+void xhciFreeRing(XhciRing* r) @nogc nothrow
 {
-    uint slot;
-    if (!xhciCommand(0, TRB_CMD_ENABLE_SLOT << 10, &slot))
-        return false;
+    if (r.trbs !is null)
+        pmmFreePages(r.phys, 1);
+    r.trbs = null;
+    r.phys = 0;
+}
+
+/// Take a device (and, for a hub, everything behind it) out of service: tell the
+/// controller to drop its slot, then give the memory back.
+void xhciRemoveSlot(uint slot) @nogc nothrow
+{
     if (slot == 0 || slot > XHCI_MAX_SLOTS)
+        return;
+    XhciUsbDevice* d = &xhci.devs[slot];
+
+    if (d.isHub)
     {
-        kprintf("xHCI: unusable slot id %u\n", slot);
-        return false;
+        d.isHub = false;                    // no more polling while we tear it down
+        for (uint p = 1; p < 16; p++)
+        {
+            ubyte c = d.hubChild[p];
+            d.hubChild[p] = 0;
+            if (c != 0 && c != XHCI_PORT_FAILED)
+                xhciRemoveSlot(c);
+        }
     }
 
-    XhciUsbDevice* d = &xhci.devs[slot];
+    // From here on the event handler and the drivers ignore the device.
+    d.mouseActive = false;
+    d.kbd.active = false;
+    d.msc.active = false;
+    d.present = false;
+    usbKbdStop(&d.kbd.state);               // a key held down while the keyboard went away must not repeat
+
+    bool released = true;
+    if (xhci.running)
+        released = xhciCommand(0, (TRB_CMD_DISABLE_SLOT << 10) | (slot << 24), null);
+    volatileStore(&xhci.dcbaa[slot], 0UL);
+
+    if (released)
+    {
+        if (d.devCtx !is null)
+            pmmFreePages(d.devCtxPhys, 1);
+        if (d.inCtx !is null)
+            pmmFreePages(d.inCtxPhys, 1);
+        if (d.dma !is null)
+            pmmFreePages(d.dmaPhys, 1);
+        xhciFreeRing(&d.ep0Ring);
+        xhciFreeRing(&d.intRing);
+        xhciFreeRing(&d.kbd.intRing);
+        xhciFreeRing(&d.msc.inRing);
+        xhciFreeRing(&d.msc.outRing);
+        if (d.msc.bounce !is null)
+            pmmFreePages(d.msc.bouncePhys, XHCI_MSC_BOUNCE_PAGES);
+    }
     *d = XhciUsbDevice.init;
-    d.slotId = cast(ubyte)slot;
-    d.port = cast(ubyte)port;
-    d.speed = cast(ubyte)speed;
-    d.ep0Mps = xhciDefaultEp0Mps(speed);
+    xhciTopologyGen++;
+}
+
+// ---------------------------------------------------------------------------
+// hubs
+//
+// A hub is driven only through control transfers on its EP0 (class requests for
+// port status, reset and power); its status-change interrupt endpoint is not
+// used. The port states are simply read again every 250 ms (xhciHubPoll).
+// ---------------------------------------------------------------------------
+
+bool xhciHubSetFeature(XhciUsbDevice* h, uint port, uint feature) @nogc nothrow
+{
+    return xhciControl(h, 0x23, 3, cast(ushort)feature, cast(ushort)port, 0, 0);
+}
+
+bool xhciHubClearFeature(XhciUsbDevice* h, uint port, uint feature) @nogc nothrow
+{
+    return xhciControl(h, 0x23, 1, cast(ushort)feature, cast(ushort)port, 0, 0);
+}
+
+// GET_STATUS of a hub port: wPortStatus and wPortChange.
+bool xhciHubPortStatus(XhciUsbDevice* h, uint port, uint* status, uint* change) @nogc nothrow
+{
+    if (!xhciControl(h, 0xA3, 0, 0, cast(ushort)port, 4, h.dmaPhys))
+        return false;
+    *status = volatileLoad(h.dma) | (cast(uint)volatileLoad(h.dma + 1) << 8);
+    *change = volatileLoad(h.dma + 2) | (cast(uint)volatileLoad(h.dma + 3) << 8);
+    return true;
+}
+
+// Reset a hub port. Returns the speed id (xHCI numbering) of the device that is
+// then enabled, or 0.
+uint xhciHubResetPort(XhciUsbDevice* h, uint port) @nogc nothrow
+{
+    if (!xhciHubSetFeature(h, port, 4))                 // PORT_RESET
+        return 0;
+    uint status = 0, change = 0;
+    bool done = false;
+    for (uint i = 0; i < 60 && !done; i++)
+    {
+        clockDelayMs(10);
+        if (!xhciHubPortStatus(h, port, &status, &change))
+            return 0;
+        done = (change & 0x10) != 0;                    // C_PORT_RESET
+    }
+    if (!done)
+        return 0;
+    xhciHubClearFeature(h, port, 20);                   // C_PORT_RESET
+    xhciHubClearFeature(h, port, 16);                   // C_PORT_CONNECTION
+    clockDelayMs(10);                                   // reset recovery time
+    if (!xhciHubPortStatus(h, port, &status, &change))
+        return 0;
+    if ((status & 3) != 3)                              // connected and enabled
+        return 0;
+    if (h.speed >= 4)
+        return 4;
+    if (status & 0x200)
+        return 2;                                       // low speed
+    if (status & 0x400)
+        return 3;                                       // high speed
+    return 1;
+}
+
+// Compare every port of a hub with what we have brought up: new devices get
+// enumerated, vanished ones are taken out of service.
+void xhciHubScan(XhciUsbDevice* h) @nogc nothrow
+{
+    for (uint p = 1; p <= h.hubPorts; p++)
+    {
+        if (!h.present || !h.isHub)
+            return;                                     // removed while we were busy
+
+        uint status, change;
+        if (!xhciHubPortStatus(h, p, &status, &change))
+        {
+            h.hubDead = true;                           // a failed control transfer leaves EP0 unusable
+            kprintf("USB: hub on slot %u stopped answering\n", cast(uint)h.slotId);
+            return;
+        }
+        for (uint b = 0; b < 5; b++)
+            if (change & (1u << b))
+                xhciHubClearFeature(h, p, 16 + b);
+
+        bool connected = (status & 1) != 0;
+        ubyte child = h.hubChild[p];
+        if (child != 0 && (!connected || (change & 1)))
+        {
+            if (child != XHCI_PORT_FAILED)
+            {
+                kprintf("USB: device removed from hub slot %u port %u\n", cast(uint)h.slotId, p);
+                xhciRemoveSlot(child);
+            }
+            child = 0;
+            h.hubChild[p] = 0;
+        }
+        if (!connected || child != 0)
+            continue;
+
+        kprintf("USB: device connected to hub slot %u port %u\n", cast(uint)h.slotId, p);
+        clockDelayMs(100);                              // let the connection settle
+        uint speed = xhciHubResetPort(h, p);
+        if (speed == 0)
+        {
+            kprintf("USB: hub port %u: reset failed\n", p);
+            h.hubChild[p] = XHCI_PORT_FAILED;
+            continue;
+        }
+        uint slot = xhciSetupDevice(h.port, speed, h, p);
+        h.hubChild[p] = slot != 0 ? cast(ubyte)slot : XHCI_PORT_FAILED;
+    }
+}
+
+// Called from xhciInitDevice() for a device with class 9 (hub).
+bool xhciSetupHub(XhciUsbDevice* d) @nogc nothrow
+{
+    bool ss = d.speed >= 4;
+    kprintf("  hub (%s)\n", ss ? "SuperSpeed".ptr : "USB 2.0".ptr);
+    if (d.depth >= XHCI_MAX_HUB_DEPTH)
+    {
+        kprintf("  hubs nested too deep, ignoring it\n");
+        return true;
+    }
+
+    if (!xhciControl(d, 0x80, 6, 0x0200, 0, 9, d.dmaPhys))
+        return false;
+    d.cfgValue = volatileLoad(d.dma + 5);
+    if (!xhciEnsureConfigured(d))
+        return false;
+    if (ss && !xhciControl(d, 0x20, 12, d.depth, 0, 0, 0))      // SET_HUB_DEPTH
+        kprintf("  hub: Set Hub Depth failed\n");
+
+    // Hub descriptor (0x29 for USB 2.0 hubs, 0x2A for SuperSpeed ones).
+    if (!xhciControl(d, 0xA0, 6, cast(ushort)(ss ? 0x2A00 : 0x2900), 0, 12, d.dmaPhys))
+        return false;
+    uint ports = volatileLoad(d.dma + 2);
+    uint chars = volatileLoad(d.dma + 3) | (cast(uint)volatileLoad(d.dma + 4) << 8);
+    uint powerGood = volatileLoad(d.dma + 5);
+    if (ports == 0)
+    {
+        kprintf("  hub reports no ports, ignoring it\n");
+        return true;
+    }
+    if (ports > 15)
+    {
+        kprintf("  hub has %u ports, only the first 15 can be used\n", ports);
+        ports = 15;                                     // a route string nibble holds 1..15
+    }
+    d.hubPorts = cast(ubyte)ports;
+    d.hubTtt = ss ? cast(ubyte)0 : cast(ubyte)((chars >> 5) & 3);
+    d.hubPowerGood = cast(ubyte)powerGood;
+    d.isHub = true;
+
+    // Tell the controller it is a hub (port count, think time): a slot context update.
+    memset(d.inCtx, 0, 4096);
+    xhciCtxW32(d.inCtx, 0, 1, 1);                       // add A0 only
+    xhciWriteSlotCtx(d, 1);
+    if (!xhciCommand(d.inCtxPhys, (TRB_CMD_CONFIGURE_EP << 10) | (cast(uint)d.slotId << 24), null))
+        kprintf("  hub: the controller refused the hub slot context\n");
+
+    kprintf("  %u ports\n", ports);
+    for (uint p = 1; p <= ports; p++)
+        xhciHubSetFeature(d, p, 8);                     // PORT_POWER
+    clockDelayMs(powerGood * 2 + 100);
+
+    xhciHubScan(d);
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// device bring-up
+// ---------------------------------------------------------------------------
+
+// Everything after Enable Slot: address the device, read its descriptors and start
+// the drivers (mouse, keyboard, storage, hub). `d` is already filled in with the
+// slot id, port, speed and topology.
+bool xhciInitDevice(XhciUsbDevice* d) @nogc nothrow
+{
+    uint slot = d.slotId;
+    uint port = d.port;
+    uint speed = d.speed;
 
     d.devCtx = cast(ubyte*)xhciDmaAlloc(1, &d.devCtxPhys);
     d.inCtx  = cast(ubyte*)xhciDmaAlloc(1, &d.inCtxPhys);
@@ -1238,8 +1503,7 @@ bool xhciSetupDevice(uint port, uint speed) @nogc nothrow
 
     // Input context for Address Device: slot context + EP0.
     xhciCtxW32(d.inCtx, 0, 1, 0x3);                                    // add A0, A1
-    xhciCtxW32(d.inCtx, 1, 0, (1u << 27) | (speed << 20));             // 1 context entry
-    xhciCtxW32(d.inCtx, 1, 1, port << 16);                             // root hub port
+    xhciWriteSlotCtx(d, 1);                                            // route, root port, TT; 1 context entry
     xhciFillEpCtx(d, 1, 4 /* control */, d.ep0Mps, 0, &d.ep0Ring, 8);
 
     if (!xhciCommand(d.inCtxPhys, (TRB_CMD_ADDRESS_DEVICE << 10) | (slot << 24), null))
@@ -1268,12 +1532,16 @@ bool xhciSetupDevice(uint port, uint speed) @nogc nothrow
     uint vid = volatileLoad(d.dma + 8) | (volatileLoad(d.dma + 9) << 8);
     uint pid = volatileLoad(d.dma + 10) | (volatileLoad(d.dma + 11) << 8);
     uint devClass = volatileLoad(d.dma + 4);
-    kprintf("USB device on port %u: %x:%x class %u\n", port, vid, pid, devClass);
+    d.vid = cast(ushort)vid;
+    d.pid = cast(ushort)pid;
+    d.devClass = cast(ubyte)devClass;
+    if (d.parentSlot != 0)
+        kprintf("USB device on hub slot %u port %u: %x:%x class %u\n",
+                cast(uint)d.parentSlot, cast(uint)d.parentPort, vid, pid, devClass);
+    else
+        kprintf("USB device on port %u: %x:%x class %u\n", port, vid, pid, devClass);
     if (devClass == 9)
-    {
-        kprintf("  hub - not supported yet\n");
-        return true;
-    }
+        return xhciSetupHub(d);
 
     // Configuration descriptor: 9 bytes first to learn wTotalLength.
     if (!xhciControl(d, 0x80, 6, 0x0200, 0, 9, d.dmaPhys))
@@ -1328,7 +1596,60 @@ bool xhciSetupDevice(uint port, uint speed) @nogc nothrow
             ok = false;
         }
     }
-    return ok;
+    return ok || d.kbd.active || d.mouseActive || d.msc.active;
+}
+
+
+/// Bring up the device on `port` (root port number) at `speed`. `parent` is the hub it
+/// is plugged into (null: the root port itself) and `parentPort` its port on that hub.
+/// Returns the slot id, or 0 if nothing usable came out of it (the slot is released then).
+uint xhciSetupDevice(uint port, uint speed, XhciUsbDevice* parent, uint parentPort) @nogc nothrow
+{
+    uint slot;
+    if (!xhciCommand(0, TRB_CMD_ENABLE_SLOT << 10, &slot))
+        return 0;
+    if (slot == 0 || slot > XHCI_MAX_SLOTS)
+    {
+        kprintf("xHCI: unusable slot id %u\n", slot);
+        return 0;
+    }
+
+    XhciUsbDevice* d = &xhci.devs[slot];
+    *d = XhciUsbDevice.init;
+    d.slotId = cast(ubyte)slot;
+    d.port = cast(ubyte)port;
+    d.speed = cast(ubyte)speed;
+    d.ep0Mps = xhciDefaultEp0Mps(speed);
+    d.serial = ++xhciDeviceSerial;
+
+    if (parent !is null)
+    {
+        d.parentSlot = parent.slotId;
+        d.parentPort = cast(ubyte)parentPort;
+        d.depth = cast(ubyte)(parent.depth + 1);
+        d.route = parent.route | (parentPort << (4 * parent.depth));
+        if (speed <= 2)                                 // LS/FS: needs the transaction translator of a HS hub above
+        {
+            if (parent.speed == 3)
+            {
+                d.ttSlot = parent.slotId;
+                d.ttPort = cast(ubyte)parentPort;
+            }
+            else
+            {
+                d.ttSlot = parent.ttSlot;
+                d.ttPort = parent.ttPort;
+            }
+        }
+    }
+
+    if (!xhciInitDevice(d))
+    {
+        xhciRemoveSlot(slot);
+        return 0;
+    }
+    xhciTopologyGen++;
+    return slot;
 }
 
 // Reset a port and return its speed id, or 0 if no enabled device results.
@@ -1392,11 +1713,144 @@ void xhciEnumeratePorts() @nogc nothrow
         if (speed == 0)
         {
             kprintf("xHCI: port %u: reset failed\n", p);
+            xhci.rootChild[p] = XHCI_PORT_FAILED;
             continue;
         }
-        xhciSetupDevice(p, speed);
+        uint slot = xhciSetupDevice(p, speed, null, 0);
+        xhci.rootChild[p] = slot != 0 ? cast(ubyte)slot : XHCI_PORT_FAILED;
+    }
+
+    // Everything that happened up to now has been dealt with: forget the connect changes.
+    for (uint p = 1; p <= xhci.maxPorts; p++)
+    {
+        size_t off = OP_PORTS + (p - 1) * 0x10;
+        uint sc = xhciRd32(xhci.op, off);
+        if (sc & PORT_CHANGE_BITS)
+            xhciWr32(xhci.op, off, (sc & PORT_PRESERVE) | PORT_CHANGE_BITS);
     }
 }
+
+// ---------------------------------------------------------------------------
+// hot-plug
+// ---------------------------------------------------------------------------
+
+// Root ports: a connect-status-change bit means something was plugged in or pulled out.
+void xhciRootScan() @nogc nothrow
+{
+    for (uint p = 1; p <= xhci.maxPorts; p++)
+    {
+        size_t off = OP_PORTS + (p - 1) * 0x10;
+        uint sc = xhciRd32(xhci.op, off);
+        if (!(sc & PORT_CSC))
+            continue;
+        xhciWr32(xhci.op, off, (sc & PORT_PRESERVE) | PORT_CHANGE_BITS);   // acknowledge
+
+        ubyte child = xhci.rootChild[p];
+        if (child != 0 && child != XHCI_PORT_FAILED)
+        {
+            kprintf("USB: device removed from port %u\n", p);
+            xhciRemoveSlot(child);
+        }
+        xhci.rootChild[p] = 0;
+
+        sc = xhciRd32(xhci.op, off);
+        if (!(sc & PORT_CCS))
+            continue;
+        kprintf("USB: device connected to port %u\n", p);
+        clockDelayMs(100);                              // let the connection settle
+        sc = xhciRd32(xhci.op, off);
+        if (!(sc & PORT_CCS))
+            continue;                                   // gone again; the next change event will say so
+        xhciWr32(xhci.op, off, (sc & PORT_PRESERVE) | PORT_CHANGE_BITS);
+
+        uint speed = xhciResetPort(p);
+        if (speed == 0)
+        {
+            kprintf("USB: port %u: reset failed\n", p);
+            xhci.rootChild[p] = XHCI_PORT_FAILED;
+            continue;
+        }
+        uint slot = xhciSetupDevice(p, speed, null, 0);
+        xhci.rootChild[p] = slot != 0 ? cast(ubyte)slot : XHCI_PORT_FAILED;
+    }
+}
+
+void xhciHubPoll() @nogc nothrow
+{
+    for (uint s = 1; s <= XHCI_MAX_SLOTS; s++)
+    {
+        XhciUsbDevice* h = &xhci.devs[s];
+        if (h.present && h.isHub && !h.hubDead)
+            xhciHubScan(h);
+    }
+}
+
+/// Look for devices that were plugged in or pulled out: root ports every 100 ms,
+/// hub ports every 250 ms. This can take a while when something did change (reset,
+/// descriptors), so it is called from the main loop and from blocking system calls,
+/// never from an interrupt handler. xhciTopologyGen tells the caller that the set
+/// of devices changed.
+public void xhciHotplugTick() @nogc nothrow
+{
+    for (uint c = 0; c < xhciCount; c++)
+    {
+        XhciController* x = &xhciControllers[c];
+        if (!x.running)
+            continue;
+        xhci = x;
+        if (clockNowNs() >= x.nextRootScan)
+        {
+            xhciRootScan();
+            x.nextRootScan = clockNowNs() + 100_000_000UL;
+        }
+        if (clockNowNs() >= x.nextHubScan)
+        {
+            xhciHubPoll();
+            x.nextHubScan = clockNowNs() + 250_000_000UL;
+        }
+    }
+}
+
+/// Print the devices that are up (shell command `usb`).
+public void xhciPrintTree() @nogc nothrow
+{
+    bool any = false;
+    for (uint c = 0; c < xhciCount; c++)
+    {
+        for (uint s = 1; s <= XHCI_MAX_SLOTS; s++)
+        {
+            XhciUsbDevice* d = &xhciControllers[c].devs[s];
+            if (!d.present)
+                continue;
+            any = true;
+            cprintf("xhci%u ", c);
+            for (uint i = 0; i < d.depth; i++)
+                cprintf("  ");
+            if (d.parentSlot != 0)
+                cprintf("hub %u port %u", cast(uint)d.parentSlot, cast(uint)d.parentPort);
+            else
+                cprintf("port %u", cast(uint)d.port);
+            const(char)* speed = d.speed == 1 ? "full".ptr : (d.speed == 2 ? "low".ptr : (d.speed == 3 ? "high".ptr : "super".ptr));
+            cprintf(": %x:%x %s-speed, ", cast(uint)d.vid, cast(uint)d.pid, speed);
+            if (d.isHub)
+                cprintf("hub with %u ports", cast(uint)d.hubPorts);
+            else if (d.msc.active)
+                cprintf("mass storage");
+            else if (d.kbd.active && d.mouseActive)
+                cprintf("keyboard and mouse");
+            else if (d.kbd.active)
+                cprintf("keyboard");
+            else if (d.mouseActive)
+                cprintf("mouse");
+            else
+                cprintf("class %u (not used)", cast(uint)d.devClass);
+            cprintf("\n");
+        }
+    }
+    if (!any)
+        cprintf("No USB devices.\n");
+}
+
 
 // Does the controller we are working on drive anything we use?
 public bool xhciMouseRunning() @nogc nothrow

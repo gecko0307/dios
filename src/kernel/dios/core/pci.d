@@ -226,10 +226,8 @@ void pciCheckFunction(uint bus, uint device, uint func) @nogc nothrow
     xhciInit(regs);
     if (xhciKeyboardRunning())
         xhciFound = true;
-    if (xhciKeyboardRunning() || xhciMouseRunning() || xhciStorageRunning())
-        return;
-    kprintf("  nothing useful on this controller\n");
-    xhciShutdown();
+    // The controller stays up even when it has nothing useful on it right now: devices
+    // and hubs can be plugged in later (hot-plug, see xhciHotplugTick).
 }
 
 void pciScan() @nogc nothrow

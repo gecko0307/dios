@@ -257,6 +257,14 @@ void run() @nogc nothrow
     while (1)
     {
         usbPoll();
+        
+        // Devices plugged in or pulled out. Messages from that must not land in the
+        // middle of a half-typed command: the hook parks the input line first.
+        kprintfHook = &shellMessageBegin;
+        usbHotplugPoll();
+        if (kprintfHook is null)
+            shellMessageEnd(); // something was printed
+        kprintfHook = null;
 
         if (ps2State.irqMode)
             ps2Drain(); // decode what the IRQ handler queued

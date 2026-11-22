@@ -15,8 +15,10 @@ import core.volatile;
 
 import dios.core.blockdev;
 import dios.core.clock;
+import dios.core.fs;
 import dios.core.mem;
 import dios.core.stdio;
+import dios.core.sysfile;
 import dios.core.xhci;
 
 enum uint CBW_SIGNATURE = 0x43425355;      // "USBC"
@@ -28,6 +30,8 @@ struct UsbDisk
 {
     bool used;
     XhciUsbDevice* dev;
+    uint serial;                // XhciUsbDevice.serial: tells this device from a later one in the same slot
+    ubyte blk;                  // index into blockDevs
     ubyte controller;
     uint tag;
     uint sectorSize;
@@ -37,7 +41,7 @@ struct UsbDisk
 }
 
 __gshared UsbDisk[USB_MAX_DISKS] usbDisks;
-__gshared uint usbDiskCount;
+__gshared uint usbSeenGen;      // xhciTopologyGen at the last look for disks
 
 extern(C):
 
@@ -61,6 +65,12 @@ uint usbGetBe32(ubyte* p) @nogc nothrow
            (cast(uint)volatileLoad(p + 2) << 8) | volatileLoad(p + 3);
 }
 
+/// Is the device still plugged in (and the same one)?
+bool mscAlive(UsbDisk* u) @nogc nothrow
+{
+    return u.dev.present && u.dev.msc.active && u.dev.serial == u.serial;
+}
+
 // Bulk-Only Mass Storage Reset, then clear both endpoint halts (spec 5.3.4).
 void mscResetRecovery(UsbDisk* u) @nogc nothrow
 {
@@ -75,6 +85,8 @@ void mscResetRecovery(UsbDisk* u) @nogc nothrow
 /// Data goes through the device's bounce buffer; `got` receives the bytes moved.
 int mscCommand(UsbDisk* u, const(ubyte)* cdb, uint cdbLen, bool dataIn, uint dataLen, uint* got) @nogc nothrow
 {
+    if (!mscAlive(u))
+        return 2;                                   // unplugged: its memory is gone, do not touch it
     XhciUsbDevice* d = u.dev;
     xhciSelect(u.controller);
 
@@ -164,6 +176,8 @@ bool mscWaitReady(UsbDisk* u) @nogc nothrow
 {
     for (uint attempt = 0; attempt < 30; attempt++)
     {
+        if (!mscAlive(u))
+            return false;
         ubyte[6] cdb;
         uint got;
         int r = mscCommand(u, cdb.ptr, 6, false, 0, &got);
@@ -269,27 +283,57 @@ extern(C) bool usbDiskRead(void* ctx, ulong lba, uint count, void* dst) @nogc no
     return true;
 }
 
-/// Look at every storage device xhci.d brought up and register the new ones as
-/// block devices (with their partitions). Safe to call again.
+/// Forget the disks whose device was unplugged (and unmount the volume if it was on one).
+void usbStorageRemoveGone() @nogc nothrow
+{
+    for (uint i = 0; i < USB_MAX_DISKS; i++)
+    {
+        UsbDisk* u = &usbDisks[i];
+        if (!u.used || mscAlive(u))
+            continue;
+        BlockDev* b = &blockDevs[u.blk];
+        kprintf("%s: removed\n", b.name.ptr);
+        if (rootMount.mounted && partitions[rootMount.partition].dev == u.blk)
+        {
+            rootMount.mounted = false;
+            sysfileReset();                         // open files of a running program are dead now
+            kprintf("Unmounted /\n");
+        }
+        blockUnregister(b);
+        u.used = false;
+    }
+}
+
+/// Look at every storage device xhci.d brought up: forget the ones that are gone and
+/// register the new ones as block devices (with their partitions). Safe to call again.
 void usbStorageProbe() @nogc nothrow
 {
+    uint gen = xhciTopologyGen;
+    usbStorageRemoveGone();
+
     for (uint n = 0;; n++)
     {
         uint ctrl;
         XhciUsbDevice* d = xhciFindStorage(n, &ctrl);
         if (d is null)
-            return;
+            break;
 
         bool known = false;
-        for (uint i = 0; i < usbDiskCount; i++)
-            if (usbDisks[i].dev is d)
+        uint free = USB_MAX_DISKS;
+        for (uint i = 0; i < USB_MAX_DISKS; i++)
+        {
+            if (usbDisks[i].used && usbDisks[i].dev is d && usbDisks[i].serial == d.serial)
                 known = true;
-        if (known || usbDiskCount >= USB_MAX_DISKS)
+            if (!usbDisks[i].used && free == USB_MAX_DISKS)
+                free = i;
+        }
+        if (known || free == USB_MAX_DISKS)
             continue;
 
-        UsbDisk* u = &usbDisks[usbDiskCount];
+        UsbDisk* u = &usbDisks[free];
         *u = UsbDisk.init;
         u.dev = d;
+        u.serial = d.serial;
         u.controller = cast(ubyte)ctrl;
 
         char[48] model;
@@ -312,17 +356,32 @@ void usbStorageProbe() @nogc nothrow
 
         char[8] name;
         name[0] = 'u'; name[1] = 's'; name[2] = 'b';
-        name[3] = cast(char)('0' + usbDiskCount);
+        name[3] = cast(char)('0' + free);
         name[4] = 0;
 
-        u.used = true;
-        usbDiskCount++;
         BlockDev* b = blockRegister(name.ptr, model.ptr, u.sectors, u.sectorSize, &usbDiskRead, u);
         if (b is null)
             continue;
+        u.used = true;
+        u.blk = cast(ubyte)blockDevIndex(b);
 
         kprintf("%s: %s, %llu MiB, %u-byte sectors\n", b.name.ptr, b.model.ptr,
                 (u.sectors * u.sectorSize) >> 20, u.sectorSize);
         blockScanPartitions(b);
+    }
+    usbSeenGen = gen;
+}
+
+/// Hot-plug: look for devices that came or went, and when the set changed update the
+/// disks (mount a newly plugged stick if nothing is mounted). Called from the main loop and
+/// from blocking system calls; may take a moment and print messages when something happened.
+void usbHotplugPoll() @nogc nothrow
+{
+    xhciHotplugTick();
+    if (xhciTopologyGen != usbSeenGen)
+    {
+        usbStorageProbe();
+        if (!rootMount.mounted)
+            fsAutoMount();
     }
 }

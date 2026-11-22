@@ -44,17 +44,18 @@ import dios.core.pci;
 import dios.core.stdio;
 import dios.core.datetime;
 import dios.core.usbstor;
+import dios.core.xhci;
 
 /// Fixed-size input and history storage: the kernel shell must not allocate.
 enum size_t SHELL_LINE_CAPACITY = 128;
 enum size_t SHELL_HISTORY_CAPACITY = 16;
 
-immutable string[30] SHELL_COMMANDS = [
+immutable string[31] SHELL_COMMANDS = [
     "help", "about", "mem", "time", "uptime", "clock",
     "irq", "pci", "history", "echo", "poweroff",
     "reboot", "clear", "cpuinfo", "acpi", "irqstat",
     "sleep", "hexdump", "crash", "version", "ls", "run", "memmap",
-    "programs", "disk", "mount", "cd", "pwd", "cat", "dmesg"
+    "programs", "disk", "mount", "cd", "pwd", "cat", "dmesg", "usb"
 ];
 
 __gshared char[SHELL_LINE_CAPACITY] shellLine;
@@ -361,19 +362,21 @@ void shellDisk() @nogc nothrow
 {
     if (blockDevCount == 0)
     {
-        cprintf("No disks. Only USB mass storage is supported, and the stick has to be plugged in at boot.\n");
+        cprintf("No disks. Only USB mass storage is supported; plug a stick in (see 'usb').\n");
         return;
     }
     for (uint d = 0; d < blockDevCount; d++)
     {
         BlockDev* b = &blockDevs[d];
+        if (!b.present)
+            continue;
         cprintf("%s: %s, %llu MiB, %u-byte sectors\n", b.name.ptr, b.model.ptr,
                 (b.sectors * b.sectorSize) >> 20, b.sectorSize);
         uint shown = 0;
         for (uint i = 0; i < partitionCount; i++)
         {
             Partition* p = &partitions[i];
-            if (p.dev != d)
+            if (!p.valid || p.dev != d)
                 continue;
             cprintf("  [%u] partition %u: start %llu, %llu MiB, %s%s\n", i, cast(uint)p.number,
                     p.startLba, (p.sectors * b.sectorSize) >> 20, p.kind.ptr,
@@ -581,6 +584,7 @@ void shellExecute() @nogc nothrow
         cprintf("  sleep SECONDS    Wait (Ctrl+C aborts)\n");
         cprintf("  programs         List programs on the boot media\n");
         cprintf("  dmesg [N [SKIP]] Kernel log (last N lines, SKIP lines before the end)\n");
+        cprintf("  usb              List the USB devices (hubs, keyboards, disks...)\n");
         cprintf("  disk             Show USB disks and partitions\n");
         cprintf("  mount [N]        Mount an exFAT or FAT32 partition as /\n");
         cprintf("  ls [PATH]        List a directory on the mounted volume\n");
@@ -752,6 +756,10 @@ void shellExecute() @nogc nothrow
     else if (shellEquals(shellLine.ptr, "ls"))
     {
         shellLs(args);
+    }
+    else if (shellEquals(shellLine.ptr, "usb"))
+    {
+        xhciPrintTree();
     }
     else if (shellEquals(shellLine.ptr, "dmesg"))
     {
@@ -1066,6 +1074,26 @@ void shellHistoryDown() @nogc nothrow
         shellReplaceLine(shellDraft.ptr);
     else
         shellReplaceLine(shellHistoryEntry(cast(size_t)shellHistPos));
+}
+
+// Kernel messages that arrive while the user is typing (USB hot-plug): move below
+// the input line first, and afterwards bring the prompt and the line back.
+__gshared size_t shellSavedCursor;
+
+void shellMessageBegin() @nogc nothrow
+{
+    shellSavedCursor = shellCursor;
+    shellCursorEnd();
+    if (console.print_x != 0)
+        consoleNewline();
+}
+
+void shellMessageEnd() @nogc nothrow
+{
+    shellPrompt();
+    shellPrintTail(0);
+    shellMoveLeftN(shellLineLength - shellSavedCursor);
+    shellCursor = shellSavedCursor;
 }
 
 // Ctrl+L: wipe the screen, redraw prompt and the current input.

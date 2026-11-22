@@ -62,6 +62,7 @@ import dios.core.ps2;
 import dios.core.fs;
 import dios.core.stdio;
 import dios.core.sysfile;
+import dios.core.usbstor;
 import dios.core.vmem;
 import dios.core.heap;
 import dios.core.xhci;
@@ -683,6 +684,7 @@ long sysGetKey(bool block) @nogc nothrow
     for (;;)
     {
         procInputPoll();
+        usbHotplugPoll();
         KeyEvent ev;
         while (keyPopEvent(&ev))
         {
@@ -705,6 +707,7 @@ long sysSleep(ulong ms) @nogc nothrow
     while (clockNowNs() < deadline)
     {
         procInputPoll();
+        usbHotplugPoll();
         KeyEvent ev;
         while (keyPopEvent(&ev))
             if (ev.ctrl && keyEventChar(&ev) == 3)
