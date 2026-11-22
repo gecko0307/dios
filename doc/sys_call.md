@@ -1,6 +1,6 @@
 # System Call
 
-The system call is a DIOS kernel function usable from applications. System calls are made with a single entry, `sys_call`, for all the functions.
+The system call is a DIOS kernel function call that can be made from applications. System calls are made with a single entry, `sys_call`, for all the functions.
 
 ## Specification
 
@@ -23,7 +23,9 @@ Supported function numbers:
 - `SYS_STAT` (10) - retrieves file stats. `a0` is the file descriptor, `a1` is the pointer to an output `UStat` structure. Returns 0 on success, -1 if the path does not exist
 - `SYS_READDIR` (11) - retrieves the next entry of an opened directory. `a0` is the directory descriptor, `a1` is the pointer to an output `UDirent` structure. Returns 1 if filled in, 0 if there are no more entries, -1 on error
 - `SYS_GETCWD` (12) - writes current working directory into a provided character buffer. `a0` is the pointer, `a1` is the buffer length. Returns CWD length or -1 on error
-- `SYS_BRK` (13) - 
+- `SYS_BRK` (13) - moves the program break. Moving it upward increases the amount of available heap memory (allocation), moving it downward decreases it (deallocation)
+- `SYS_YIELD` (14) - let other programs run now
+- `SYS_GETPID` (15) - task ID of this program.
 
 ## Data Types
 

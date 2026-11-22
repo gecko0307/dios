@@ -441,9 +441,7 @@ private void splitBlock(Block* block, size_t size) @nogc nothrow
     if (remaining < HEADER_SIZE + ALIGNMENT)
         return;
 
-    Block* next = cast(Block*)(
-        cast(ubyte*)(block + 1) + size
-    );
+    Block* next = cast(Block*)(cast(ubyte*)(block + 1) + size);
 
     next.size = remaining - HEADER_SIZE;
     next.prev = block;
