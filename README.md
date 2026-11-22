@@ -83,6 +83,8 @@ Programs are also written in D (in fact, they can be written in any language tha
   - `src/kernel/dios/bootloader` - boot protocol; currently only Limine protocol is implemented. Multiboot support was dropped
   - `src/kernel/dios/core` - kernel modules, including core drivers necessary to run the main I/O loop
   - `src/kernel/main.d` - the kernel entry point
+- `src/lib` contains the ulib runtime library code:
+  - `src/lib/dios` - implements basic functionality on top of DIOS syscalls
 - `userspace` contains sample userspace programs:
   - `userspace/hello`
   - `userspace/file`

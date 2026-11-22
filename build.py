@@ -5,7 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).parent.resolve()
 
-SRC_KERNEL = ROOT / "src"
+SRC_KERNEL = ROOT / "src" / "kernel"
 OBJ = ROOT / "o-elf-x86_64"
 OBJ_KERNEL = OBJ / "kernel"
 CDROOT = ROOT / "cdroot"
@@ -40,7 +40,7 @@ D_FLAGS_KERNEL = [
     "--fno-exceptions",
     "--nogc",
     "-O0",
-    "-I=src",
+    "-I=src/kernel",
     "-code-model=medium",
 ]
 
