@@ -1,6 +1,6 @@
 {
     "name": "file",
-    "description": "Simple DIOS application",
+    "description": "Application that prints a text file",
     "homepage": "",
     "license": "Unlicense",
     "authors": [

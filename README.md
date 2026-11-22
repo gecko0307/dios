@@ -71,11 +71,9 @@ After successful initialization, the kernel immediately starts an interactive sh
 Simple examples of what can be done in DIOS userspace.
 
 - `hello.elf` - "Hello, World!" program that prints its arguments
-- `count.elf` - counts once a second. Ctrl+C stops it (the kernel handles that)
-- `rev.elf` - reads lines and prints them reversed. An empty line ends the program
-- `fault.elf` - deliberately crashes by dereferencing a null pointer. The kernel reports it and keeps running
+- `file.elf FILE [OFFSET]`  - print a text file, optionally starting at a byte offset.
 - `dir.elf [PATH]` - lists a directory
-- `show.elf FILE [OFFSET]`  - print a text file, optionally starting at a byte offset.
+- `memtest.elf` - dynamic memory allocation test.
 
 Programs are also written in D (in fact, they can be written in any language that outputs ELF64). When running on a real hardware, they are meant to be copied to USB stick alongside with the DIOS kernel. When testing in QEMU, it is recommended to make a separate USB stick using fstool (`makestick.bat`) and run the VM via `run_usbstick.bat`.
 
@@ -85,13 +83,11 @@ Programs are also written in D (in fact, they can be written in any language tha
   - `src/kernel/dios/bootloader` - boot protocol; currently only Limine protocol is implemented. Multiboot support was dropped
   - `src/kernel/dios/core` - kernel modules, including core drivers necessary to run the main I/O loop
   - `src/kernel/main.d` - the kernel entry point
-- `src/user` contains sample userspace programs:
-  - `src/user/count.d`
-  - `src/user/dir.d`
-  - `src/user/fault.d`
-  - `src/user/hello.d`
-  - `src/user/rev.d`
-  - `src/user/show.d`
+- `userspace` contains sample userspace programs:
+  - `userspace/hello`
+  - `userspace/file`
+  - `userspace/dir`
+  - `userspace/memtest`
 
 ## Building
 
