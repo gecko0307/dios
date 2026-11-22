@@ -76,8 +76,10 @@ enum int KEY_DELETE = 0x107;
 
 extern(C):
 
+/// Calls a kernel function.
 long sys_call(ulong nr, ulong a0, ulong a1, ulong a2) @nogc nothrow;
 
+///
 void* memset(void* dst, int c, size_t n) @nogc nothrow
 {
     ubyte* p = cast(ubyte*)dst;
@@ -86,6 +88,7 @@ void* memset(void* dst, int c, size_t n) @nogc nothrow
     return dst;
 }
 
+///
 void* memcpy(void* dst, const(void)* src, size_t n) @nogc nothrow
 {
     ubyte* d = cast(ubyte*)dst;
@@ -95,6 +98,7 @@ void* memcpy(void* dst, const(void)* src, size_t n) @nogc nothrow
     return dst;
 }
 
+///
 void* memmove(void* dst, const(void)* src, size_t n) @nogc nothrow
 {
     ubyte* d = cast(ubyte*)dst;
@@ -112,11 +116,13 @@ void* memmove(void* dst, const(void)* src, size_t n) @nogc nothrow
     return dst;
 }
 
+/// Terminates the application.
 void uexit(long code) @nogc nothrow
 {
     sys_call(SYS_EXIT, cast(ulong)code, 0, 0);
 }
 
+///
 size_t ustrlen(const(char)* s) @nogc nothrow
 {
     size_t n = 0;
@@ -125,21 +131,25 @@ size_t ustrlen(const(char)* s) @nogc nothrow
     return n;
 }
 
+/// Writes to the standard output (the kernel shell, if running in text mode).
 void uwrite(const(char)* s, size_t n) @nogc nothrow
 {
     sys_call(SYS_WRITE, cast(ulong)s, n, 0);
 }
 
+/// Writes a zero-terminated string to the standard output.
 void uputs(const(char)* s) @nogc nothrow
 {
     uwrite(s, ustrlen(s));
 }
 
+/// Writes a character to the standard output.
 void uputc(char c) @nogc nothrow
 {
     uwrite(&c, 1);
 }
 
+/// Writes an unsigned integer to the standard output.
 void uputu(ulong v) @nogc nothrow
 {
     char[20] d;
@@ -153,6 +163,7 @@ void uputu(ulong v) @nogc nothrow
     uwrite(d.ptr + k, 20 - k);
 }
 
+/// Writes an unsigned integer in hexadecimal format to the standard output.
 void uputhex(ulong v) @nogc nothrow
 {
     char[16] d;
@@ -172,16 +183,19 @@ int ugetkey(bool block) @nogc nothrow
     return cast(int)sys_call(SYS_GETKEY, block ? 1 : 0, 0, 0);
 }
 
+/// Stops execution for a given time in milliseconds.
 void usleep(ulong ms) @nogc nothrow
 {
     sys_call(SYS_SLEEP, ms, 0, 0);
 }
 
+/// Returns the number of millisecond ticks since the system start.
 ulong uticks() @nogc nothrow
 {
     return cast(ulong)sys_call(SYS_TICKS, 0, 0, 0);
 }
 
+/// Clears the standard ouput (the kernel shell, if running in text mode).
 void uclear() @nogc nothrow
 {
     sys_call(SYS_CLEAR, 0, 0, 0);
@@ -190,49 +204,52 @@ void uclear() @nogc nothrow
 // Files (read-only). Paths are relative to the shell's current directory or absolute.
 // At most 8 files can be open at once; they are closed when the program ends.
 
-/// File descriptor of a file or directory, or -1.
+/// Returns the file descriptor of a file or directory, or -1 if it doesn't exist.
 int uopen(const(char)* path) @nogc nothrow
 {
     return cast(int)sys_call(SYS_OPEN, cast(ulong)path, 0, 0);
 }
 
-/// Bytes read (0 = end of file), or -1.
+/// Reads bytes from the file at the current offset. Returns the number of bytes read (0 = end of file), or -1 on error.
 long uread(int fd, void* buf, size_t n) @nogc nothrow
 {
     return sys_call(SYS_READ, cast(ulong)fd, cast(ulong)buf, n);
 }
 
+/// Closes the file.
 int uclose(int fd) @nogc nothrow
 {
     return cast(int)sys_call(SYS_CLOSE, cast(ulong)fd, 0, 0);
 }
 
-/// New position, or -1.
+/// Jumps to a byte offset in the file. Returns a new position, or -1 on error.
 long useek(int fd, long offset, int whence) @nogc nothrow
 {
     return sys_call(SYS_SEEK, cast(ulong)fd, cast(ulong)offset, cast(ulong)whence);
 }
 
-/// 0 on success, -1 if the path does not exist.
+/// Retrieves file stats. Returns 0 on success, -1 if the path does not exist.
 int ustat(const(char)* path, UStat* st) @nogc nothrow
 {
     return cast(int)sys_call(SYS_STAT, cast(ulong)path, cast(ulong)st, 0);
 }
 
-/// Next entry of a directory opened with uopen(): 1 = filled in, 0 = no more, -1 = error.
+/// Fills the next entry of a directory opened with uopen(). Returns 1 if filled in, 0 if there are no more entries, -1 on error.
 int ureaddir(int fd, UDirent* e) @nogc nothrow
 {
     return cast(int)sys_call(SYS_READDIR, cast(ulong)fd, cast(ulong)e, 0);
 }
 
-/// Current directory into buf; returns its length or -1.
+/// Writes the current working directory into a provided character buffer. Returns CWD length or -1 on error.
 long ugetcwd(char* buf, size_t n) @nogc nothrow
 {
     return sys_call(SYS_GETCWD, cast(ulong)buf, n, 0);
 }
 
-/// Query or change the current process' heap break.
-/// Returns the current/new break, or null on failure.
+/**
+ * Query or change the current process' heap break.
+ * Returns the current/new break, or null on failure.
+ */
 void* ubrk(void* newBreak) @nogc nothrow
 {
     long result = sys_call(SYS_BRK, cast(ulong)newBreak, 0, 0);

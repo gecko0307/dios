@@ -13,8 +13,8 @@ Supported function numbers:
 - `SYS_EXIT` (0) - terminates the application. Return code is passed via `a0`
 - `SYS_WRITE` (1) - writes to the standard output (the kernel shell, if running in text mode). `a0` is the start pointer, `a1` is the number of characters to write
 - `SYS_GETKEY` (2) - returns currently pressed ASCII key code. If `a0` is 0, immediately returns -1 if no key is pressed, otherwise waits until a key is pressed
-- `SYS_SLEEP` (3) - sleeps for a given time in milliseconds (`a0`)
-- `SYS_TICKS` (4) - returns the number of ticks since the system start
+- `SYS_SLEEP` (3) - stops execution for a given time in milliseconds (`a0`)
+- `SYS_TICKS` (4) - returns the number of millisecond ticks since the system start
 - `SYS_CLEAR` (5) - clears the standard ouput (the kernel shell, if running in text mode)
 - `SYS_OPEN` (6) - opens a file/directory. `a0` is the path. Returns a descriptor on success, or -1 on error
 - `SYS_READ` (7) - reads bytes from the file at the current offset. `a0` is the file descriptor, `a1` is the destination buffer, `a2` is the number of bytes to read. Returns number of bytes actually read (0 = end of file), or -1 on error
