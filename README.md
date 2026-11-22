@@ -36,40 +36,7 @@ DIOS is now 64-bit only, x86 support was dropped.
 
 ## Kernel Shell Commands
 
-After successful initialization, the kernel immediately starts an interactive shell session.
-
-- `help` - show the command list
-- `about` - kernel version information
-- `cpuinfo` - CPU identification and features
-- `mem` - physical memory statistics
-- `memmap` - show the memory map
-- `time` - print current date and time
-- `uptime` - time since boot
-- `clock` - clock source and timer status
-- `irq` - interrupt controller status
-- `irqstat` - interrupt counts per vector
-- `pci` - enumerate PCI functions
-- `hexdump [-p] ADDR [LEN]` - dump memory (-p: physical address)
-- `history` - show recent commands
-- `echo TEXT` - print TEXT
-- `sleep SECONDS` - wait (Ctrl+C aborts)
-- `programs` - list program modules provided by the bootloader
-- `dmesg [N [SKIP]]` - kernel log (last N lines, SKIP lines before the end)
-- `usb` - list USB devices (hubs, keyboards, removable disks...)
-- `disk` - show USB disks and partitions
-- `mount [N]` - mount an exFAT partition N as `/`
-- `ls [PATH]` - list a directory on the mounted volume
-- `cd [DIR]` - change the current directory
-- `pwd` - show the current directory
-- `cat FILE` - print a text file
-- `run NAME [ARGS] [&]` - run a boot program or an ELF executable from the disk (& = run in background)
-- `ps` - list running programs
-- `kill ID` - stop a program
-- `fg [ID]` - bring a background program to the foreground
-- `clear` - clear the screen
-- `crash pf|ud|div|gp` - trigger a CPU exception (kernel halts)
-- `reboot` - restart the computer
-- `poweroff` - shut down the computer.
+After successful initialization, the kernel immediately starts an interactive shell session. Available commands are listed [here](doc/commands.md);
 
 ## Programs
 
@@ -92,7 +59,7 @@ DIOS project consists of a several structural layers, each with its own workflow
   - `src/kernel/dios/core` - kernel modules, including core drivers necessary to run the main I/O loop
   - `src/kernel/main.d` - the kernel entry point
 - `src/ulib` contains the **ulib** runtime library code:
-  - `src/ulib/ulib/dios` - implements basic libc-like functionality on top of DIOS syscalls
+  - `src/ulib/ulib/dios` - implements basic libc-like functionality on top of [DIOS syscalls](doc/sys_call.md)
   - `src/ulib/umain.d` - runtime entry point. Allocates an arguments array and calls compiler-generated `_Dmain`
 - `src/user` contains sample userspace programs:
   - `src/user/hello`
