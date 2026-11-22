@@ -53,6 +53,7 @@ import dios.core.xhci;
 import dios.core.usbstor;
 import dios.core.fs;
 import dios.core.datetime;
+import dios.core.heap;
 import dios.bootloader.limine;
 
 struct BootInfo
@@ -242,16 +243,14 @@ void run() @nogc nothrow
         frontBuffer.width, frontBuffer.height, frontBuffer.bytesPerPixel * 8, cast(ulong)frontBuffer.ptr);
     kprintf("PS/2: %s\n", !havePs2 ? "absent".ptr : (ps2State.irqMode ? "present, interrupt driven".ptr : "present, polled".ptr));
     interruptsPrintStatus();
-
-    // Enumerate PCI; this also brings up the xHCI controller(s) and any USB mouse
-    pciScan();
+    
+    pciScan(); // this also brings up the xHCI controller(s)
     usbStorageProbe();
     fsAutoMount();
     procInit();
     shellInit();
 
     enum ulong BLINK_MS = 100;
-
     ulong nextBlink = nowMs() + BLINK_MS;
 
     while (1)

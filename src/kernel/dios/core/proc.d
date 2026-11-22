@@ -63,6 +63,7 @@ import dios.core.fs;
 import dios.core.stdio;
 import dios.core.sysfile;
 import dios.core.vmem;
+import dios.core.heap;
 import dios.core.xhci;
 
 enum ulong USER_IMAGE_MIN = 0x400000;
@@ -87,6 +88,8 @@ enum ulong SYS_SEEK = 9;
 enum ulong SYS_STAT = 10;
 enum ulong SYS_READDIR = 11;
 enum ulong SYS_GETCWD = 12;
+enum ulong SYS_MALLOC = 13;
+enum ulong SYS_FREE = 14;
 
 enum uint MSR_EFER = 0xC0000080;
 enum uint MSR_STAR = 0xC0000081;
@@ -749,6 +752,11 @@ long syscallDispatch(ulong nr, ulong a0, ulong a1, ulong a2) @nogc nothrow
             return sysReaddir(a0, a1);
         case SYS_GETCWD:
             return sysGetCwd(a0, a1);
+        // TODO:
+        //case SYS_MALLOC:
+        //    return sysMalloc(a0);
+        //case SYS_FREE:
+        //    return sysFree(a0);
         default:
             return -1;
     }
