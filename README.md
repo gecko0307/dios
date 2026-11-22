@@ -96,6 +96,10 @@ DIOS project consists of a several structural layers, each with its own workflow
   - `src/user/dir`
   - `src/user/memtest`
 
+## ulib
+
+ulib stands for "unfinished library" (because, again, it is a hobby project that will likely never be finished). It is a simple runtime library for DIOS applications written in D.
+
 ## "Hello, World" application in D
 
 ```d
@@ -106,10 +110,6 @@ void main(string[] args)
     uputs("Hello, World!\n");
 }
 ```
-
-## ulib
-
-ulib stands for "unfinished library" (because, again, it is a hobby project that will likely never be finished). It is a simple runtime library for DIOS applications written in D.
 
 ## Building
 
