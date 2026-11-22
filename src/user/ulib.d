@@ -25,8 +25,9 @@ For more information, please refer to <https://unlicense.org>
 */
 module ulib;
 
-// Everything a DIOS user program needs: system call wrappers, a few printing
-// helpers and the memory functions the compiler may call.
+/**
+ * DIOS system library.
+ */
 
 enum ulong SYS_EXIT = 0;
 enum ulong SYS_WRITE = 1;
@@ -51,7 +52,7 @@ enum int SEEK_END = 2;
 struct UStat
 {
     ulong size;
-    uint mtime;                 // DOS timestamp: (year-1980)<<25 | month<<21 | day<<16 | hour<<11 | min<<5 | sec/2
+    uint mtime; // DOS timestamp: (year-1980)<<25 | month<<21 | day<<16 | hour<<11 | min<<5 | sec/2
     uint isDir;
 }
 
