@@ -75,6 +75,9 @@ enum ulong USER_ARGS_MAX = 256;
 enum uint PROC_MAX_PROGRAMS = 16;
 enum uint PROC_NAME_MAX = 32;
 
+enum ulong USER_HEAP_BASE  = USER_IMAGE_MAX;
+enum ulong USER_HEAP_LIMIT = USER_STACK_TOP - USER_STACK_PAGES * 4096;
+
 enum ulong SYS_EXIT = 0;
 enum ulong SYS_WRITE = 1;
 enum ulong SYS_GETKEY = 2;
@@ -88,8 +91,7 @@ enum ulong SYS_SEEK = 9;
 enum ulong SYS_STAT = 10;
 enum ulong SYS_READDIR = 11;
 enum ulong SYS_GETCWD = 12;
-enum ulong SYS_MALLOC = 13;
-enum ulong SYS_FREE = 14;
+enum ulong SYS_BRK = 13;
 
 enum uint MSR_EFER = 0xC0000080;
 enum uint MSR_STAR = 0xC0000081;
@@ -142,7 +144,8 @@ struct Process
     ulong entry;
     ulong stackPointer;
     ulong argsAddr;
-    char[PROC_NAME_MAX] name;   // for crash messages
+    ulong heapBreak;
+    char[PROC_NAME_MAX] name; // for crash messages
 }
 
 __gshared Program[PROC_MAX_PROGRAMS] programs;
@@ -309,6 +312,89 @@ ubyte* procMapPage(ulong pml4Phys, ulong vaddr, bool writable) @nogc nothrow
     return page;
 }
 
+// Unmap one user page and return its physical page to PMM.
+bool procUnmapUserPage(ulong vaddr) @nogc nothrow
+{
+    ulong* pte = procPte(proc.pml4Phys, vaddr, false);
+    if (pte is null || !(*pte & PTE_PRESENT))
+        return false;
+
+    ulong phys = *pte & PTE_ADDR_MASK;
+
+    *pte = 0;
+    vmemInvalidatePage(vaddr);
+
+    return pmmFreePage(phys);
+}
+
+// Change the current process' heap break.
+// requested == 0: query current break.
+// Returns the new/current break, or -1 on failure.
+long procSetBreak(ulong requested) @nogc nothrow
+{
+    if (!proc.active || proc.pml4Phys == 0)
+        return -1;
+
+    if (requested == 0)
+        return cast(long)proc.heapBreak;
+
+    if (requested < USER_HEAP_BASE || requested > USER_HEAP_LIMIT)
+        return -1;
+
+    ulong oldBreak = proc.heapBreak;
+    ulong oldEnd = (oldBreak + 4095) & ~4095UL;
+    ulong newEnd = (requested + 4095) & ~4095UL;
+
+    // Expand heap.
+    if (newEnd > oldEnd)
+    {
+        ulong va = oldEnd;
+
+        while (va < newEnd)
+        {
+            // Do not overwrite an existing mapping.
+            ulong* pte = procPte(proc.pml4Phys, va, false);
+            if (pte !is null && (*pte & PTE_PRESENT))
+                goto rollback;
+
+            if (procMapPage(proc.pml4Phys, va, true) is null)
+                goto rollback;
+
+            va += 4096;
+        }
+
+        proc.heapBreak = requested;
+        return cast(long)requested;
+
+    rollback:
+        // Roll back every page mapped during this expansion.
+        for (ulong undo = oldEnd; undo < va; undo += 4096)
+            procUnmapUserPage(undo);
+
+        return -1;
+    }
+
+    // Shrink heap. First validate all pages that are about to be released.
+    if (newEnd < oldEnd)
+    {
+        for (ulong va = newEnd; va < oldEnd; va += 4096)
+        {
+            ulong* pte = procPte(proc.pml4Phys, va, false);
+            if (pte is null || !(*pte & PTE_PRESENT) || !(*pte & PTE_USER))
+                return -1;
+        }
+
+        for (ulong va = newEnd; va < oldEnd; va += 4096)
+        {
+            if (!procUnmapUserPage(va))
+                return -1;
+        }
+    }
+
+    proc.heapBreak = requested;
+    return cast(long)requested;
+}
+
 bool procLoadElf(Program* prog, ulong pml4Phys, ulong* entry) @nogc nothrow
 {
     if (prog.size < Elf64Ehdr.sizeof)
@@ -398,6 +484,7 @@ bool procBuildSpace(Program* prog, const(char)* args) @nogc nothrow
     memcpy(pml4, cast(void*)vmemPhysToVirt(PML4_PHYS), 4096);
     (cast(ulong*)pml4)[0] = 0;
     proc.pml4Phys = pml4Phys;
+    proc.heapBreak = USER_HEAP_BASE;
 
     if (!procLoadElf(prog, pml4Phys, &proc.entry))
         return false;
@@ -752,11 +839,8 @@ long syscallDispatch(ulong nr, ulong a0, ulong a1, ulong a2) @nogc nothrow
             return sysReaddir(a0, a1);
         case SYS_GETCWD:
             return sysGetCwd(a0, a1);
-        // TODO:
-        //case SYS_MALLOC:
-        //    return sysMalloc(a0);
-        //case SYS_FREE:
-        //    return sysFree(a0);
+        case SYS_BRK:
+            return procSetBreak(a0);
         default:
             return -1;
     }

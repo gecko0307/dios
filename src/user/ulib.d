@@ -42,6 +42,7 @@ enum ulong SYS_SEEK = 9;
 enum ulong SYS_STAT = 10;
 enum ulong SYS_READDIR = 11;
 enum ulong SYS_GETCWD = 12;
+enum ulong SYS_BRK = 13;
 
 // useek() origins
 enum int SEEK_SET = 0;
@@ -228,4 +229,12 @@ int ureaddir(int fd, UDirent* e) @nogc nothrow
 long ugetcwd(char* buf, size_t n) @nogc nothrow
 {
     return sys_call(SYS_GETCWD, cast(ulong)buf, n, 0);
+}
+
+/// Query or change the current process' heap break.
+/// Returns the current/new break, or null on failure.
+void* ubrk(void* newBreak) @nogc nothrow
+{
+    long result = sys_call(SYS_BRK, cast(ulong)newBreak, 0, 0);
+    return result < 0 ? null : cast(void*)result;
 }
