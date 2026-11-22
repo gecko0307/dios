@@ -105,7 +105,7 @@ extern(C) int umain(const(char)* args) @nogc nothrow
 }
 ```
 
-Note that the entry point is `umain`, not `main`, because of the current incompatibility with C arguments passing convention.
+Note that the entry point is `umain`, not `main`, because of the current incompatibility with C arguments passing convention. A compatibility layer for `main` will be added in the nearest future.
 
 ## Building
 
