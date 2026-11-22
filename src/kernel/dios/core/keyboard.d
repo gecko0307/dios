@@ -246,6 +246,12 @@ bool keyQueueHasCtrlC() @nogc nothrow
     return false;
 }
 
+/// Is any key press waiting?
+bool keyQueueHasKey() @nogc nothrow
+{
+    return keyQueue.tail != keyQueue.head;
+}
+
 /// Throw away everything that is queued.
 void keyQueueClear() @nogc nothrow
 {

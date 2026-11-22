@@ -50,12 +50,13 @@ import dios.core.xhci;
 enum size_t SHELL_LINE_CAPACITY = 128;
 enum size_t SHELL_HISTORY_CAPACITY = 16;
 
-immutable string[31] SHELL_COMMANDS = [
+immutable string[34] SHELL_COMMANDS = [
     "help", "about", "mem", "time", "uptime", "clock",
     "irq", "pci", "history", "echo", "poweroff",
     "reboot", "clear", "cpuinfo", "acpi", "irqstat",
     "sleep", "hexdump", "crash", "version", "ls", "run", "memmap",
-    "programs", "disk", "mount", "cd", "pwd", "cat", "dmesg", "usb"
+    "programs", "disk", "mount", "cd", "pwd", "cat", "dmesg", "usb",
+    "ps", "kill", "fg"
 ];
 
 __gshared char[SHELL_LINE_CAPACITY] shellLine;
@@ -181,18 +182,64 @@ void shellShowPci() @nogc nothrow
 }
 
 // Start program `index` and report how it ended.
-void shellRunProgram(uint index, const(char)* args) @nogc nothrow
+void shellRunProgram(uint index, const(char)* args, bool background) @nogc nothrow
 {
-    long code = 0;
-    if (!procLaunch(index, args, &code))
-    {
+    uint id = procLaunch(index, args, !background);
+    if (id == 0)
         cprintf("Could not start '%s'.\n", programs[index].name.ptr);
+    else if (background)
+        cprintf("[%u] %s\n", id, programs[index].name.ptr);
+}
+
+// A trailing "&" means: run in the background. Removes it from the argument string.
+bool shellTakeAmp(const(char)* args) @nogc nothrow
+{
+    char* s = cast(char*)args;
+    size_t n = 0;
+    while (s[n] != 0)
+        n++;
+    while (n > 0 && (s[n - 1] == ' ' || s[n - 1] == '\t'))
+        n--;
+    if (n == 0 || s[n - 1] != '&')
+        return false;
+    n--;
+    while (n > 0 && (s[n - 1] == ' ' || s[n - 1] == '\t'))
+        n--;
+    s[n] = 0;
+    return true;
+}
+
+// Called (from procPoll) for every task that ended.
+extern(C) void shellTaskExited(uint id, const(char)* name, long code, bool wasForeground) @nogc nothrow
+{
+    if (wasForeground)
+    {
+        keyQueueClear();
+        if (console.print_x != 0)
+            consoleNewline();                   // the program's last line had no newline
+        if (code != 0)
+            cprintf("[%s exited with code %llu]\n", name, cast(ulong)code);
+        shellPrompt();
         return;
     }
+    bool park = !procHasForeground();
+    if (park)
+        shellMessageBegin();
+    cprintf("[%u] %s exited with code %llu\n", id, name, cast(ulong)code);
+    if (park)
+        shellMessageEnd();
+}
+
+extern(C) void shellBgOutBegin() @nogc nothrow
+{
+    shellMessageBegin();
+}
+
+extern(C) void shellBgOutEnd() @nogc nothrow
+{
     if (console.print_x != 0)
-        consoleNewline(); // the program's last line had no newline
-    if (code != 0)
-        cprintf("[%s exited with code %llu]\n", programs[index].name.ptr, cast(ulong)code);
+        consoleNewline();
+    shellMessageEnd();
 }
 
 void shellListPrograms() @nogc nothrow
@@ -409,7 +456,7 @@ void shellMount(const(char)* args) @nogc nothrow
 }
 
 // Run an ELF file from the mounted volume. Tries `path`, then `path.elf`.
-void shellRunFile(const(char)* path, const(char)* args) @nogc nothrow
+void shellRunFile(const(char)* path, const(char)* args, bool background) @nogc nothrow
 {
     ExfatEntry e;
     char[FS_PATH_MAX + 8] withExt;
@@ -474,18 +521,11 @@ void shellRunFile(const(char)* path, const(char)* args) @nogc nothrow
     {
         char[PROC_NAME_MAX] name;
         procMakeName(path, name.ptr);
-        long code = 0;
-        if (!procLaunchImage(name.ptr, image, e.size, args, &code))
-        {
+        uint id = procLaunchImage(name.ptr, image, e.size, args, !background);
+        if (id == 0)
             cprintf("Could not start '%s'.\n", name.ptr);
-        }
-        else
-        {
-            if (console.print_x != 0)
-                consoleNewline();
-            if (code != 0)
-                cprintf("[%s exited with code %llu]\n", name.ptr, cast(ulong)code);
-        }
+        else if (background)
+            cprintf("[%u] %s\n", id, name.ptr);
     }
     pmmFreePages(phys, pages);
 }
@@ -591,7 +631,10 @@ void shellExecute() @nogc nothrow
         cprintf("  cat FILE         Print a text file\n");
         cprintf("  cd [DIR], pwd    Change the current directory\n");
         cprintf("  pwd              Show the current directory\n");
-        cprintf("  run NAME [ARGS]  Run a boot program or an ELF from the disk\n");
+        cprintf("  run NAME [ARGS] [&]  Run a boot program or an ELF from the disk (& = background)\n");
+        cprintf("  ps               List running programs\n");
+        cprintf("  kill ID          Kill a program\n");
+        cprintf("  fg [ID]          Bring a background program to the foreground\n");
         cprintf("  clear            Clear the screen\n");
         cprintf("  crash pf|ud|div|gp  Trigger a CPU exception (kernel halts)\n");
         cprintf("  reboot           Restart the computer\n");
@@ -803,15 +846,16 @@ void shellExecute() @nogc nothrow
         while (*p == ' ' || *p == '\t')
             p++;
 
+        bool bg = shellTakeAmp(p);
         if (n == 0)
-            cprintf("Usage: run NAME [ARGS]  (see 'programs')\n");
+            cprintf("Usage: run NAME [ARGS] [&]  (see 'programs')\n");
         else
         {
             int index = procFind(name.ptr);
             if (index >= 0)
-                shellRunProgram(cast(uint)index, p);
+                shellRunProgram(cast(uint)index, p, bg);
             else if (rootMount.mounted)
-                shellRunFile(name.ptr, p);          // a path on the mounted volume
+                shellRunFile(name.ptr, p, bg);          // a path on the mounted volume
             else
                 cprintf("No such program: %s\n", name.ptr);
         }
@@ -822,16 +866,41 @@ void shellExecute() @nogc nothrow
         if (!acpiPoweroff())
             cprintf("ACPI shutdown is unavailable (missing FADT/DSDT _S5_ or PM1a control block).\n");
     }
+    else if (shellEquals(shellLine.ptr, "ps"))
+    {
+        procPrintTasks();
+    }
+    else if (shellEquals(shellLine.ptr, "kill"))
+    {
+        ulong id;
+        if (diagParseNumber(args, &id) is null || id == 0)
+            cprintf("Usage: kill ID   (ids in 'ps')\n");
+        else if (!procKillId(cast(uint)id))
+            cprintf("No such task: %llu\n", id);
+    }
+    else if (shellEquals(shellLine.ptr, "fg"))
+    {
+        ulong id = 0;
+        if (*args != 0 && diagParseNumber(args, &id) is null)
+            cprintf("Usage: fg [ID]\n");
+        else
+        {
+            uint got = procForeground(cast(uint)id);
+            if (got == 0)
+                cprintf("No such task.\n");
+        }
+    }
     else if (shellLine[0] != 0)
     {
+        bool bg = shellTakeAmp(args);
         int index = procFind(shellLine.ptr);
         if (index >= 0)
         {
-            shellRunProgram(cast(uint)index, args);
+            shellRunProgram(cast(uint)index, args, bg);
         }
         else if (rootMount.mounted && (fsStat(shellLine.ptr, &shellProbe) && !shellProbe.isDir))
         {
-            shellRunFile(shellLine.ptr, args);          // "./hello" or "/bin/hello" on the disk
+            shellRunFile(shellLine.ptr, args, bg);          // "./hello" or "/bin/hello" on the disk
         }
         else
         {
@@ -841,7 +910,8 @@ void shellExecute() @nogc nothrow
     }
 
     shellClearLine();
-    shellPrompt();
+    if (!procHasForeground())
+        shellPrompt();      // otherwise shellTaskExited() prints it when the program ends
 }
 
 void shellComplete() @nogc nothrow
@@ -903,6 +973,9 @@ void shellInit() @nogc nothrow
     shellClearLine();
     shellHistoryCount = 0;
     shellHistoryNext = 0;
+    taskExitHook = &shellTaskExited;
+    taskOutBegin = &shellBgOutBegin;
+    taskOutEnd = &shellBgOutEnd;
     cprintf("\nWelcome to the kernel shell! Type 'help' for available commands.\n");
     shellPrompt();
 }

@@ -43,6 +43,8 @@ enum ulong SYS_STAT = 10;
 enum ulong SYS_READDIR = 11;
 enum ulong SYS_GETCWD = 12;
 enum ulong SYS_BRK = 13;
+enum ulong SYS_YIELD = 14;
+enum ulong SYS_GETPID = 15;
 
 // useek() origins
 enum int SEEK_SET = 0;
@@ -272,6 +274,18 @@ void usleep(ulong ms) @nogc nothrow
 ulong uticks() @nogc nothrow
 {
     return cast(ulong)sys_call(SYS_TICKS, 0, 0, 0);
+}
+
+/// Let other programs run now.
+void uyield() @nogc nothrow
+{
+    sys_call(SYS_YIELD, 0, 0, 0);
+}
+
+/// Task id of this program (as shown by `ps`).
+int ugetpid() @nogc nothrow
+{
+    return cast(int)sys_call(SYS_GETPID, 0, 0, 0);
 }
 
 /// Clears the standard ouput (the kernel shell, if running in text mode).

@@ -73,7 +73,8 @@ alias IrqHandler = extern(C) void function(InterruptFrame*) @nogc nothrow;
 
 // Set by proc.d. Both are only called when the interrupted code was in ring 3.
 //   userFaultHook: a CPU exception in a user program (must not return)
-//   userTickHook:  a timer tick that interrupted a user program (may not return)
+//   userTickHook:  a timer tick that interrupted a user program (the interrupt is already
+//                  acknowledged; the hook may switch tasks and return much later)
 __gshared IrqHandler userFaultHook;
 __gshared IrqHandler userTickHook;
 
@@ -157,8 +158,9 @@ void idtInit() @nogc nothrow
         ubyte ist = 0;
         if (v == 2 || v == 8 || v == 18)
             ist = cast(ubyte)IST_FAULT;     // NMI, #DF, #MC: known-good stack
-        else if (v >= 32)
-            ist = cast(ubyte)IST_IRQ;       // external interrupts: never on the interrupted stack
+        // External interrupts (v >= 32) run on the interrupted code's own stack: for ring 3
+        // that is TSS.rsp0, i.e. the running task's kernel stack. That is what lets the timer
+        // tick switch tasks (the interrupt frame stays on the task's stack while it sleeps).
         idtSetGate(v, isrStubAddress(v), ist);
         irqHandlers[v] = null;
         irqUnhandled[v] = 0;
@@ -272,7 +274,13 @@ void isrDispatch(InterruptFrame* f) @nogc nothrow
         irqUnhandled[v]++;
 
     if (v == VEC_TIMER && (f.cs & 3) == 3 && userTickHook !is null)
+    {
+        // The hook may switch to another task and only return much later, so the
+        // interrupt is acknowledged first.
+        lapicEoi();
         userTickHook(f);
+        return;
+    }
 
     lapicEoi();
 }

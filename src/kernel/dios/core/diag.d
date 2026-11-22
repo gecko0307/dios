@@ -39,6 +39,7 @@ import dios.core.gfx;
 import dios.core.idt;
 import dios.core.keyboard;
 import dios.core.port;
+import dios.core.proc;
 import dios.core.ps2;
 import dios.core.stdio;
 import dios.core.vmem;
@@ -474,6 +475,7 @@ bool diagSleep(ulong ms) @nogc nothrow
                 return false;
 
         gfxPresent();
+        procYield();
         cpuHlt();
     }
     return true;

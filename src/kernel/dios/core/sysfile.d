@@ -33,12 +33,18 @@ struct OpenFile
 {
     bool used;
     bool isDir;
+    uint generation;            // sysfileGeneration when opened; stale after a volume change
     ExfatEntry entry;
     ExfatFile file;
     ulong pos;                  // file offset, or the next directory index
 }
 
-__gshared OpenFile[SYSFILE_MAX_OPEN] openFiles;
+/// Every task owns an OpenFile[SYSFILE_MAX_OPEN] table; the scheduler points this at the
+/// running task's table (sysfileBind). Task 0 (the shell) has one too, but never uses it.
+__gshared OpenFile* openFiles;
+
+/// Bumped when the volume goes away: every descriptor of every task becomes invalid.
+__gshared uint sysfileGeneration;
 
 struct DirPick
 {
@@ -50,15 +56,33 @@ struct DirPick
 
 extern(C):
 
+/// The volume changed or vanished: all open files of all tasks are dead.
 void sysfileReset() @nogc nothrow
 {
+    sysfileGeneration++;
+}
+
+/// Close everything in a fresh task's table.
+void sysfileClear(OpenFile* table) @nogc nothrow
+{
     for (uint i = 0; i < SYSFILE_MAX_OPEN; i++)
-        openFiles[i].used = false;
+        table[i].used = false;
+}
+
+/// Make `table` the one the file syscalls work on (called on every task switch).
+void sysfileBind(OpenFile* table) @nogc nothrow
+{
+    openFiles = table;
+}
+
+bool sysfileLive(const(OpenFile)* f) @nogc nothrow
+{
+    return f.used && f.generation == sysfileGeneration;
 }
 
 OpenFile* sysfileGet(ulong fd) @nogc nothrow
 {
-    if (fd >= SYSFILE_MAX_OPEN || !openFiles[fd].used)
+    if (openFiles is null || fd >= SYSFILE_MAX_OPEN || !sysfileLive(&openFiles[fd]))
         return null;
     return &openFiles[fd];
 }
@@ -66,10 +90,10 @@ OpenFile* sysfileGet(ulong fd) @nogc nothrow
 /// Open a file or directory. Returns the descriptor, or -1.
 long sysfileOpen(const(char)* path) @nogc nothrow
 {
-    if (!rootMount.mounted)
+    if (!rootMount.mounted || openFiles is null)
         return -1;
     uint fd = 0;
-    while (fd < SYSFILE_MAX_OPEN && openFiles[fd].used)
+    while (fd < SYSFILE_MAX_OPEN && sysfileLive(&openFiles[fd]))
         fd++;
     if (fd == SYSFILE_MAX_OPEN)
         return -1;
@@ -81,6 +105,7 @@ long sysfileOpen(const(char)* path) @nogc nothrow
     f.pos = 0;
     if (!f.isDir && !exfatOpen(&f.file, &f.entry))
         return -1;
+    f.generation = sysfileGeneration;
     f.used = true;
     return fd;
 }

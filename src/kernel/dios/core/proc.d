@@ -26,25 +26,43 @@ DEALINGS IN THE SOFTWARE.
 module dios.core.proc;
 
 /**
- * User programs: ELF64 images delivered as bootloader modules, run one at a
- * time in ring 3 with their own address space, talking to the kernel through
- * SYSCALL.
+ * Tasks and user programs.
+ *
+ * Task 0 is the kernel itself: the shell and the main loop. Every other task runs an
+ * ELF64 program in ring 3 in its own address space and talks to the kernel through
+ * SYSCALL. Each task has its own kernel stack (taskStacks), its own page tables, break,
+ * and table of open files.
+ *
+ * Scheduling: round robin on one CPU.
+ *   - Ring 3 is preemptive: a timer tick that interrupted a program ends its time slice
+ *     (TASK_SLICE_TICKS ms) and switches to the next runnable task, from inside the interrupt.
+ *   - The kernel is not preemptive: a task switches only at the explicit points
+ *     taskSchedule() is called from: the blocking system calls (sleep, getkey, yield), exit,
+ *     and task 0's main loop (once per round). That is what keeps the drivers and file systems
+ *     free of locks - they never see a second task in the middle of an operation.
+ *   - Task 0 never blocks, so there is always something to run. When no program is runnable the
+ *     main loop sleeps in HLT until the next interrupt.
+ *
+ * Jobs: `run NAME` starts a program in the foreground (it owns the keyboard and the shell waits
+ * for it), `run NAME &` in the background. Only the foreground task receives keys; Ctrl+C
+ * (seen by the main loop) kills it. A background task that wants keys waits until `fg` brings
+ * it to the front.
  *
  * Address space of a program (PML4 slot 0 is private, everything else is the
  * kernel's, shared):
  *   0x0000000000400000 - 0x0000000040000000   program image (PT_LOAD segments)
+ *   0x0000000040000000 - ...                  heap (brk)
  *   0x000000007FFF0000 - 0x0000000080000000   stack (64 KiB), arguments at its top
  * The kernel keeps running on the program's page tables during a syscall; user
  * pointers are validated page by page (present + user + writable if written).
  *
- * A program ends by calling exit, by faulting (the kernel prints what happened
- * and carries on) or by Ctrl+C (checked on every timer tick that interrupts the
- * program, and inside the blocking syscalls). All three paths leave through
- * userResume(), which returns from userEnter() inside procLaunch().
+ * A task ends by calling exit, by faulting (the kernel prints what happened and carries on)
+ * or by being killed. It becomes a zombie; task 0 reaps it (frees the address space) in
+ * procPoll() and reports the exit through taskExitHook.
  *
  * System calls (rax = number; rdi, rsi, rdx = arguments; result in rax):
- *   0 exit(code)              1 write(buf, len)       2 getkey(block)
- *   3 sleep(ms)               4 ticks() -> ms         5 clear()
+ *   0 exit(code)   1 write(buf, len)   2 getkey(block)   3 sleep(ms)   4 ticks() -> ms
+ *   5 clear()   6..12 files   13 brk   14 yield()   15 getpid()
  */
 import dios.bootloader.limine;
 import dios.core.clock;
@@ -93,6 +111,8 @@ enum ulong SYS_STAT = 10;
 enum ulong SYS_READDIR = 11;
 enum ulong SYS_GETCWD = 12;
 enum ulong SYS_BRK = 13;
+enum ulong SYS_YIELD = 14;
+enum ulong SYS_GETPID = 15;
 
 enum uint MSR_EFER = 0xC0000080;
 enum uint MSR_STAR = 0xC0000081;
@@ -138,28 +158,60 @@ struct Program
     ulong size;
 }
 
-struct Process
+enum uint TASK_MAX = 8;                 // slot 0 is the kernel, so 7 programs at a time
+enum ulong TASK_STACK_SIZE = 32768;     // kernel stack per task
+enum uint TASK_SLICE_TICKS = 5;         // ms (1 kHz tick)
+
+enum TaskState : ubyte
 {
-    bool active;
-    ulong pml4Phys;
+    Free,
+    Ready,          // running or waiting for its turn
+    Sleep,          // until wakeNs
+    WaitKey,        // for a key; only woken while it is the foreground task
+    Zombie          // finished, waiting for task 0 to clean up
+}
+
+struct Task
+{
+    TaskState state;
+    uint id;                    // shown by ps, used by kill/fg; 0 is the kernel
+    ulong pml4Phys;             // 0 for task 0 (kernel page tables)
     ulong entry;
-    ulong stackPointer;
+    ulong stackPointer;         // initial user stack pointer
     ulong argsAddr;
     ulong heapBreak;
-    char[PROC_NAME_MAX] name; // for crash messages
+    ulong savedSp;              // kernel stack pointer while switched out
+    ulong wakeNs;
+    ulong startMs;
+    long exitCode;
+    char[PROC_NAME_MAX] name;
+    OpenFile[SYSFILE_MAX_OPEN] files;
 }
+
+/// Reports a reaped task: id, name, exit code, was it the foreground task. Set by the shell.
+alias TaskExitHook = extern(C) void function(uint id, const(char)* name, long code, bool wasForeground) @nogc nothrow;
+/// Bracket the output of a background task when the shell is sitting at its prompt.
+alias TaskOutHook = extern(C) void function() @nogc nothrow;
 
 __gshared Program[PROC_MAX_PROGRAMS] programs;
 __gshared uint programCount;
-__gshared Process proc;
-__gshared uint tickDivider;
+__gshared Task[TASK_MAX] tasks;
+__gshared Task* cur;                    // the running task
+__gshared Task* fgTask;                 // owns the keyboard (null: the shell does)
+__gshared uint nextTaskId = 1;
+__gshared uint sliceTicks;
+__gshared TaskExitHook taskExitHook;
+__gshared TaskOutHook taskOutBegin;
+__gshared TaskOutHook taskOutEnd;
+align(16) __gshared ubyte[TASK_STACK_SIZE][TASK_MAX] taskStacks;
 
 extern(C):
 
 void syscallSetStack(ulong top) @nogc nothrow;
 void* syscallEntryAddress() @nogc nothrow;
-long userEnter(ulong entry, ulong stackTop, ulong arg0) @nogc nothrow;
-void userResume(long code) @nogc nothrow;
+void userJump(ulong entry, ulong stackTop, ulong arg0) @nogc nothrow;
+void taskSwitch(ulong* saveSp, ulong newSp) @nogc nothrow;
+void* taskTrampolineAddress() @nogc nothrow;
 
 // Program table
 
@@ -178,6 +230,17 @@ void procMakeName(const(char)* path, char* dst) @nogc nothrow
         n++;
     }
     dst[n] = 0;
+}
+
+void procCopyName(char* dst, const(char)* src) @nogc nothrow
+{
+    uint i = 0;
+    while (src[i] != 0 && i + 1 < PROC_NAME_MAX)
+    {
+        dst[i] = src[i];
+        i++;
+    }
+    dst[i] = 0;
 }
 
 bool procNameEq(const(char)* a, const(char)* b) @nogc nothrow
@@ -201,6 +264,14 @@ void procInit() @nogc nothrow
 
     userFaultHook = &procUserFault;
     userTickHook = &procUserTick;
+
+    // The code running right now becomes task 0.
+    tasks[0].state = TaskState.Ready;
+    tasks[0].id = 0;
+    procCopyName(tasks[0].name.ptr, "shell");
+    cur = &tasks[0];
+    sysfileClear(tasks[0].files.ptr);
+    sysfileBind(tasks[0].files.ptr);
 
     programCount = 0;
     if (moduleRequest.response is null)
@@ -316,7 +387,7 @@ ubyte* procMapPage(ulong pml4Phys, ulong vaddr, bool writable) @nogc nothrow
 // Unmap one user page and return its physical page to PMM.
 bool procUnmapUserPage(ulong vaddr) @nogc nothrow
 {
-    ulong* pte = procPte(proc.pml4Phys, vaddr, false);
+    ulong* pte = procPte(cur.pml4Phys, vaddr, false);
     if (pte is null || !(*pte & PTE_PRESENT))
         return false;
 
@@ -333,16 +404,16 @@ bool procUnmapUserPage(ulong vaddr) @nogc nothrow
 // Returns the new/current break, or -1 on failure.
 long procSetBreak(ulong requested) @nogc nothrow
 {
-    if (!proc.active || proc.pml4Phys == 0)
+    if (cur.pml4Phys == 0)
         return -1;
 
     if (requested == 0)
-        return cast(long)proc.heapBreak;
+        return cast(long)cur.heapBreak;
 
     if (requested < USER_HEAP_BASE || requested > USER_HEAP_LIMIT)
         return -1;
 
-    ulong oldBreak = proc.heapBreak;
+    ulong oldBreak = cur.heapBreak;
     ulong oldEnd = (oldBreak + 4095) & ~4095UL;
     ulong newEnd = (requested + 4095) & ~4095UL;
 
@@ -354,17 +425,17 @@ long procSetBreak(ulong requested) @nogc nothrow
         while (va < newEnd)
         {
             // Do not overwrite an existing mapping.
-            ulong* pte = procPte(proc.pml4Phys, va, false);
+            ulong* pte = procPte(cur.pml4Phys, va, false);
             if (pte !is null && (*pte & PTE_PRESENT))
                 goto rollback;
 
-            if (procMapPage(proc.pml4Phys, va, true) is null)
+            if (procMapPage(cur.pml4Phys, va, true) is null)
                 goto rollback;
 
             va += 4096;
         }
 
-        proc.heapBreak = requested;
+        cur.heapBreak = requested;
         return cast(long)requested;
 
     rollback:
@@ -380,7 +451,7 @@ long procSetBreak(ulong requested) @nogc nothrow
     {
         for (ulong va = newEnd; va < oldEnd; va += 4096)
         {
-            ulong* pte = procPte(proc.pml4Phys, va, false);
+            ulong* pte = procPte(cur.pml4Phys, va, false);
             if (pte is null || !(*pte & PTE_PRESENT) || !(*pte & PTE_USER))
                 return -1;
         }
@@ -392,7 +463,7 @@ long procSetBreak(ulong requested) @nogc nothrow
         }
     }
 
-    proc.heapBreak = requested;
+    cur.heapBreak = requested;
     return cast(long)requested;
 }
 
@@ -471,7 +542,7 @@ bool procLoadElf(Program* prog, ulong pml4Phys, ulong* entry) @nogc nothrow
     return true;
 }
 
-bool procBuildSpace(Program* prog, const(char)* args) @nogc nothrow
+bool procBuildSpace(Task* t, Program* prog, const(char)* args) @nogc nothrow
 {
     ulong pml4Phys;
     void* pml4 = vmemAllocTable(&pml4Phys);
@@ -484,10 +555,10 @@ bool procBuildSpace(Program* prog, const(char)* args) @nogc nothrow
     // Share the kernel half; slot 0 (low half) is the program's own.
     memcpy(pml4, cast(void*)vmemPhysToVirt(PML4_PHYS), 4096);
     (cast(ulong*)pml4)[0] = 0;
-    proc.pml4Phys = pml4Phys;
-    proc.heapBreak = USER_HEAP_BASE;
+    t.pml4Phys = pml4Phys;
+    t.heapBreak = USER_HEAP_BASE;
 
-    if (!procLoadElf(prog, pml4Phys, &proc.entry))
+    if (!procLoadElf(prog, pml4Phys, &t.entry))
         return false;
 
     for (uint i = 0; i < USER_STACK_PAGES; i++)
@@ -511,126 +582,320 @@ bool procBuildSpace(Program* prog, const(char)* args) @nogc nothrow
         dst[i] = cast(ubyte)args[i];
     dst[n] = 0;
 
-    proc.argsAddr = argsVa;
-    proc.stackPointer = argsVa - 64;        // some headroom below the arguments
+    t.argsAddr = argsVa;
+    t.stackPointer = argsVa - 64;        // some headroom below the arguments
     return true;
 }
 
-// Running and ending programs
+// Tasks
 
-void procInputPoll() @nogc nothrow
+ulong taskStackTop(const(Task)* t) @nogc nothrow
 {
-    usbPoll();
-    if (ps2State.irqMode)
-        ps2Drain();
-    else
-        ps2Poll();
+    size_t i = cast(size_t)(t - tasks.ptr);
+    return cast(ulong)taskStacks[i].ptr + TASK_STACK_SIZE;
 }
 
-/// Leave the running program immediately. Never returns.
-void procKill(long code) @nogc nothrow
+// Could this task run right now?
+bool taskRunnable(const(Task)* t, ulong nowNs) @nogc nothrow
 {
-    if (!proc.active)
-        hcf();
-    userResume(code);
+    switch (t.state)
+    {
+        case TaskState.Ready:
+            return true;
+        case TaskState.Sleep:
+            return nowNs >= t.wakeNs;
+        case TaskState.WaitKey:
+            return t is fgTask && keyQueueHasKey();
+        default:
+            return false;
+    }
+}
+
+// Round robin, starting after the current task; the current task comes last. Task 0 is
+// always Ready, so something is always found.
+Task* taskPick() @nogc nothrow
+{
+    ulong now = clockNowNs();
+    size_t start = cast(size_t)(cur - tasks.ptr);
+    for (size_t k = 1; k <= TASK_MAX; k++)
+    {
+        Task* t = &tasks[(start + k) % TASK_MAX];
+        if (taskRunnable(t, now))
+        {
+            t.state = TaskState.Ready;
+            return t;
+        }
+    }
+    return &tasks[0];
+}
+
+/// Is any task besides task 0 ready to run? (The main loop only sleeps when none is.)
+bool procOthersReady() @nogc nothrow
+{
+    ulong now = clockNowNs();
+    for (uint i = 1; i < TASK_MAX; i++)
+        if (taskRunnable(&tasks[i], now))
+            return true;
+    return false;
+}
+
+/// Give the CPU to the next runnable task; returns when this task is picked again. The
+/// caller sets its own state first (Ready to just yield, Sleep/WaitKey to block). Interrupts
+/// are off during the switch and restored to this task's own setting afterwards.
+void taskSchedule() @nogc nothrow
+{
+    ulong flags = cpuIrqSave();
+    Task* prev = cur;
+    Task* next = taskPick();
+    if (next !is prev)
+    {
+        cur = next;
+        ulong want = (next.pml4Phys != 0) ? next.pml4Phys : PML4_PHYS;
+        if ((getCR3() & PTE_ADDR_MASK) != want)
+            setCR3(want);
+        if (next.pml4Phys != 0)
+        {
+            // The next ring 3 -> ring 0 transition (interrupt or syscall) lands on its stack.
+            ulong top = taskStackTop(next);
+            tss.rsp0 = top;
+            syscallSetStack(top);
+        }
+        sysfileBind(next.files.ptr);
+        sliceTicks = 0;
+        taskSwitch(&prev.savedSp, next.savedSp);
+        // ... and we are back: somebody switched to this task again.
+    }
+    cpuIrqRestore(flags);
+}
+
+/// Task 0: let the others run for a while.
+void procYield() @nogc nothrow
+{
+    taskSchedule();
+}
+
+// First code a new task runs, on its own kernel stack (reached through taskTrampoline).
+extern(C) void taskFirstRun() @nogc nothrow
+{
+    Task* t = cur;
+    userJump(t.entry, t.stackPointer, t.argsAddr);
     for (;;)
         cpuHlt();
 }
 
-void procAbort() @nogc nothrow
+/// End the running task. Never returns.
+void taskExit(long code) @nogc nothrow
 {
-    kprintf("^C\n");
-    procKill(130);
+    if (cur is &tasks[0])
+        hcf();
+    cur.exitCode = code;
+    cur.state = TaskState.Zombie;
+    taskSchedule();
+    for (;;)
+        cpuHlt();
+}
+
+/// End another task (or the running one). Its resources are freed by procPoll().
+void taskKill(Task* t, long code) @nogc nothrow
+{
+    if (t is cur)
+        taskExit(code);
+    if (t is &tasks[0] || t.state == TaskState.Free || t.state == TaskState.Zombie)
+        return;
+    t.exitCode = code;
+    t.state = TaskState.Zombie;
+}
+
+// Free the zombies: address space and slot. Runs in task 0 on the kernel page tables.
+void taskReap() @nogc nothrow
+{
+    for (uint i = 1; i < TASK_MAX; i++)
+    {
+        Task* t = &tasks[i];
+        if (t.state != TaskState.Zombie)
+            continue;
+
+        bool wasFg = (t is fgTask);
+        if (wasFg)
+            fgTask = null;
+        char[PROC_NAME_MAX] name;
+        procCopyName(name.ptr, t.name.ptr);
+        uint id = t.id;
+        long code = t.exitCode;
+
+        procFreeSpace(t.pml4Phys);
+        t.pml4Phys = 0;
+        t.state = TaskState.Free;
+
+        if (taskExitHook !is null)
+            taskExitHook(id, name.ptr, code, wasFg);
+    }
+}
+
+/// Called from the main loop: clean up finished tasks, and Ctrl+C kills the foreground task.
+void procPoll() @nogc nothrow
+{
+    taskReap();
+    if (fgTask !is null && keyQueueHasCtrlC())
+    {
+        keyQueueClear();
+        kprintf("^C\n");
+        taskKill(fgTask, 130);
+        taskReap();
+    }
+}
+
+bool procHasForeground() @nogc nothrow
+{
+    return fgTask !is null;
+}
+
+Task* procFindId(uint id) @nogc nothrow
+{
+    if (id == 0)
+        return null;
+    for (uint i = 1; i < TASK_MAX; i++)
+        if (tasks[i].state != TaskState.Free && tasks[i].state != TaskState.Zombie && tasks[i].id == id)
+            return &tasks[i];
+    return null;
+}
+
+/// kill ID. False if there is no such running task.
+bool procKillId(uint id) @nogc nothrow
+{
+    Task* t = procFindId(id);
+    if (t is null)
+        return false;
+    taskKill(t, 137);
+    taskReap();
+    return true;
+}
+
+/// fg [ID]: give the keyboard to a task (the newest one when id == 0). Returns its id or 0.
+uint procForeground(uint id) @nogc nothrow
+{
+    Task* t = null;
+    if (id != 0)
+        t = procFindId(id);
+    else
+        for (uint i = 1; i < TASK_MAX; i++)
+            if (tasks[i].state != TaskState.Free && tasks[i].state != TaskState.Zombie &&
+                (t is null || tasks[i].id > t.id))
+                t = &tasks[i];
+    if (t is null)
+        return 0;
+    keyQueueClear();
+    fgTask = t;
+    return t.id;
+}
+
+void procPrintTasks() @nogc nothrow
+{
+    cprintf("  ID  STATE   TIME  NAME\n");
+    ulong nowMs = clockNowNs() / 1_000_000UL;
+    for (uint i = 1; i < TASK_MAX; i++)
+    {
+        Task* t = &tasks[i];
+        if (t.state == TaskState.Free)
+            continue;
+        const(char)* st = "run";
+        if (t.state == TaskState.Sleep)
+            st = "sleep";
+        else if (t.state == TaskState.WaitKey)
+            st = "key";
+        else if (t.state == TaskState.Zombie)
+            st = "zombie";
+        cprintf("%c %u  %s  %llu s  %s\n", t is fgTask ? '*' : ' ', t.id, st,
+            (nowMs - t.startMs) / 1000, t.name.ptr);
+    }
+    cprintf("(* = foreground; the shell waits for it)\n");
 }
 
 extern(C) void procUserFault(InterruptFrame* f) @nogc nothrow
 {
     uint v = cast(uint)f.vector;
-    kprintf("\nProgram '%s' crashed: %s (vector %u) at %llx",
-        proc.name.ptr, exceptionNames[v & 31].ptr, v, f.rip);
+    kprintf("\nProgram '%s' (%u) crashed: %s (vector %u) at %llx",
+        cur.name.ptr, cur.id, exceptionNames[v & 31].ptr, v, f.rip);
     if (v == 14)
         kprintf(", address %llx", cpuReadCr2());
     kprintf("\n");
-    procKill(128 + v);
+    taskExit(128 + v);
 }
 
-// Timer tick that interrupted ring 3. Every 8th one: poll the keyboards (the
-// main loop is not running) and watch for Ctrl+C so a stuck program can be stopped.
+// Timer tick that interrupted ring 3 (already acknowledged): end of a time slice?
 extern(C) void procUserTick(InterruptFrame* f) @nogc nothrow
 {
-    if (!proc.active)
+    if (cur.pml4Phys == 0)
         return;
-    if (++tickDivider < 8)
+    if (++sliceTicks < TASK_SLICE_TICKS)
         return;
-    tickDivider = 0;
-
-    procInputPoll();
-    if (keyQueueHasCtrlC())
-    {
-        keyQueueClear();
-        lapicEoi(); // we are not going to return through isrDispatch
-        procAbort();
-    }
+    sliceTicks = 0;
+    taskSchedule();
 }
 
-/// Run boot module `index` to completion. Returns false if it could not be started;
-/// otherwise stores its exit code (128+vector if it crashed, 130 for Ctrl+C).
-bool procLaunch(uint index, const(char)* args, long* exitCode) @nogc nothrow
+/// Create a task for `prog`: address space, kernel stack, ready to run. 0 on failure.
+/// The image only has to stay around until this returns (it is copied).
+uint procSpawn(Program* prog, const(char)* args, bool foreground) @nogc nothrow
+{
+    Task* t = null;
+    for (uint i = 1; i < TASK_MAX; i++)
+        if (tasks[i].state == TaskState.Free)
+        {
+            t = &tasks[i];
+            break;
+        }
+    if (t is null)
+    {
+        cprintf("run: too many running programs (max %u)\n", TASK_MAX - 1);
+        return 0;
+    }
+
+    procCopyName(t.name.ptr, prog.name.ptr);
+    t.pml4Phys = 0;
+    if (!procBuildSpace(t, prog, args))
+    {
+        procFreeSpace(t.pml4Phys);
+        t.pml4Phys = 0;
+        return 0;
+    }
+    sysfileClear(t.files.ptr);
+
+    // First switch to this task "returns" from taskSwitch into taskTrampoline.
+    ulong top = taskStackTop(t);
+    ulong* sp = cast(ulong*)top;
+    sp[-2] = cast(ulong)taskTrampolineAddress();
+    for (uint i = 3; i <= 8; i++)
+        sp[-cast(int)i] = 0;                // rbx, rbp, r12..r15
+    t.savedSp = top - 64;
+
+    t.id = nextTaskId++;
+    t.startMs = clockNowNs() / 1_000_000UL;
+    t.exitCode = 0;
+    if (foreground)
+    {
+        keyQueueClear();                    // keys typed before the program started are not its input
+        fgTask = t;
+    }
+    t.state = TaskState.Ready;
+    return t.id;
+}
+
+/// Start boot module `index`. Returns its task id, 0 if it could not be started.
+uint procLaunch(uint index, const(char)* args, bool foreground) @nogc nothrow
 {
     if (index >= programCount)
-        return false;
-    return procLaunchProgram(&programs[index], args, exitCode);
+        return 0;
+    return procSpawn(&programs[index], args, foreground);
 }
 
-/// Run an ELF image that is already in memory (for example read from a disk).
-/// The image only has to stay around until this returns.
-bool procLaunchImage(const(char)* name, const(ubyte)* image, ulong size, const(char)* args, long* exitCode) @nogc nothrow
+/// Start an ELF image that is already in memory (for example read from a disk).
+uint procLaunchImage(const(char)* name, const(ubyte)* image, ulong size, const(char)* args, bool foreground) @nogc nothrow
 {
     Program p;
-    uint i = 0;
-    while (name[i] != 0 && i + 1 < PROC_NAME_MAX)
-    {
-        p.name[i] = name[i];
-        i++;
-    }
-    p.name[i] = 0;
+    procCopyName(p.name.ptr, name);
     p.image = image;
     p.size = size;
-    return procLaunchProgram(&p, args, exitCode);
-}
-
-bool procLaunchProgram(Program* prog, const(char)* args, long* exitCode) @nogc nothrow
-{
-    if (proc.active)
-        return false;
-
-    for (uint i = 0; i < PROC_NAME_MAX; i++)
-        proc.name[i] = prog.name[i];
-    proc.pml4Phys = 0;
-    if (!procBuildSpace(prog, args))
-    {
-        procFreeSpace(proc.pml4Phys);
-        proc.pml4Phys = 0;
-        return false;
-    }
-
-    sysfileReset();
-    keyQueueClear(); // keys typed before the program started are not its input
-    tickDivider = 0;
-    proc.active = true;
-    setCR3(proc.pml4Phys);
-    long rc = userEnter(proc.entry, proc.stackPointer, proc.argsAddr);
-
-    // Back from userResume(): kernel page tables first, then clean up.
-    setCR3(PML4_PHYS);
-    proc.active = false;
-    sysfileReset();
-    procFreeSpace(proc.pml4Phys);
-    proc.pml4Phys = 0;
-    keyQueueClear();
-    cpuSti(); // we may have been entered from an ISR or syscall context
-    *exitCode = rc;
-    return true;
+    return procSpawn(&p, args, foreground);
 }
 
 // System calls
@@ -645,7 +910,7 @@ bool procUserOk(ulong addr, ulong len, bool write) @nogc nothrow
 
     for (ulong page = addr & ~0xFFFUL; page < addr + len; page += 4096)
     {
-        ulong* pte = procPte(proc.pml4Phys, page, false);
+        ulong* pte = procPte(cur.pml4Phys, page, false);
         if (pte is null)
             return false;
         ulong e = *pte;
@@ -683,21 +948,25 @@ long sysGetKey(bool block) @nogc nothrow
 {
     for (;;)
     {
-        procInputPoll();
-        usbHotplugPoll();
-        KeyEvent ev;
-        while (keyPopEvent(&ev))
+        if (cur is fgTask)
         {
-            if (ev.ctrl && keyEventChar(&ev) == 3)
-                procAbort();
-            long k = procKeyCode(&ev);
-            if (k >= 0)
-                return k;
+            KeyEvent ev;
+            while (keyPopEvent(&ev))
+            {
+                if (ev.ctrl && keyEventChar(&ev) == 3)
+                {
+                    kprintf("^C\n");
+                    taskExit(130);
+                }
+                long k = procKeyCode(&ev);
+                if (k >= 0)
+                    return k;
+            }
         }
         if (!block)
             return -1;
-        gfxPresent();
-        cpuHlt();
+        cur.state = TaskState.WaitKey;      // woken when we are the foreground task and a key is queued
+        taskSchedule();
     }
 }
 
@@ -706,14 +975,9 @@ long sysSleep(ulong ms) @nogc nothrow
     ulong deadline = clockNowNs() + ms * 1_000_000UL;
     while (clockNowNs() < deadline)
     {
-        procInputPoll();
-        usbHotplugPoll();
-        KeyEvent ev;
-        while (keyPopEvent(&ev))
-            if (ev.ctrl && keyEventChar(&ev) == 3)
-                procAbort();
-        gfxPresent();
-        cpuHlt();
+        cur.wakeNs = deadline;
+        cur.state = TaskState.Sleep;
+        taskSchedule();
     }
     return 0;
 }
@@ -724,6 +988,12 @@ long sysWrite(ulong buf, ulong len) @nogc nothrow
         len = 65536;
     if (!procUserOk(buf, len, false))
         return -1;
+
+    // A background task prints while the shell is waiting at its prompt: get the input
+    // line out of the way first and bring it back afterwards.
+    bool park = (cur !is fgTask) && fgTask is null && taskOutBegin !is null;
+    if (park)
+        taskOutBegin();
 
     const(ubyte)* p = cast(const(ubyte)*)buf;
     for (ulong i = 0; i < len; i++)
@@ -738,6 +1008,8 @@ long sysWrite(ulong buf, ulong len) @nogc nothrow
         else
             consolePrintChar('?');
     }
+    if (park)
+        taskOutEnd();
     gfxPresent();
     return cast(long)len;
 }
@@ -808,13 +1080,13 @@ long sysGetCwd(ulong buf, ulong len) @nogc nothrow
     return cast(long)n;
 }
 
-// Called from the SYSCALL entry stub (cpu.s) on the ring-0 stack, interrupts off.
+// Called from the SYSCALL entry stub (cpu.s) on the task's kernel stack, interrupts off.
 long syscallDispatch(ulong nr, ulong a0, ulong a1, ulong a2) @nogc nothrow
 {
     switch (nr)
     {
         case SYS_EXIT:
-            procKill(cast(long)a0);
+            taskExit(cast(long)a0);
             return 0;
         case SYS_WRITE:
             return sysWrite(a0, a1);
@@ -844,6 +1116,12 @@ long syscallDispatch(ulong nr, ulong a0, ulong a1, ulong a2) @nogc nothrow
             return sysGetCwd(a0, a1);
         case SYS_BRK:
             return procSetBreak(a0);
+        case SYS_YIELD:
+            cur.state = TaskState.Ready;
+            taskSchedule();
+            return 0;
+        case SYS_GETPID:
+            return cur.id;
         default:
             return -1;
     }

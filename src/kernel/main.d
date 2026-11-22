@@ -257,13 +257,13 @@ void run() @nogc nothrow
     while (1)
     {
         usbPoll();
-        
+
         // Devices plugged in or pulled out. Messages from that must not land in the
         // middle of a half-typed command: the hook parks the input line first.
         kprintfHook = &shellMessageBegin;
         usbHotplugPoll();
         if (kprintfHook is null)
-            shellMessageEnd(); // something was printed
+            shellMessageEnd();                  // something was printed
         kprintfHook = null;
 
         if (ps2State.irqMode)
@@ -271,9 +271,13 @@ void run() @nogc nothrow
         else
             ps2Poll();
 
-        // Every key press, in order (Shift state was captured when it went down)
+        // Finished programs, Ctrl+C for the foreground program
+        procPoll();
+
+        // Every key press, in order (Shift state was captured when it went down). While a
+        // program runs in the foreground the keys stay queued for it.
         KeyEvent ev;
-        while (keyPopEvent(&ev))
+        while (!procHasForeground() && keyPopEvent(&ev))
         {
             shellHandleKey(&ev);
         }
@@ -291,7 +295,10 @@ void run() @nogc nothrow
 
         // Sleep until the next interrupt (at most 1 ms: the timer tick). Without a
         // working tick there would be nothing to wake us, so keep spinning then
-        if (interruptStatus.tick)
+        if (interruptStatus.tick && !procOthersReady())
             cpuHlt();
+
+        // Let the programs run until the next time slice ends
+        procYield();
     }
 }
