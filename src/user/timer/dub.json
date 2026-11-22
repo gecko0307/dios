@@ -1,0 +1,53 @@
+{
+    "name": "timer",
+    "description": "Timer service for running in background",
+    "homepage": "",
+    "license": "Unlicense",
+    "authors": [
+        "Timur Gafarov"
+    ],
+    
+    "importPaths": [
+        "src", "../../ulib"
+    ],
+    
+    "sourcePaths": [
+        "src", "../../ulib"
+    ],
+    
+    "buildRequirements": [
+        "allowWarnings"
+    ],
+    
+    "targetType": "executable",
+    "targetName": "timer.elf",
+    
+    "dflags-ldc": [
+        "-mtriple=x86_64-none-elf",
+        "-nodefaultlib",
+        "--boundscheck=off",
+        "--disable-red-zone",
+        "--use-ctors=0",
+        "--fno-exceptions",
+        "--nogc",
+        "-O0",
+        "-link-internally",
+        "-defaultlib="
+    ],
+
+    "lflags": [
+        "-m", "elf_x86_64",
+        "-T", "linker.ld",
+        "-z", "max-page-size=0x1000",
+        "-static",
+        "--gc-sections",
+        "-u", "_start",
+        "../../../libulib.a"
+    ],
+    
+    "postBuildCommands-windows": [
+        "move /Y timer.elf.exe timer.elf",
+        "if not exist ..\\..\\..\\usbstick mkdir ..\\..\\..\\usbstick",
+        "copy /Y timer.elf ..\\..\\..\\usbstick\\timer.elf"
+    ]
+}
