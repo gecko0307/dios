@@ -25,6 +25,7 @@ DEALINGS IN THE SOFTWARE.
 */
 module dios.core.shell;
 
+import dios.core._version;
 import dios.core.clock;
 import dios.core.acpi;
 import dios.core.console;
@@ -188,7 +189,7 @@ void shellRunProgram(uint index, const(char)* args) @nogc nothrow
         return;
     }
     if (console.print_x != 0)
-        consoleNewline();                   // the program's last line had no newline
+        consoleNewline(); // the program's last line had no newline
     if (code != 0)
         cprintf("[%s exited with code %llu]\n", programs[index].name.ptr, cast(ulong)code);
 }
@@ -204,9 +205,7 @@ void shellListPrograms() @nogc nothrow
         cprintf("  %s  (%llu bytes)\n", programs[i].name.ptr, programs[i].size);
 }
 
-// ---------------------------------------------------------------------------
 // disks and files
-// ---------------------------------------------------------------------------
 
 __gshared ubyte[4096] shellIo;
 __gshared ExfatEntry shellProbe;
@@ -598,7 +597,7 @@ void shellExecute() @nogc nothrow
     }
     else if (shellEquals(shellLine.ptr, "about"))
     {
-        cprintf("D Incomplete Operating System 0.2.0 for x86_64\n");
+        cprintf(diosVersionInfo);
     }
     else if (shellEquals(shellLine.ptr, "mem"))
     {
@@ -680,7 +679,7 @@ void shellExecute() @nogc nothrow
     }
     else if (shellEquals(shellLine.ptr, "version"))
     {
-        cprintf("DIOS 0.3.0 for x86_64\n");
+        cprintf(diosVersion);
     }
     else if (shellEquals(shellLine.ptr, "clear"))
     {

@@ -25,6 +25,7 @@ DEALINGS IN THE SOFTWARE.
 */
 module main;
 
+import dios.core._version;
 import dios.core.port;
 import dios.core.vga;
 import dios.core.keyboard;
@@ -223,8 +224,8 @@ void run() @nogc nothrow
     if (havePs2 && interruptStatus.ioapic)
         ps2StartIrq(interruptStatus.apicId);
 
-    kprintf("DIOS 0.3.0\n");
-    kprintf("---------------\n");
+    kprintf(diosVersion);
+    kprintf("---------------------\n");
     DateTime t;
     datetimeNow(&t);
     kprintf("UTC %02d.%02d.%d %02d:%02d:%02d\n",
