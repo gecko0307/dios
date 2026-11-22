@@ -98,14 +98,11 @@ DIOS project consists of a several structural layers, each with its own workflow
 ```d
 import dios.ulib;
 
-extern(C) int umain(const(char)* args) @nogc nothrow
+void main(const(char)* args)
 {
     uputs("Hello, World!\n");
-    return 0;
 }
 ```
-
-Note that the entry point is `umain`, not `main`, because of the current incompatibility with C arguments passing convention. A compatibility layer for `main` will be added in the nearest future.
 
 ## Building
 

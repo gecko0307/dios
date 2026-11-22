@@ -27,7 +27,7 @@ module main;
 
 import dios.ulib;
 
-int main(string[] args)
+void main(string[] args)
 {
     uputs("Hello, World!\n");
     if (args.length)
@@ -40,5 +40,4 @@ int main(string[] args)
         }
         uputs("\n");
     }
-    return 0;
 }
