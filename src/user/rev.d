@@ -25,7 +25,7 @@ For more information, please refer to <https://unlicense.org>
 */
 module rev;
 
-import ulib;
+import dios.ulib;
 
 // Reads lines and prints them reversed. An empty line ends the program.
 extern(C) int umain(const(char)* args) @nogc nothrow

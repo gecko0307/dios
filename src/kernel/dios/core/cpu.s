@@ -30,9 +30,7 @@ extern syscallDispatch
 
 section .text
 
-; Limine hands over with CR4.OSFXSR/OSXMMEXCPT cleared (CR4 = 0x20), so ANY
-; SSE instruction raises #UD. The compiler emits SSE for things as innocent as
-; zero-initialising a struct. Call this first thing in kmain.
+; void sseEnable()
 sseEnable:
     mov rax, cr0
     btr rax, 2              ; CR0.EM = 0 (no x87 emulation)

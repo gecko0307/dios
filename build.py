@@ -194,7 +194,7 @@ def check_boot_modules(programs):
 
 def main():
     compile_kernel()
-    programs = compile_userspace()
+    #programs = compile_userspace()
     #check_boot_modules(programs)
 
     run([

@@ -25,7 +25,7 @@ For more information, please refer to <https://unlicense.org>
 */
 module show;
 
-import ulib;
+import dios.ulib;
 
 // show FILE [OFFSET]  - print a text file, optionally starting at a byte offset
 extern(C) int umain(const(char)* args) @nogc nothrow

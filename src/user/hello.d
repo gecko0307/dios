@@ -25,7 +25,7 @@ For more information, please refer to <https://unlicense.org>
 */
 module hello;
 
-import ulib;
+import dios.ulib;
 
 extern(C) int umain(const(char)* args) @nogc nothrow
 {

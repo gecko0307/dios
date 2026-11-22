@@ -26,7 +26,7 @@ For more information, please refer to <https://unlicense.org>
 module fault;
 
 import core.volatile;
-import ulib;
+import dios.ulib;
 
 // Deliberately crashes: the kernel must report it and keep running.
 extern(C) int umain(const(char)* args) @nogc nothrow

@@ -25,7 +25,7 @@ For more information, please refer to <https://unlicense.org>
 */
 module count;
 
-import ulib;
+import dios.ulib;
 
 // Counts once a second. Ctrl+C stops it (the kernel handles that).
 extern(C) int umain(const(char)* args) @nogc nothrow

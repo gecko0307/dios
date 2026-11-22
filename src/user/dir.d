@@ -25,7 +25,7 @@ For more information, please refer to <https://unlicense.org>
 */
 module dir;
 
-import ulib;
+import dios.ulib;
 
 void putPad(ulong v, uint width) @nogc nothrow
 {
