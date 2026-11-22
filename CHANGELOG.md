@@ -33,7 +33,7 @@ DIOS 0.0.4 - 20 Nov, 2026
 - Initial USB 3.0 support
 - Many fixes and improvements across the codebase.
 
-Early development (c. 2016 - 2020)
+Early development (c. 2017 - 2020)
 ----------------------------------
 - GRUB/Multiboot
 - VGA text mode
