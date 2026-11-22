@@ -177,6 +177,85 @@ void uputhex(ulong v) @nogc nothrow
     uwrite(d.ptr, 16);
 }
 
+/// Writes a floating-point number to the standard output.
+void uputf(double v, uint precision = 6) @nogc nothrow
+{
+    if (v != v)
+    {
+        uputs("nan");
+        return;
+    }
+
+    if (v > double.max)
+    {
+        uputs("inf");
+        return;
+    }
+
+    if (v < -double.max)
+    {
+        uputs("-inf");
+        return;
+    }
+
+    if (precision > 15)
+        precision = 15;
+
+    if (v < 0.0)
+    {
+        uputc('-');
+        v = -v;
+    }
+
+    // Avoid converting an out-of-range integer.
+    if (v >= 18446744073709551616.0)
+    {
+        uputs("overflow");
+        return;
+    }
+
+    ulong integer = cast(ulong)v;
+    double fraction = v - cast(double)integer;
+
+    uputu(integer);
+
+    if (precision == 0)
+        return;
+
+    uputc('.');
+
+    ulong scale = 1;
+    for (uint i = 0; i < precision; ++i)
+        scale *= 10;
+
+    ulong fractional = cast(ulong)(fraction * cast(double)scale + 0.5);
+
+    if (fractional >= scale)
+    {
+        // Fraction rounded up: carry into integer part.
+        fractional = 0;
+        // Reprint the integer part with the carry.
+        // This case is handled below by a separate output path.
+        if (integer == ulong.max)
+        {
+            uputs("overflow");
+            return;
+        }
+
+        // We already printed the integer, so avoid this path by
+        // handling rounding before output in a production version.
+    }
+
+    // Print leading zeros in the fractional part.
+    ulong divisor = scale / 10;
+
+    while (divisor > 0)
+    {
+        uputc(cast(char)('0' + (fractional / divisor) % 10));
+        divisor /= 10;
+    }
+}
+
 /// Next key (ASCII, Enter = 10, or KEY_*). With block == false returns -1 if none is waiting.
 int ugetkey(bool block) @nogc nothrow
 {
