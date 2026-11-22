@@ -107,6 +107,11 @@ syscallEntry:
     push rcx                        ; user RIP
     push r11                        ; user RFLAGS
     sub rsp, 8                      ; keep the call site 16-byte aligned
+    ; The program's x87/SSE state (the math library uses it) must survive the call: kernel
+    ; code uses SSE freely, and the task may be switched out for a long time inside the
+    ; call. Kept on this task's own kernel stack, so every task has its own copy.
+    sub rsp, 512                    ; stack top is 16-byte aligned, so this is too
+    fxsave [rsp]
     ; syscallDispatch(nr, a0, a1, a2)
     mov rcx, rdx
     mov rdx, rsi
@@ -114,6 +119,8 @@ syscallEntry:
     mov rdi, rax
     cld
     call syscallDispatch
+    fxrstor [rsp]
+    add rsp, 512
     add rsp, 8
     pop r11
     pop rcx
@@ -124,6 +131,28 @@ syscallEntry:
 ; Drops to ring 3 with an iretq frame (interrupts on). Used once per task, by
 ; taskFirstRun(), on the task's own kernel stack.
 userJump:
+    ; A new program starts with a clean FPU/SSE state, not whatever the last task left.
+    fninit
+    sub rsp, 8
+    mov dword [rsp], 0x1F80         ; MXCSR default: all exceptions masked
+    ldmxcsr [rsp]
+    add rsp, 8
+    xorps xmm0, xmm0
+    xorps xmm1, xmm1
+    xorps xmm2, xmm2
+    xorps xmm3, xmm3
+    xorps xmm4, xmm4
+    xorps xmm5, xmm5
+    xorps xmm6, xmm6
+    xorps xmm7, xmm7
+    xorps xmm8, xmm8
+    xorps xmm9, xmm9
+    xorps xmm10, xmm10
+    xorps xmm11, xmm11
+    xorps xmm12, xmm12
+    xorps xmm13, xmm13
+    xorps xmm14, xmm14
+    xorps xmm15, xmm15
     mov rax, rdx
     push qword 0x1B                 ; SS  = user data | 3
     push rsi                        ; RSP
