@@ -2,7 +2,7 @@
 
 <img align="left" alt="dios logo" src="https://github.com/gecko0307/dios/raw/main/media/logo_128.png" height="80" />
 
-DIOS stands for D Incomplete Operating System (because it is a toy project that will likely never be feature-complete). It is a minimal x86_64 OS kernel written in D with some parts in assembly. It is tested on a real hardware and emulators like VirtualBox and QEMU. The main purpose of this project is demonstrating D's fitness for system development. I've written it initially in D1/GDC and ported to D2/LDC in 2025.
+DIOS stands for D Incomplete Operating System (because it is a toy project that will likely never be feature-complete). It is a minimalistic single-tasking x86_64 OS kernel written in D with some parts in assembly. It is tested on a real hardware and emulators like VirtualBox and QEMU. The main purpose of this project is demonstrating D's fitness for system development. I've written it initially in D1/GDC and ported to D2/LDC in 2025.
 
 You are free to use this code as a base to create your own kernel. PRs implementing new features are welcome. The code is a bit messy but readable.
 
@@ -24,10 +24,11 @@ DIOS is an ELF kernel that requires a bootloader to run. Default setup in this r
 - USB and PS/2 keyboard and mouse
 - CMOS date-time reading
 - A shell with built-in kernel commands
-- Basic single-tasking userspace in Ring 3; system calls
 - A single-mount read-only filesystem
 - USB mass storage devices (FAT32, exFAT)
-- Running programs from a USB stick.
+- Basic single-tasking userspace in Ring 3; system calls
+- A simple standard library for applications
+- Running applications from a USB stick.
 
 DIOS is planned as a graphical OS: all rendering features are built into the kernel (but there's no full-featured GUI yet).
 
