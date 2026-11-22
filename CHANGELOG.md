@@ -1,5 +1,9 @@
 DIOS 0.4.0 - TBD
 ----------------
+- **Kernel**:
+  - Multi-tasking support
+  - New shell commands `ps`, `kill`, `fg`
+  - Ability to run programs in background with `&` postfix
 - **ulib**:
   - Runtime entry point that allocates an arguments array and calls compiler-generated `_Dmain`
   - `ulib.math` - elementary math functions
