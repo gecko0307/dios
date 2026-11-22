@@ -2,5 +2,6 @@
 *.exe
 *.dll
 *.bin
+*.elf
 *.iso
 OVMF.fd

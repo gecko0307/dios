@@ -23,18 +23,66 @@ OTHER DEALINGS IN THE SOFTWARE.
 
 For more information, please refer to <https://unlicense.org>
 */
-module hello;
+module main;
 
 import dios.ulib;
 
+// show FILE [OFFSET]  - print a text file, optionally starting at a byte offset
 extern(C) int umain(const(char)* args) @nogc nothrow
 {
-    uputs("Hello, World!\n");
-    uputs("Arguments: ");
-    if (args[0] == 0)
-        uputs("(none)");
-    else
-        uputs(args);
-    uputs("\n");
+    char[256] name;
+    uint n = 0;
+    while (args[n] != 0 && args[n] != ' ' && n + 1 < name.length)
+    {
+        name[n] = args[n];
+        n++;
+    }
+    name[n] = 0;
+    if (n == 0)
+    {
+        uputs("usage: show FILE [OFFSET]\n");
+        return 1;
+    }
+
+    const(char)* rest = args + n;
+    while (*rest == ' ')
+        rest++;
+    long offset = 0;
+    while (*rest >= '0' && *rest <= '9')
+        offset = offset * 10 + (*rest++ - '0');
+
+    int fd = uopen(name.ptr);
+    if (fd < 0)
+    {
+        uputs("show: cannot open ");
+        uputs(name.ptr);
+        uputs("\n");
+        return 1;
+    }
+    if (offset != 0 && useek(fd, offset, SEEK_SET) < 0)
+    {
+        uputs("show: bad offset\n");
+        uclose(fd);
+        return 1;
+    }
+
+    char[512] buf;
+    ulong total = 0;
+    for (;;)
+    {
+        long got = uread(fd, buf.ptr, buf.length);
+        if (got < 0)
+        {
+            uputs("\nshow: read error\n");
+            uclose(fd);
+            return 1;
+        }
+        if (got == 0)
+            break;
+        uwrite(buf.ptr, cast(size_t)got);
+        total += cast(ulong)got;
+    }
+    uclose(fd);
+    uputc('\n');
     return 0;
 }

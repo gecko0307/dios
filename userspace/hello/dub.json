@@ -46,6 +46,8 @@
     ],
     
     "postBuildCommands-windows": [
-        "move /Y hello.elf.exe hello.elf"
+        "move /Y hello.elf.exe hello.elf",
+        "if not exist ..\\..\\usbstick mkdir ..\\..\\usbstick",
+        "copy /Y hello.elf ..\\..\\usbstick\\hello.elf"
     ]
 }
