@@ -87,7 +87,7 @@ DIOS project consists of a several structural layers, each with its own workflow
   - `src/kernel/dios/bootloader` - boot protocol; currently only Limine protocol is implemented. Multiboot support was dropped
   - `src/kernel/dios/core` - kernel modules, including core drivers necessary to run the main I/O loop
   - `src/kernel/main.d` - the kernel entry point
-- `src/ulib` contains the ulib runtime library code:
+- `src/ulib` contains the **ulib** runtime library code:
   - `src/ulib/ulib/dios` - implements basic libc-like functionality on top of DIOS syscalls
   - `src/ulib/umain.d` - runtime entry point. Allocates an arguments array and calls compiler-generated `_Dmain`
 - `src/user` contains sample userspace programs:
@@ -106,6 +106,10 @@ void main(string[] args)
     uputs("Hello, World!\n");
 }
 ```
+
+## ulib
+
+ulib stands for "unfinished library" (because, again, it is a hobby project that will likely never be finished). It is a simple runtime library for DIOS applications written in D.
 
 ## Building
 
