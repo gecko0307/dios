@@ -93,6 +93,20 @@ DIOS project consists of a several structural layers, each with its own workflow
   - `src/user/dir`
   - `src/user/memtest`
 
+## Hello, World application in D
+
+```d
+import dios.ulib;
+
+extern(C) int umain(const(char)* args) @nogc nothrow
+{
+    uputs("Hello, World!\n");
+    return 0;
+}
+```
+
+Note that the entry point is `umain`, not `main`, because of the current incompatibility with C arguments passing convention.
+
 ## Building
 
 Prerequisites:
