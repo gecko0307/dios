@@ -80,7 +80,7 @@ Programs are also written in D, but they actually can be written in any language
 
 ## Code Structure
 
-DIOS source code consists of a several structural layers, each with its own workflow.
+DIOS project consists of a several structural layers, each with its own workflow.
 
 - `src/kernel` contains the kernel code:
   - `src/kernel/dios/bootloader` - boot protocol; currently only Limine protocol is implemented. Multiboot support was dropped
