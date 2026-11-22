@@ -20,9 +20,9 @@ DIOS is an ELF kernel that requires a bootloader to run. Default setup in this r
 - Minimal ACPI table reader
 - I/O APIC, Local APIC
 - CMOS date-time
-- PS/2 keyboard and mouse
 - PCI enumeration
 - xHCI driver. USB keyboard and mouse; mass storage devices (FAT32, exFAT); USB hot-plug support; USB hubs support
+- PS/2 keyboard and mouse
 - A shell with built-in kernel commands
 - Basic single-tasking userspace in Ring 3; system calls; a simple standard library for applications
 - A single-mount read-only filesystem
