@@ -133,7 +133,7 @@ static assert(GfxEvent.sizeof == 32);
 
 extern(C):
 
-/// Screen size and whether a graphics server is running. 0 on success.
+/// Gets the kernel graphics info (screen size; whether a graphics server is running). Returns 0 on success.
 int ugfxInfo(GfxInfo* info) @nogc nothrow
 {
     return cast(int)sys_call(SYS_GFX_INFO, cast(ulong)info, 0, 0);
@@ -151,7 +151,7 @@ int ugfxPoll(GfxEvent* ev, long timeoutMs) @nogc nothrow
 
 /**
  * Sends an event. From a client: to the server (type must be >= GFX_EV_USER; `surface` is
- * one of yours or 0). From the server: to the owner of `surface` (any type). 0 on success.
+ * one of yours or 0). From the server: to the owner of `surface` (any type). Returns 0 on success.
  */
 int ugfxSend(uint surface, const(GfxEvent)* ev) @nogc nothrow
 {
@@ -169,7 +169,7 @@ int ugfxSurfaceCreate(GfxSurfaceDesc* desc) @nogc nothrow
     return cast(int)sys_call(SYS_GFX_SURFACE_CREATE, cast(ulong)desc, 0, 0);
 }
 
-/// Tells the server that `rect` of the surface changed (null: all of it).
+/// Tells the server that `rect` part of the surface is changed (`null`: all of it).
 int ugfxSurfaceCommit(uint surface, const(GfxRect)* rect) @nogc nothrow
 {
     return cast(int)sys_call(SYS_GFX_SURFACE_COMMIT, cast(ulong)surface, cast(ulong)rect, 0);
@@ -184,7 +184,7 @@ int ugfxSurfaceDestroy(uint surface) @nogc nothrow
 // Server
 
 /**
- * Becomes THE graphics server and takes the screen. Fails (-1) if there already is one.
+ * Becomes the graphics server and takes the screen. Fails (-1) if there already is one.
  * Surfaces of programs that are already running are announced as GFX_EV_SURFACE_NEW.
  */
 int ugfxServerBegin() @nogc nothrow
