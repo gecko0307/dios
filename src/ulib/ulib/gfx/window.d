@@ -27,7 +27,7 @@ For more information, please refer to <https://unlicense.org>
 module ulib.gfx.window;
 
 /**
- * The application side of the graphics server, in four calls:
+ * The application side of the graphics server.
  *
  *     Window win;
  *     if (!windowCreate(&win, 320, 240)) ...        // a drawable area
@@ -38,7 +38,7 @@ module ulib.gfx.window;
  *     windowClose(&win);
  *
  * Without a graphics server (or while the shell has the screen) all of this still works,
- * nothing is shown. The memory of the window is freed when the program ends.
+ * but nothing is displayed. The memory of the window is freed when the program ends.
  */
 
 import ulib.gfx.proto;
@@ -53,8 +53,10 @@ struct Window
 
 extern(C):
 
-/// Opens a window of width x height pixels (black). False if it could not be created
-/// (too big, too many windows, out of memory).
+/**
+ * Opens a window of width x height pixels (black). False if it could not be created
+ * (too big, too many windows, out of memory).
+ */
 bool windowCreate(Window* win, uint width, uint height) @nogc nothrow
 {
     GfxSurfaceDesc d;
@@ -96,11 +98,12 @@ void windowCommitRect(Window* win, int x, int y, int w, int h) @nogc nothrow
     ugfxSurfaceCommit(win.id, &r);
 }
 
-/// The next event for this program (see GFX_EV_*). Waits up to `timeoutMs`: 0 = do not wait,
-/// negative = for as long as it takes. False if there was none.
-///
-/// Typical events for a window: GFX_EV_KEY, GFX_EV_MOUSE (coordinates relative to the
-/// window), GFX_EV_FOCUS, GFX_EV_CLOSE; and GFX_EV_SERVER (a server started or stopped).
+/**
+ * The next event for this program (see GFX_EV_*). Waits up to `timeoutMs`: 0 = do not wait,
+ * negative = for as long as it takes. False if there was none.
+ * Typical events for a window: GFX_EV_KEY, GFX_EV_MOUSE (coordinates relative to the
+ * window), GFX_EV_FOCUS, GFX_EV_CLOSE; and GFX_EV_SERVER (a server started or stopped).
+ */
 bool windowPoll(Window* win, GfxEvent* ev, long timeoutMs) @nogc nothrow
 {
     if (ugfxPoll(ev, timeoutMs) != 1)

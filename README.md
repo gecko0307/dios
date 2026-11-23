@@ -64,6 +64,8 @@ DIOS project consists of a several structural layers, each with its own workflow
   - `src/kernel/main.d` - the kernel entry point
 - `src/ulib` contains the **ulib** runtime library code:
   - `src/ulib/ulib/dios` - implements basic libc-like functionality on top of [DIOS syscalls](doc/sys_call.md)
+  - `src/ulib/ulib/math` - elementary math functions
+  - `src/ulib/ulib/gfx` - DIOS graphics protocol and userspace rendering API
   - `src/ulib/umain.d` - runtime entry point. Allocates an arguments array and calls compiler-generated `_Dmain`
 - `src/user` contains userspace services and built-in programs:
   - `src/user/gfxd` - **GFXD**, the DIOS Graphics Server

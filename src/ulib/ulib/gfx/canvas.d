@@ -30,8 +30,6 @@ module ulib.gfx.canvas;
  * A Canvas is a view of a rectangle of 32 bit pixels (0x00RRGGBB) in memory: a window's
  * drawable area, the server's back buffer, or a part of either (sub()). It does not own
  * the memory. All drawing is clipped to the canvas, so it is safe to draw outside of it.
- *
- * This is deliberately small: put your own rendering (blending, text, images...) next to it.
  */
 
 /// Packs 0..255 channels into a pixel.
@@ -42,10 +40,10 @@ uint rgb(uint r, uint g, uint b) @nogc nothrow
 
 struct Canvas
 {
-    uint* pixels;       // top left pixel
+    uint* pixels; // top left pixel
     int width;
     int height;
-    int stride;         // distance between rows in PIXELS (the kernel reports bytes)
+    int stride; // distance between rows in PIXELS (the kernel reports bytes)
 
     /// Does it point at something drawable?
     bool valid() @nogc nothrow

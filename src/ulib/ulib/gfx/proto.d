@@ -27,9 +27,9 @@ For more information, please refer to <https://unlicense.org>
 module ulib.gfx.proto;
 
 /**
- * DIOS graphics protocol: the system calls of the graphics server support (kernel side:
- * src/kernel/dios/core/gfxsrv.d - read the comment at its top first) and the structures
- * that go through them. Everything here must stay identical to the kernel's definitions.
+ * DIOS graphics protocol.
+ *
+ * The system calls of the kernel's graphics subsystem and the structures that go through them.
  *
  * Two roles:
  *   client - a normal program that wants a drawable area: ugfxSurfaceCreate(), draw into the
@@ -139,25 +139,31 @@ int ugfxInfo(GfxInfo* info) @nogc nothrow
     return cast(int)sys_call(SYS_GFX_INFO, cast(ulong)info, 0, 0);
 }
 
-/// Next event for this program (the server's events, if it is the server). Waits up to
-/// `timeoutMs` milliseconds: 0 = do not wait, negative = wait for as long as it takes.
-/// Returns 1 if `ev` was filled in, 0 on timeout, -1 on error.
+/**
+ * Next event for this program (the server's events, if it is the server). Waits up to
+ * `timeoutMs` milliseconds: 0 = do not wait, negative = wait for as long as it takes.
+ * Returns 1 if `ev` was filled in, 0 on timeout, -1 on error.
+ */
 int ugfxPoll(GfxEvent* ev, long timeoutMs) @nogc nothrow
 {
     return cast(int)sys_call(SYS_GFX_POLL, cast(ulong)ev, cast(ulong)timeoutMs, 0);
 }
 
-/// Sends an event. From a client: to the server (type must be >= GFX_EV_USER; `surface` is
-/// one of yours or 0). From the server: to the owner of `surface` (any type). 0 on success.
+/**
+ * Sends an event. From a client: to the server (type must be >= GFX_EV_USER; `surface` is
+ * one of yours or 0). From the server: to the owner of `surface` (any type). 0 on success.
+ */
 int ugfxSend(uint surface, const(GfxEvent)* ev) @nogc nothrow
 {
     return cast(int)sys_call(SYS_GFX_SEND, cast(ulong)surface, cast(ulong)ev, 0);
 }
 
-// client
+// Client
 
-/// Creates a drawable area: fill in `width` and `height`; on success `id`, `stride` and
-/// `pixels` are set and 0 is returned. The pixels start out black (0).
+/**
+ * Creates a drawable area: fill in `width` and `height`; on success `id`, `stride` and
+ * `pixels` are set and 0 is returned. The pixels start out black (0).
+ */
 int ugfxSurfaceCreate(GfxSurfaceDesc* desc) @nogc nothrow
 {
     return cast(int)sys_call(SYS_GFX_SURFACE_CREATE, cast(ulong)desc, 0, 0);
@@ -175,10 +181,12 @@ int ugfxSurfaceDestroy(uint surface) @nogc nothrow
     return cast(int)sys_call(SYS_GFX_SURFACE_DESTROY, cast(ulong)surface, 0, 0);
 }
 
-// server
+// Server
 
-/// Becomes THE graphics server and takes the screen. Fails (-1) if there already is one.
-/// Surfaces of programs that are already running are announced as GFX_EV_SURFACE_NEW.
+/**
+ * Becomes THE graphics server and takes the screen. Fails (-1) if there already is one.
+ * Surfaces of programs that are already running are announced as GFX_EV_SURFACE_NEW.
+ */
 int ugfxServerBegin() @nogc nothrow
 {
     return cast(int)sys_call(SYS_GFX_SERVER_BEGIN, 0, 0, 0);
@@ -190,24 +198,30 @@ int ugfxServerEnd() @nogc nothrow
     return cast(int)sys_call(SYS_GFX_SERVER_END, 0, 0, 0);
 }
 
-/// Copies the back buffer to the screen: all of it, or just `rect`. `pixels` is a
-/// screen-sized buffer of 0x00RRGGBB pixels whose rows are `pitchBytes` apart (0: tightly
-/// packed, width * 4). Returns 1 if it was copied, 0 if the shell has the screen right now
-/// (nothing happened), -1 on error.
+/**
+ * Copies the back buffer to the screen: all of it, or just `rect`. `pixels` is a
+ * screen-sized buffer of 0x00RRGGBB pixels whose rows are `pitchBytes` apart (0: tightly
+ * packed, width * 4). Returns 1 if it was copied, 0 if the shell has the screen right now
+ * (nothing happened), -1 on error.
+ */
 int ugfxServerPresent(const(uint)* pixels, const(GfxRect)* rect, uint pitchBytes) @nogc nothrow
 {
     return cast(int)sys_call(SYS_GFX_SERVER_PRESENT, cast(ulong)pixels, cast(ulong)rect, cast(ulong)pitchBytes);
 }
 
-/// Maps the surface `desc.id` into this program: on success width, height, stride, pixels
-/// and owner are set. Mapping twice gives the same address.
+/**
+ * Maps the surface `desc.id` into this program: on success width, height, stride, pixels
+ * and owner are set. Mapping twice gives the same address.
+ */
 int ugfxServerMap(GfxSurfaceDesc* desc) @nogc nothrow
 {
     return cast(int)sys_call(SYS_GFX_SERVER_MAP, cast(ulong)desc, 0, 0);
 }
 
-/// Lets go of a mapped surface. Do this after GFX_EV_SURFACE_GONE, once nothing uses its
-/// pixels any more: the memory is only freed then.
+/**
+ * Lets go of a mapped surface. Do this after GFX_EV_SURFACE_GONE, once nothing uses its
+ * pixels any more: the memory is only freed then.
+ */
 int ugfxServerUnmap(uint surface) @nogc nothrow
 {
     return cast(int)sys_call(SYS_GFX_SERVER_UNMAP, cast(ulong)surface, 0, 0);
