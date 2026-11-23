@@ -63,6 +63,7 @@ __gshared int wmCascade;                    // where the next window goes
 __gshared int wmMouseX;
 __gshared int wmMouseY;
 __gshared uint wmButtons;
+__gshared bool wmChanged;                   // windows, their order or the focus changed: the scene needs recomposing
 
 void wmInit()
 {
@@ -72,6 +73,7 @@ void wmInit()
     wmFocus = -1;
     wmGrab = -1;
     wmCascade = 0;
+    wmChanged = true;
 }
 
 /// Index of the window of a kernel surface, -1 if we do not have one.
@@ -96,6 +98,7 @@ void wmSetFocus(int idx)
 {
     if (idx == wmFocus)
         return;
+    wmChanged = true;
     if (wmFocus >= 0)
         wmSendFocus(wmFocus, 0);
     wmFocus = idx;
@@ -106,6 +109,7 @@ void wmSetFocus(int idx)
 /// Moves window `idx` in front of all others.
 void wmRaise(int idx)
 {
+    wmChanged = true;
     int j = 0;
     for (int i = 0; i < wmCount; i++)
         if (wmOrder[i] != idx)
@@ -148,7 +152,8 @@ int wmAdd(uint surface, uint owner)
     wmCascade++;
 
     wmOrder[wmCount++] = slot;
-    wmSetFocus(slot); // new windows get the keyboard
+    wmChanged = true;
+    wmSetFocus(slot);                       // new windows get the keyboard
     return slot;
 }
 
@@ -161,6 +166,7 @@ void wmRemove(uint surface)
         // Forget the window BEFORE letting go of the memory: nothing may touch its pixels afterwards.
         wmWindows[idx].used = false;
         wmWindows[idx].canvas.pixels = null;
+        wmChanged = true;
 
         int j = 0;
         for (int i = 0; i < wmCount; i++)
@@ -172,7 +178,7 @@ void wmRemove(uint surface)
             wmGrab = -1;
         if (wmFocus == idx)
         {
-            wmFocus = -1; // the window is gone, no FOCUS event for it
+            wmFocus = -1;                   // the window is gone, no FOCUS event for it
             wmSetFocus(wmCount > 0 ? wmOrder[wmCount - 1] : -1);
         }
     }
@@ -229,7 +235,7 @@ void wmHandleMouse(const(GfxEvent)* ev)
     if (target >= 0)
     {
         GfxEvent fwd = *ev;
-        fwd.a = wmMouseX - wmWindows[target].x; // relative to the window's drawable area
+        fwd.a = wmMouseX - wmWindows[target].x;     // relative to the window's drawable area
         fwd.b = wmMouseY - wmWindows[target].y;
         ugfxSend(wmWindows[target].surface, &fwd);
     }

@@ -27,7 +27,7 @@ For more information, please refer to <https://unlicense.org>
 module main;
 
 /**
- * GFXD - DIOS Graphics Server.
+ * GFXD - the graphics server.
  *
  * Start it from the kernel shell with `gfx start` (or `run gfxd &`). It takes the screen
  * at once. Ctrl+F1 switches back to the shell, Ctrl+F2 back to the server, Ctrl+F3 kills
@@ -36,8 +36,8 @@ module main;
  *
  * Everything it does is a reaction to events from ugfxPoll():
  *   GFX_EV_SURFACE_NEW / _DAMAGE / _GONE   programs and their drawable areas   -> wm.d
- *   GFX_EV_VISIBLE                         the screen was given / taken away
- *   GFX_EV_KEY / GFX_EV_MOUSE              input, only while we have the screen -> wm.d
+ *   GFX_EV_VISIBLE                          the screen was given / taken away
+ *   GFX_EV_KEY / GFX_EV_MOUSE               input, only while we have the screen -> wm.d
  * and then, when something changed, a new picture is composed (render.d) and presented.
  *
  * Messages printed with uputs() land on the shell's screen: read them after Ctrl+F1.
@@ -48,10 +48,11 @@ import ulib.gfx;
 import wm;
 import render;
 
-enum ulong FRAME_MS = 16; // at most ~60 pictures per second
+enum ulong FRAME_MS = 16;           // at most ~60 pictures per second
 
 __gshared bool running = true;
-__gshared bool dirty = true; // the picture is out of date
+__gshared bool sceneDirty = true;   // windows, content or focus changed: recompose everything
+__gshared bool cursorDirty;         // only the mouse moved: cheap update
 
 void handleEvent(const(GfxEvent)* ev)
 {
@@ -59,27 +60,27 @@ void handleEvent(const(GfxEvent)* ev)
     {
         case GFX_EV_SURFACE_NEW:
             wmAdd(ev.surface, cast(uint)ev.c);
-            dirty = true;
+            sceneDirty = true;
             break;
 
         case GFX_EV_SURFACE_DAMAGE:
             // ev.a, ev.b, ev.c, ev.d: the rectangle that changed, relative to the surface.
             // We just redraw everything; this is where per-window dirty rectangles would start.
-            dirty = true;
+            sceneDirty = true;
             break;
 
         case GFX_EV_SURFACE_GONE:
             wmRemove(ev.surface);
-            dirty = true;
+            sceneDirty = true;
             break;
 
         case GFX_EV_VISIBLE:
             renderVisible = ev.a != 0;
-            dirty = true; // when we get the screen back it must be repainted fully
+            sceneDirty = true;          // when we get the screen back it must be repainted fully
             break;
 
         case GFX_EV_KEY:
-            if ((ev.c & GFX_MOD_CTRL) != 0 && ev.b == 17) // Ctrl+Q (ASCII control code 17)
+            if ((ev.c & GFX_MOD_CTRL) != 0 && ev.b == 17)   // Ctrl+Q (ASCII control code 17)
                 running = false;
             else
                 wmHandleKey(ev);
@@ -87,7 +88,7 @@ void handleEvent(const(GfxEvent)* ev)
 
         case GFX_EV_MOUSE:
             wmHandleMouse(ev);
-            dirty = true; // the cursor moved
+            cursorDirty = true;         // the cursor moved (a click may also change the scene: see wmChanged)
             break;
 
         default:
@@ -124,7 +125,7 @@ int main(string[] args)
     {
         // Sleep until something happens - but when a picture is due, only until it is time.
         long timeout = -1;
-        if (dirty && renderVisible)
+        if ((sceneDirty || cursorDirty) && renderVisible)
         {
             ulong since = uticks() - lastFrame;
             timeout = (since >= FRAME_MS) ? 0 : cast(long)(FRAME_MS - since);
@@ -135,21 +136,30 @@ int main(string[] args)
         while (got == 1)
         {
             handleEvent(&ev);
-            got = ugfxPoll(&ev, 0); // everything that is already waiting
+            got = ugfxPoll(&ev, 0);     // everything that is already waiting
         }
         if (got < 0)
-            break; // not the server any more
+            break;                      // not the server any more
 
-        if (dirty && renderVisible && uticks() - lastFrame >= FRAME_MS)
+        if (wmChanged)
         {
-            renderFrame();
-            renderPresent();
-            dirty = false;
+            sceneDirty = true;
+            wmChanged = false;
+        }
+
+        if ((sceneDirty || cursorDirty) && renderVisible && uticks() - lastFrame >= FRAME_MS)
+        {
+            if (sceneDirty)
+                renderFrame();          // recompose, present everything
+            else
+                renderCursorMove();     // present two small rectangles
+            sceneDirty = false;
+            cursorDirty = false;
             lastFrame = uticks();
         }
     }
 
-    ugfxServerEnd(); // the shell gets the screen back
+    ugfxServerEnd();                    // the shell gets the screen back
     uputs("gfxd: stopped\n");
     return 0;
 }
