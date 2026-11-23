@@ -89,7 +89,7 @@ Most of its functions are libc-like and self-explanatory. Full list of them can 
 
 GFXD is a userspace program that is provided to the kernel as a binary module via Limine (see `limine.conf`). It must be present as `cdroot/user/gfxd.elf` before building the ISO image with the system. DIOS repository provides a prebuilt GFXD binary for convenience.
 
-The graphics server is started with `gfx start` command. In the graphics mode, you can switch back to the kernel shell with `Ctrl+F1` and to the graphics mode with `Ctrl+F2`. `Ctrl+F3` stops the graphics server.
+The graphics server is started with `gfx start` command. `Ctrl+F1` switches back to the shell, `Ctrl+F2` shows the server, `Ctrl+F3` stops it.
 
 ## "Hello, World" application in D
 

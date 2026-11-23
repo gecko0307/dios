@@ -1,10 +1,14 @@
 DIOS 0.5.0 - TBD
 ----------------
 - **Kernel**:
-  - New system call `SYS_DATETIME`
+  - User-space graphics server support that can give ownership of the screen to a userspace service and switch back to the kernel shell. `Ctrl+F1` switches back to the shell, `Ctrl+F2` shows the server, `Ctrl+F3` stops it
+  - New system calls `SYS_DATETIME`, `SYS_RANDOM`; syscall extension hook
 - **ulib**:
+  - `ulib.gfx`, a graphics API. `ulib.gfx.proto` provides a kernel graphics protocol; `ulib.gfx.canvas` implements a simple 2D canvas
   - New functions `memcmp`,  `alignUp`, `alignDown`, `uputi`, `uprintf`, `udatetime`
-  - Buffered output.
+  - Buffered output
+- **GFXD**
+  - Built-in graphics server. Not much is implemented in it at the moment, but it already allows applications to render something on the screen.
 
 DIOS 0.4.0 - 23 Nov, 2026
 -------------------------
