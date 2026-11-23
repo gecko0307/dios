@@ -33,8 +33,8 @@ void main(string[] args)
     float x;
     
     x = sqrt(64.0f);
-    uputs("sqrt(64) = "); uputf(x); uputc('\n');
+    uprintf("sqrt(64) = %f\n", x);
     
     x = sin(PI * 0.5f);
-    uputs("sin(PI/2) = "); uputf(x); uputc('\n');
+    uprintf("sin(PI/2) = %f\n", x);
 }

@@ -29,15 +29,13 @@ import ulib.dios;
 
 void main(string[] args)
 {
-    uputs("Hello, World!\n");
+    uprintf("Hello, World!\n");
     if (args.length)
     {
-        uputs("Arguments: \n");
+        uprintf("Arguments: \n");
         for (size_t i = 0; i < args.length; ++i)
         {
-            uputs(args[i].ptr);
-            uputs("\n");
+            uprintf("%s\n", args[i].ptr);
         }
-        uputs("\n");
     }
 }

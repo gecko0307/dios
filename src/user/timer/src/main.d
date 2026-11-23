@@ -93,7 +93,7 @@ int main(string[] args)
     if (durationMs > 0)
     {
         usleep(durationMs);
-        uputs("Time is up!");
+        uputs("Time is up!\n");
     }
     else
         printUsage();

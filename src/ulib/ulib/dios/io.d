@@ -27,6 +27,7 @@ module ulib.dios.io;
 
 import ulib.dios.sys;
 import ulib.dios.mem;
+import core.stdc.stdarg;
 
 extern(C):
 
@@ -165,4 +166,77 @@ void uputf(double v, uint precision = 6) @nogc nothrow
         uputc(cast(char)('0' + (fractional / divisor) % 10));
         divisor /= 10;
     }
+}
+
+/**
+ * Simple formatted output.
+ * Supports %c, %s, %d, %u, %x, %f.
+ */
+int uprintf(const(char)* fmt, ...) @nogc nothrow
+{
+    va_list ap;
+    va_start!(const(char)*)(ap, fmt);
+    
+    size_t len = ustrlen(fmt);
+    
+    char c;
+    for (size_t i = 0; i < len; i++)
+    {
+        c = fmt[i];
+        
+        if (c != '%')
+        {
+            uputc(c);
+            continue;
+        }
+        else
+        {
+            i++;
+            c = fmt[i];
+            if (c == 0)
+                break;
+        }
+        
+        // Character
+        if (fmt[i] == 'c')
+        {
+            uputc(va_arg!(char)(ap));
+        }
+        // Zero-terminated string
+        else if (fmt[i] == 's')
+        {
+            char* str = va_arg!(char*)(ap);
+            if (str != null)
+            {
+                while (*str != 0)
+                    uputc(*str++);
+            }
+            else
+                uputs("null");
+        }
+        // Signed decimal
+        else if (c == 'd')
+        {
+            uputi(va_arg!long(ap));
+        }
+        // Unsigned decimal
+        else if (fmt[i] == 'u')
+        {
+            uputu(va_arg!ulong(ap));
+        }
+        // Hexadecimal
+        else if (fmt[i] == 'x')
+        {
+            uputhex(va_arg!ulong(ap));
+        }
+        // Floating-point
+        else if (fmt[i] == 'f')
+        {
+            uputf(va_arg!double(ap));
+        }
+    }
+    
+    va_end(ap);
+    
+    return 0;
 }
