@@ -70,7 +70,9 @@ DIOS project consists of a several structural layers, each with its own workflow
 
 ## ulib
 
-ulib stands for "unfinished library" (because, again, it is a hobby project that will likely never be finished). It is a simple runtime library for DIOS applications written in D.
+ulib stands for "unfinished library" (because, again, it is a hobby project that will likely never be finished). It is a low-level runtime library for DIOS applications written in D.
+
+Most of its functions are libc-like and self-explanatory. Full list of them can be found [here](doc/ulib.md).
 
 ## "Hello, World" application in D
 

@@ -1,5 +1,5 @@
-DIOS 0.4.0 - TBD
-----------------
+DIOS 0.4.0 - 23 Nov, 2026
+-------------------------
 - **Kernel**:
   - Multi-tasking support
   - New shell commands `ps`, `kill`, `fg`
