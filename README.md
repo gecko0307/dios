@@ -29,9 +29,9 @@ DIOS is a monolithic kernel that contains all the device drivers in itself. It i
 - Basic multi-tasking userspace in Ring 3; system calls; a simple standard library for applications
 - A single-mount read-only filesystem
 - Running applications from a USB stick
-- Userspace graphics server (GFXD) and graphical applications.
+- Userspace graphics server (GFXD), windowed applications.
 
-DIOS is planned as a graphical OS, but there's no full-featured GUI yet. Graphical features are work-in-progress.
+DIOS is planned as a graphical OS, but there's no built-in GUI toolkit yet. Graphical features are work-in-progress.
 
 DIOS is now 64-bit only, x86 support was dropped.
 
