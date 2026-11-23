@@ -27,7 +27,7 @@ For more information, please refer to <https://unlicense.org>
 module main;
 
 /**
- * gfxdemo - template for a program with a window.
+ * gfxdemo - template for a graphical program.
  *
  *   1. windowCreate()   gives you a drawable area (win.canvas) of the size you ask for
  *   2. draw into it     win.canvas.fillRect(), line(), blit(), setPixel()... or write the
@@ -38,8 +38,8 @@ module main;
  * Run it from the shell: `run gfxdemo &`. It also works before the graphics server is
  * started (`gfx start`): the server picks it up when it comes.
  *
- * Here: a bouncing square, a crosshair at the mouse, paint with the left button, right
- * button clears, 'c' clears, 'q' or Escape quits.
+ * The program implements painting with the left mouse button.
+ * Right button and C key clear the canvas, press Q or Escape to quit.
  */
 
 import ulib.dios;
@@ -47,29 +47,29 @@ import ulib.gfx;
 
 enum uint WIDTH = 320;
 enum uint HEIGHT = 240;
-enum int BALL = 16;
 enum uint PAPER = 0x00101820;
 
 struct Demo
 {
     Window win;
     Canvas paint; // what was painted: ordinary memory, composed into the window every frame
-    int ballX, ballY, ballVx, ballVy;
     int mouseX, mouseY;
     bool leftDown;
     int lastX, lastY;
     bool focused;
     bool running;
 
-    void handle(const(GfxEvent)* ev) @nogc nothrow
+    void handle(const(GfxEvent)* event) @nogc nothrow
     {
-        switch (ev.type)
+        switch(event.type)
         {
             case GFX_EV_MOUSE:
-                // ev.a, ev.b: position inside the window; ev.c: buttons; ev.d: wheel
-                mouseX = ev.a;
-                mouseY = ev.b;
-                if ((ev.c & GFX_BTN_LEFT) != 0)
+                // event.a, event.b: position inside the window
+                // event.c: buttons
+                // event.d: wheel
+                mouseX = event.a;
+                mouseY = event.b;
+                if ((event.c & GFX_BTN_LEFT) != 0)
                 {
                     if (leftDown)
                         paint.line(lastX, lastY, mouseX, mouseY, rgb(120, 220, 120));
@@ -81,20 +81,21 @@ struct Demo
                 }
                 else
                     leftDown = false;
-                if ((ev.c & GFX_BTN_RIGHT) != 0)
+                if ((event.c & GFX_BTN_RIGHT) != 0)
                     paint.clear(PAPER);
                 break;
 
             case GFX_EV_KEY:
-                // ev.b: the ASCII character (0 if the key has none); ev.a: the scancode
-                if (ev.b == 'q' || ev.b == 27)
+                // event.b: the ASCII character (0 if the key has none)
+                // event.a: the scancode
+                if (event.b == 'q' || event.b == 27)
                     running = false;
-                else if (ev.b == 'c')
+                else if (event.b == 'c')
                     paint.clear(PAPER);
                 break;
 
             case GFX_EV_FOCUS:
-                focused = ev.a != 0;
+                focused = event.a != 0;
                 break;
 
             case GFX_EV_CLOSE:
@@ -108,36 +109,13 @@ struct Demo
 
     void update() @nogc nothrow
     {
-        ballX += ballVx;
-        ballY += ballVy;
-        if (ballX < 0)
-        {
-            ballX = 0;
-            ballVx = -ballVx;
-        }
-        if (ballX + BALL > win.canvas.width)
-        {
-            ballX = win.canvas.width - BALL;
-            ballVx = -ballVx;
-        }
-        if (ballY < 0)
-        {
-            ballY = 0;
-            ballVy = -ballVy;
-        }
-        if (ballY + BALL > win.canvas.height)
-        {
-            ballY = win.canvas.height - BALL;
-            ballVy = -ballVy;
-        }
+        
     }
 
     void draw() @nogc nothrow
     {
         Canvas* c = &win.canvas;
         c.blit(&paint, 0, 0);
-        c.fillRect(ballX, ballY, BALL, BALL, rgb(255, 200, 40));
-        c.rect(ballX, ballY, BALL, BALL, rgb(255, 255, 255));
         c.hline(mouseX - 6, mouseY, 13, rgb(255, 255, 255));
         c.vline(mouseX, mouseY - 6, 13, rgb(255, 255, 255));
         c.rect(0, 0, c.width, c.height, focused ? rgb(255, 200, 40) : rgb(90, 90, 90));
@@ -147,10 +125,6 @@ struct Demo
 int main(string[] args)
 {
     Demo d;
-    d.ballX = 40;
-    d.ballY = 30;
-    d.ballVx = 3;
-    d.ballVy = 2;
     d.running = true;
 
     if (!windowCreate(&d.win, WIDTH, HEIGHT))
@@ -158,12 +132,14 @@ int main(string[] args)
         uputs("gfxdemo: could not create a window\n");
         return 1;
     }
+    
     d.paint.pixels = cast(uint*)umalloc(cast(size_t)WIDTH * HEIGHT * 4);
     if (d.paint.pixels is null)
     {
         windowClose(&d.win);
         return 1;
     }
+    
     d.paint.width = cast(int)WIDTH;
     d.paint.height = cast(int)HEIGHT;
     d.paint.stride = cast(int)WIDTH;
@@ -172,15 +148,15 @@ int main(string[] args)
     if (!d.win.serverRunning)
         uputs("gfxdemo: no graphics server yet - 'gfx start' shows this window\n");
 
-    while (d.running)
+    while(d.running)
     {
         // The poll doubles as the frame timer: it returns after 16 ms at the latest
-        GfxEvent ev;
-        bool got = windowPoll(&d.win, &ev, 16);
-        while (got)
+        GfxEvent event;
+        bool got = windowPoll(&d.win, &event, 16);
+        while(got)
         {
-            d.handle(&ev);
-            got = windowPoll(&d.win, &ev, 0);
+            d.handle(&event);
+            got = windowPoll(&d.win, &event, 0);
         }
 
         d.update();
