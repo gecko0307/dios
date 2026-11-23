@@ -47,7 +47,9 @@ Simple examples of what can be done in DIOS userspace.
 - `dir.elf [PATH]` - lists a directory
 - `memtest.elf` - dynamic memory allocation test
 - `timer.elf` - a timer that can be run in background (for example, `timer.elf 10s &`)
-- `math.elf` - floating-point math functions test.
+- `math.elf` - floating-point math functions test
+- `random.elf` - random number generator test
+- `gfxdemo` - graphical application demo. Run `gfxdemo.elf &` to start it in background, then switch to graphics mode (see below).
 
 Applications are also written in D, but they actually can be written in any language that can make platform-independent ELF64 binaries.
 
@@ -62,19 +64,31 @@ DIOS project consists of a several structural layers, each with its own workflow
 - `src/ulib` contains the **ulib** runtime library code:
   - `src/ulib/ulib/dios` - implements basic libc-like functionality on top of [DIOS syscalls](doc/sys_call.md)
   - `src/ulib/umain.d` - runtime entry point. Allocates an arguments array and calls compiler-generated `_Dmain`
-- `src/user` contains sample userspace programs:
-  - `src/user/hello`
-  - `src/user/file`
-  - `src/user/dir`
-  - `src/user/memtest`
-  - `src/user/timer`
-  - `src/user/math`
+- `src/user` contains userspace services and built-in programs:
+  - `src/user/gfxd` - **GFXD**, the DIOS Graphics Server
+- `src/demos` contains sample applications:
+  - `src/demos/hello`
+  - `src/demos/file`
+  - `src/demos/dir`
+  - `src/demos/memtest`
+  - `src/demos/timer`
+  - `src/demos/math`
+  - `src/demos/random`
+  - `src/demos/gfxdemo`
 
 ## ulib
 
 ulib stands for "user library" (or, alternatively, "unfinished library" because, again, it is a hobby project that will likely never be finished). It is a low-level runtime library for DIOS applications written in D.
 
 Most of its functions are libc-like and self-explanatory. Full list of them can be found [here](doc/ulib.md).
+
+## GFXD
+
+GFXD is a graphics server that allows other applications to draw graphics on the screen. It is something akin to X Server in Unix.
+
+GFXD is a userspace program that is provided to the kernel as a binary module via Limine (see `limine.conf`). It must be present as `cdroot/user/gfxd.elf` before building the ISO image with the system. DIOS repository provides a prebuilt GFXD binary for convenience.
+
+The graphics server is started with `gfx start` command. In the graphics mode, you can switch back to the kernel shell with `Ctrl+F1` and to the graphics mode with `Ctrl+F2`. `Ctrl+F3` stops the graphics server.
 
 ## "Hello, World" application in D
 
@@ -103,7 +117,7 @@ Run `python build.py` to compile the kernel (`cdroot/kernel64.bin`) and generate
 
 Run `buildlib.bat` to compile ulib and generate `libulib.a`. This is necessary to build sample programs.
 
-All sample programs are built with DUB:
+Userspace services and sample programs are built with DUB:
 
 ```
 dub build

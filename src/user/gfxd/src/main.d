@@ -27,7 +27,7 @@ For more information, please refer to <https://unlicense.org>
 module main;
 
 /**
- * gfxd - the graphics server.
+ * GFXD - DIOS Graphics Server.
  *
  * Start it from the kernel shell with `gfx start` (or `run gfxd &`). It takes the screen
  * at once. Ctrl+F1 switches back to the shell, Ctrl+F2 back to the server, Ctrl+F3 kills
@@ -36,8 +36,8 @@ module main;
  *
  * Everything it does is a reaction to events from ugfxPoll():
  *   GFX_EV_SURFACE_NEW / _DAMAGE / _GONE   programs and their drawable areas   -> wm.d
- *   GFX_EV_VISIBLE                          the screen was given / taken away
- *   GFX_EV_KEY / GFX_EV_MOUSE               input, only while we have the screen -> wm.d
+ *   GFX_EV_VISIBLE                         the screen was given / taken away
+ *   GFX_EV_KEY / GFX_EV_MOUSE              input, only while we have the screen -> wm.d
  * and then, when something changed, a new picture is composed (render.d) and presented.
  *
  * Messages printed with uputs() land on the shell's screen: read them after Ctrl+F1.
