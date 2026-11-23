@@ -87,6 +87,8 @@ void main(string[] args)
 }
 ```
 
+ulib is currently statically linked; DIOS doesn't support dynamic linking yet.
+
 ## Building
 
 Prerequisites:

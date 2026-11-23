@@ -73,7 +73,7 @@ int main(string[] args)
         return 0;
     }
 
-    int fd = uopen(path.ptr);
+    int fd = uopen(path.ptr, O_RDONLY);
     if (fd < 0)
     {
         uputs("dir: cannot open\n");

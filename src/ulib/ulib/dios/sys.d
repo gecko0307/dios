@@ -49,6 +49,11 @@ enum ulong SYS_BRK = 13;
 enum ulong SYS_YIELD = 14;
 enum ulong SYS_GETPID = 15;
 
+// uopen() flags
+enum int O_RDONLY = 0;
+enum int O_WRONLY = 1;
+enum int O_RDWR   = 2;
+
 // useek() origins
 enum int SEEK_SET = 0;
 enum int SEEK_CUR = 1;
@@ -136,8 +141,11 @@ void uclear() @nogc nothrow
 // Files (read-only). Paths are relative to the shell's current directory or absolute.
 // At most 8 files can be open at once; they are closed when the program ends.
 
-/// Returns the file descriptor of a file or directory, or -1 if it doesn't exist.
-int uopen(const(char)* path) @nogc nothrow
+/**
+ * Returns the file descriptor of a file or directory, or -1 if it doesn't exist.
+ * flag parameters is currently not used and should be zero (O_RDONLY).
+ */
+int uopen(const(char)* path, int flag) @nogc nothrow
 {
     return cast(int)sys_call(SYS_OPEN, cast(ulong)path, 0, 0);
 }

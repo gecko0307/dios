@@ -70,7 +70,7 @@ int main(string[] args)
         }
     }
 
-    int fd = uopen(name.ptr);
+    int fd = uopen(name.ptr, O_RDONLY);
 
     if (fd < 0)
     {
