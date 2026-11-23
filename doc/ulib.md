@@ -82,6 +82,8 @@ Basic input/output functions.
 
 `void uputf(double v, uint precision = 6)`
 
+`int uprintf(const(char)* fmt, ...)`
+
 ## ulib.math
 
 Elementary math functions.

@@ -1,7 +1,7 @@
 DIOS 0.5.0 - TBD
 ----------------
 - **ulib**:
-  - New functions `memcmp`, `uputi`.
+  - New functions `memcmp`, `uputi`, `uprintf`.
 
 DIOS 0.4.0 - 23 Nov, 2026
 -------------------------
