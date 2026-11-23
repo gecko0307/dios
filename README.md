@@ -46,7 +46,8 @@ Simple examples of what can be done in DIOS userspace.
 - `file.elf FILE [OFFSET]` - print a text file, optionally starting at a byte offset.
 - `dir.elf [PATH]` - lists a directory
 - `memtest.elf` - dynamic memory allocation test
-- `timer.elf` - a timer that can be run in background (for example, `timer.elf 10s &`).
+- `timer.elf` - a timer that can be run in background (for example, `timer.elf 10s &`)
+- `math.elf` - floating-point math functions test.
 
 Applications are also written in D, but they actually can be written in any language that can make platform-independent ELF64 binaries.
 
@@ -67,6 +68,7 @@ DIOS project consists of a several structural layers, each with its own workflow
   - `src/user/dir`
   - `src/user/memtest`
   - `src/user/timer`
+  - `src/user/math`
 
 ## ulib
 
