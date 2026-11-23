@@ -51,9 +51,9 @@ import dios.core.xhci;
 enum size_t SHELL_LINE_CAPACITY = 128;
 enum size_t SHELL_HISTORY_CAPACITY = 16;
 
-immutable string[35] SHELL_COMMANDS = [
+immutable string[36] SHELL_COMMANDS = [
     "help", "about", "mem", "time", "uptime", "clock",
-    "irq", "pci", "history", "echo", "poweroff",
+    "irq", "pci", "history", "echo", "poweroff", "shutdown",
     "reboot", "clear", "cpuinfo", "acpi", "irqstat",
     "sleep", "hexdump", "crash", "version", "ls", "run", "memmap",
     "programs", "disk", "mount", "cd", "pwd", "cat", "dmesg", "usb",
@@ -675,40 +675,40 @@ void shellExecute() @nogc nothrow
     if (shellEquals(shellLine.ptr, "help"))
     {
         cprintf("DIOS kernel shell\n");
-        cprintf("  help             Show this command list\n");
-        cprintf("  about            Kernel version information\n");
-        cprintf("  mem              Physical memory statistics\n");
-        cprintf("  memmap           Show the physical memory map\n");
-        cprintf("  time             Print current date and time\n");
-        cprintf("  uptime           Time since boot\n");
-        cprintf("  clock            Clock source and timer status\n");
-        cprintf("  irq              Interrupt controller status\n");
-        cprintf("  irqstat          Interrupt counts per vector\n");
-        cprintf("  pci              Enumerate PCI functions\n");
-        cprintf("  cpuinfo          CPU identification and features\n");
-        cprintf("  acpi             ACPI tables, MADT, FADT summary\n");
+        cprintf("  help                Show this command list\n");
+        cprintf("  about               Kernel version information\n");
+        cprintf("  mem                 Physical memory statistics\n");
+        cprintf("  memmap              Show the physical memory map\n");
+        cprintf("  time                Print current date and time\n");
+        cprintf("  uptime              Time since boot\n");
+        cprintf("  clock               Clock source and timer status\n");
+        cprintf("  irq                 Interrupt controller status\n");
+        cprintf("  irqstat             Interrupt counts per vector\n");
+        cprintf("  pci                 Enumerate PCI functions\n");
+        cprintf("  cpuinfo             CPU identification and features\n");
+        cprintf("  acpi                ACPI tables, MADT, FADT summary\n");
         cprintf("  hexdump [-p] ADDR [LEN]  Dump memory (-p: physical address)\n");
-        cprintf("  history          Show recent commands\n");
-        cprintf("  echo TEXT        Print TEXT\n");
-        cprintf("  sleep SECONDS    Wait (Ctrl+C aborts)\n");
-        cprintf("  programs         List programs on the boot media\n");
-        cprintf("  dmesg [N [SKIP]] Kernel log (last N lines, SKIP lines before the end)\n");
-        cprintf("  usb              List the USB devices (hubs, keyboards, disks...)\n");
-        cprintf("  disk             Show USB disks and partitions\n");
-        cprintf("  mount [N]        Mount an exFAT or FAT32 partition as /\n");
-        cprintf("  ls [PATH]        List a directory on the mounted volume\n");
-        cprintf("  cat FILE         Print a text file\n");
-        cprintf("  cd [DIR]         Change the current directory\n");
-        cprintf("  pwd              Show the current directory\n");
-        cprintf("  run NAME [ARGS] [&]  Run a boot program or an ELF from the disk (& = background)\n");
-        cprintf("  ps               List running programs\n");
-        cprintf("  kill ID          Kill a program\n");
-        cprintf("  fg [ID]          Bring a background program to the foreground\n");
-        cprintf("  gfx [CMD]        Graphics server: status, start [NAME], stop, show, hide\n");
-        cprintf("  clear            Clear the screen\n");
+        cprintf("  history             Show recent commands\n");
+        cprintf("  echo TEXT           Print TEXT\n");
+        cprintf("  sleep SECONDS       Wait (Ctrl+C aborts)\n");
+        cprintf("  programs            List programs on the boot media\n");
+        cprintf("  dmesg [N [SKIP]]    Kernel log (last N lines, SKIP lines before the end)\n");
+        cprintf("  usb                 List the USB devices (hubs, keyboards, disks...)\n");
+        cprintf("  disk                Show USB disks and partitions\n");
+        cprintf("  mount [N]           Mount an exFAT or FAT32 partition as /\n");
+        cprintf("  ls [PATH]           List a directory on the mounted volume\n");
+        cprintf("  cat FILE            Print a text file\n");
+        cprintf("  cd [DIR]            Change the current directory\n");
+        cprintf("  pwd                 Show the current directory\n");
+        cprintf("  run NAME [ARGS] [&] Run a boot program or an ELF from the disk (& = background)\n");
+        cprintf("  ps                  List running programs\n");
+        cprintf("  kill ID             Kill a program\n");
+        cprintf("  fg [ID]             Bring a background program to the foreground\n");
+        cprintf("  gfx [CMD]           Graphics server: status, start [NAME], stop, show, hide\n");
+        cprintf("  clear               Clear the screen\n");
         cprintf("  crash pf|ud|div|gp  Trigger a CPU exception (kernel halts)\n");
-        cprintf("  reboot           Restart the computer\n");
-        cprintf("  poweroff         Shut down the computer\n");
+        cprintf("  reboot              Restart the computer\n");
+        cprintf("  poweroff / shutdown Shut down the computer\n");
         cprintf("Keys: arrows/Home/End/Del edit, Up/Down history, Tab completes,\n");
         cprintf("      Ctrl+A/E start/end, Ctrl+U clear line, Ctrl+L redraw, Ctrl+C cancel\n");
         cprintf("      Ctrl+F1 shows the shell, Ctrl+F2 shows the graphics server, Ctrl+F3 stops the graphics server\n");
@@ -931,9 +931,9 @@ void shellExecute() @nogc nothrow
                 cprintf("No such program: %s\n", name.ptr);
         }
     }
-    else if (shellEquals(shellLine.ptr, "poweroff"))
+    else if (shellEquals(shellLine.ptr, "poweroff") || shellEquals(shellLine.ptr, "shutdown"))
     {
-        cprintf("Powering off...\n");
+        cprintf("Turning off the computer...\n");
         if (!acpiPoweroff())
             cprintf("ACPI shutdown is unavailable (missing FADT/DSDT _S5_ or PM1a control block).\n");
     }

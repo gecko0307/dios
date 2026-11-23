@@ -32,4 +32,4 @@
 - `clear` - clear the screen
 - `crash pf|ud|div|gp` - trigger a CPU exception (kernel halts)
 - `reboot` - restart the computer
-- `poweroff` - shut down the computer.
+- `poweroff` or `shutdown` - shut down the computer.
