@@ -1,0 +1,53 @@
+{
+    "name": "random",
+    "description": "Simple DIOS application",
+    "homepage": "",
+    "license": "Unlicense",
+    "authors": [
+        "Timur Gafarov"
+    ],
+    
+    "importPaths": [
+        "src", "../../ulib"
+    ],
+    
+    "sourcePaths": [
+        "src", "../../ulib"
+    ],
+    
+    "buildRequirements": [
+        "allowWarnings"
+    ],
+    
+    "targetType": "executable",
+    "targetName": "random.elf",
+    
+    "dflags-ldc": [
+        "-mtriple=x86_64-none-elf",
+        "-nodefaultlib",
+        "--boundscheck=off",
+        "--disable-red-zone",
+        "--use-ctors=0",
+        "--fno-exceptions",
+        "--nogc",
+        "-O0",
+        "-link-internally",
+        "-defaultlib="
+    ],
+
+    "lflags": [
+        "-m", "elf_x86_64",
+        "-T", "linker.ld",
+        "-z", "max-page-size=0x1000",
+        "-static",
+        "--gc-sections",
+        "-u", "_start",
+        "../../../libulib.a"
+    ],
+    
+    "postBuildCommands-windows": [
+        "move /Y random.elf.exe random.elf",
+        "if not exist ..\\..\\..\\usbstick mkdir ..\\..\\..\\usbstick",
+        "copy /Y random.elf ..\\..\\..\\usbstick\\random.elf"
+    ]
+}
