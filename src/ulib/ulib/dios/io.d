@@ -29,22 +29,58 @@ import ulib.dios.sys;
 import ulib.dios.mem;
 import core.stdc.stdarg;
 
+// Buffered output device
+private struct OutBuf
+{
+    char[512] data;
+    size_t pos = 0;
+
+    void putc(char c) @nogc nothrow
+    {
+        if (pos >= data.length)
+            flush();
+        data[pos++] = c;
+    }
+
+    void puts(const(char)* s, size_t len) @nogc nothrow
+    {
+        for (size_t i = 0; i < len; i++)
+            putc(s[i]);
+    }
+
+    void flush() @nogc nothrow
+    {
+        if (pos > 0)
+        {
+            uwrite(data.ptr, pos);
+            pos = 0;
+        }
+    }
+}
+
+private __gshared OutBuf outBuf;
+
 extern(C):
 
-/// Writes a zero-terminated string to the standard output.
-void uputs(const(char)* s) @nogc nothrow
+void uflush_b() @nogc nothrow
 {
-    uwrite(s, ustrlen(s));
+    outBuf.flush();
 }
 
-/// Writes a character to the standard output.
-void uputc(char c) @nogc nothrow
+/// [Buffered] Writes a zero-terminated string to the standard output.
+void uputs_b(const(char)* s) @nogc nothrow
 {
-    uwrite(&c, 1);
+    outBuf.puts(s, ustrlen(s));
 }
 
-/// Writes an unsigned integer to the standard output.
-void uputu(ulong v) @nogc nothrow
+/// [Buffered] Writes a zero-terminated string to the standard output.
+void uputc_b(char c) @nogc nothrow
+{
+    outBuf.putc(c);
+}
+
+/// [Buffered] Writes an unsigned integer to the standard output.
+void uputu_b(ulong v) @nogc nothrow
 {
     char[20] d;
     uint k = 20;
@@ -54,11 +90,11 @@ void uputu(ulong v) @nogc nothrow
         v /= 10;
     }
     while (v != 0);
-    uwrite(d.ptr + k, 20 - k);
+    outBuf.puts(d.ptr + k, 20 - k);
 }
 
-/// Writes a signed integer to the standard output.
-void uputi(long v) @nogc nothrow
+/// [Buffered] Writes a signed integer to the standard output.
+void uputi_b(long v) @nogc nothrow
 {
     char[21] d; // 20 digits max + 1 byte for '-'
     uint k = 21;
@@ -72,11 +108,11 @@ void uputi(long v) @nogc nothrow
     } while (u != 0);
     if (neg)
         d[--k] = '-';
-    uwrite(d.ptr + k, 21 - k);
+    outBuf.puts(d.ptr + k, 21 - k);
 }
 
-/// Writes an unsigned integer in hexadecimal format to the standard output.
-void uputhex(ulong v) @nogc nothrow
+/// [Buffered] Writes an unsigned integer in hexadecimal format to the standard output.
+void uputhex_b(ulong v) @nogc nothrow
 {
     char[16] d;
     for (int i = 15; i >= 0; i--)
@@ -85,28 +121,28 @@ void uputhex(ulong v) @nogc nothrow
         d[i] = cast(char)(nib < 10 ? '0' + nib : 'a' + nib - 10);
         v >>= 4;
     }
-    uwrite("0x".ptr, 2);
-    uwrite(d.ptr, 16);
+    outBuf.puts("0x".ptr, 2);
+    outBuf.puts(d.ptr, 16);
 }
 
-/// Writes a floating-point number to the standard output.
-void uputf(double v, uint precision = 6) @nogc nothrow
+/// [Buffered] Writes a floating-point number to the standard output.
+void uputf_b(double v, uint precision = 6) @nogc nothrow
 {
     if (v != v)
     {
-        uputs("nan");
+        uputs_b("nan");
         return;
     }
 
     if (v > double.max)
     {
-        uputs("inf");
+        uputs_b("inf");
         return;
     }
 
     if (v < -double.max)
     {
-        uputs("-inf");
+        uputs_b("-inf");
         return;
     }
 
@@ -115,26 +151,26 @@ void uputf(double v, uint precision = 6) @nogc nothrow
 
     if (v < 0.0)
     {
-        uputc('-');
+        uputc_b('-');
         v = -v;
     }
 
     // Avoid converting an out-of-range integer.
     if (v >= 18446744073709551616.0)
     {
-        uputs("overflow");
+        uputs_b("overflow");
         return;
     }
 
     ulong integer = cast(ulong)v;
     double fraction = v - cast(double)integer;
 
-    uputu(integer);
+    uputu_b(integer);
 
     if (precision == 0)
         return;
 
-    uputc('.');
+    uputc_b('.');
 
     ulong scale = 1;
     for (uint i = 0; i < precision; ++i)
@@ -150,7 +186,7 @@ void uputf(double v, uint precision = 6) @nogc nothrow
         // This case is handled below by a separate output path.
         if (integer == ulong.max)
         {
-            uputs("overflow");
+            uputs_b("overflow");
             return;
         }
 
@@ -163,9 +199,49 @@ void uputf(double v, uint precision = 6) @nogc nothrow
 
     while (divisor > 0)
     {
-        uputc(cast(char)('0' + (fractional / divisor) % 10));
+        uputc_b(cast(char)('0' + (fractional / divisor) % 10));
         divisor /= 10;
     }
+}
+
+/// [Immediate] Writes a zero-terminated string to the standard output.
+void uputs(const(char)* s) @nogc nothrow
+{
+    uwrite(s, ustrlen(s));
+}
+
+/// [Immediate] Writes a character to the standard output.
+void uputc(char c) @nogc nothrow
+{
+    uwrite(&c, 1);
+}
+
+/// [Immediate] Writes an unsigned integer to the standard output.
+void uputu(ulong v) @nogc nothrow
+{
+    uputu_b(v);
+    outBuf.flush();
+}
+
+/// [Immediate] Writes a signed integer to the standard output.
+void uputi(long v) @nogc nothrow
+{
+    uputi_b(v);
+    outBuf.flush();
+}
+
+/// [Immediate] Writes an unsigned integer in hexadecimal format to the standard output.
+void uputhex(ulong v) @nogc nothrow
+{
+    uputhex_b(v);
+    outBuf.flush();
+}
+
+/// [Immediate] Writes a floating-point number to the standard output.
+void uputf(double v, uint precision = 6) @nogc nothrow
+{
+    uputf_b(v, precision);
+    outBuf.flush();
 }
 
 /**
@@ -186,7 +262,7 @@ int uprintf(const(char)* fmt, ...) @nogc nothrow
         
         if (c != '%')
         {
-            uputc(c);
+            uputc_b(c);
             continue;
         }
         else
@@ -200,7 +276,7 @@ int uprintf(const(char)* fmt, ...) @nogc nothrow
         // Character
         if (fmt[i] == 'c')
         {
-            uputc(va_arg!(char)(ap));
+            uputc_b(va_arg!(char)(ap));
         }
         // Zero-terminated string
         else if (fmt[i] == 's')
@@ -209,34 +285,36 @@ int uprintf(const(char)* fmt, ...) @nogc nothrow
             if (str != null)
             {
                 while (*str != 0)
-                    uputc(*str++);
+                    uputc_b(*str++);
             }
             else
-                uputs("null");
+                uputs_b("null");
         }
         // Signed decimal
         else if (c == 'd')
         {
-            uputi(va_arg!long(ap));
+            uputi_b(va_arg!long(ap));
         }
         // Unsigned decimal
         else if (fmt[i] == 'u')
         {
-            uputu(va_arg!ulong(ap));
+            uputu_b(va_arg!ulong(ap));
         }
         // Hexadecimal
         else if (fmt[i] == 'x')
         {
-            uputhex(va_arg!ulong(ap));
+            uputhex_b(va_arg!ulong(ap));
         }
         // Floating-point
         else if (fmt[i] == 'f')
         {
-            uputf(va_arg!double(ap));
+            uputf_b(va_arg!double(ap));
         }
     }
     
     va_end(ap);
+    
+    outBuf.flush();
     
     return 0;
 }

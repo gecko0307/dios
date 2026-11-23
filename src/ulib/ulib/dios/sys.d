@@ -25,6 +25,8 @@ For more information, please refer to <https://unlicense.org>
 */
 module ulib.dios.sys;
 
+import ulib.dios.io;
+
 /**
  * DIOS kernel API
  */
@@ -85,6 +87,7 @@ long sys_call(ulong nr, ulong a0, ulong a1, ulong a2) @nogc nothrow;
 /// Terminates the application.
 void uexit(long code) @nogc nothrow
 {
+    uflush_b(); // flush the output
     sys_call(SYS_EXIT, cast(ulong)code, 0, 0);
 }
 

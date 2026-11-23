@@ -31,6 +31,7 @@ module umain;
  */
 
 import ulib.dios.alloc;
+import ulib.dios.io;
 
 private bool isSpace(char c) @nogc nothrow
 {
@@ -103,6 +104,8 @@ extern(C) int umain(const(char)* rawArgs) @nogc nothrow
     }
 
     int result = _Dmain(argv);
+    
+    uflush_b(); // flush the output
 
     ufree(block);
 
