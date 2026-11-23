@@ -85,3 +85,15 @@ size_t ustrlen(const(char)* s) @nogc nothrow
         n++;
     return n;
 }
+
+///
+size_t alignUp(size_t value, size_t alignment) @nogc nothrow
+{
+    return (value + alignment - 1) & ~(alignment - 1);
+}
+
+///
+size_t alignDown(size_t a, size_t alignment) @nogc nothrow
+{
+    return a & ~(alignment - 1);
+}

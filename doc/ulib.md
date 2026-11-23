@@ -66,23 +66,43 @@ Memory helpers.
 
 `size_t ustrlen(const(char)* s)`
 
+`size_t alignUp(size_t value, size_t alignment)`
+
+`size_t alignDown(size_t a, size_t alignment)`
+
 ## ulib.dios.io
 
 Basic input/output functions.
 
 `void uputs(const(char)* s)`
 
+`void uputs_b(const(char)* s)`
+
 `void uputc(char c)`
+
+`void uputc_b(char c)`
 
 `void uputu(ulong v)`
 
+`void uputu_b(ulong v)`
+
 `void uputi(long v)`
+
+`void uputi_b(long v)`
 
 `void uputhex(ulong v)`
 
+`void uputhex_b(ulong v)`
+
 `void uputf(double v, uint precision = 6)`
 
+`void uputf_b(double v, uint precision = 6)`
+
+`void uflush_b()`
+
 `int uprintf(const(char)* fmt, ...)`
+
+`uput*` functions are available in two forms: buffered (`_b`) and immediate. Buffered functions don't print immediately, their output is stored in a ring buffer and sent to the kernel by calling `uflush_b`. This makes the output atomic. `uprintf` uses this mechanism to print whole lines that are not messed up at scheduler interrupts.
 
 ## ulib.math
 
