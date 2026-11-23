@@ -129,7 +129,7 @@ struct Demo
         c.blit(&paint, 0, 0);
         //c.hline(mouseX - 6, mouseY, 13, rgb(255, 255, 255));
         //c.vline(mouseX, mouseY - 6, 13, rgb(255, 255, 255));
-        c.rect(0, 0, c.width, c.height, focused ? rgb(255, 200, 40) : rgb(90, 90, 90));
+        //c.rect(0, 0, c.width, c.height, focused ? rgb(255, 200, 40) : rgb(90, 90, 90));
         
         needRedraw = false;
     }

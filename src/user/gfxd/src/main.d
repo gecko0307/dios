@@ -51,7 +51,7 @@ import render;
 enum ulong FRAME_MS = 16;           // at most ~60 pictures per second
 
 __gshared bool running = true;
-__gshared bool sceneDirty = true;   // windows, content or focus changed: recompose everything
+__gshared bool sceneDirty = true;   // the whole screen is out of date (start, screen regained)
 __gshared bool cursorDirty;         // only the mouse moved: cheap update
 
 void handleEvent(const(GfxEvent)* ev)
@@ -60,7 +60,6 @@ void handleEvent(const(GfxEvent)* ev)
     {
         case GFX_EV_SURFACE_NEW:
             wmAdd(ev.surface, cast(uint)ev.c);
-            sceneDirty = true;
             break;
 
         case GFX_EV_SURFACE_DAMAGE:
@@ -74,7 +73,6 @@ void handleEvent(const(GfxEvent)* ev)
 
         case GFX_EV_SURFACE_GONE:
             wmRemove(ev.surface);
-            sceneDirty = true;
             break;
 
         case GFX_EV_VISIBLE:
@@ -91,7 +89,7 @@ void handleEvent(const(GfxEvent)* ev)
 
         case GFX_EV_MOUSE:
             wmHandleMouse(ev);
-            cursorDirty = true;         // the cursor moved (a click may also change the scene: see wmChanged)
+            cursorDirty = true;         // the cursor moved (a drag or click may also change the scene: see wmTakeDamage)
             break;
 
         default:
@@ -112,7 +110,7 @@ int main(string[] args)
         uputs("gfxd: out of memory for the back buffer\n");
         return 1;
     }
-    wmInit();
+    wmInit(cast(int)info.width, cast(int)info.height);
 
     // From here on we own the screen. Programs that are already running are announced
     // as GFX_EV_SURFACE_NEW, the first event is for them.
@@ -145,18 +143,17 @@ int main(string[] args)
         if (got < 0)
             break;                      // not the server any more
 
-        if (wmChanged)
-        {
-            sceneDirty = true;
-            wmChanged = false;
-        }
+        // What the window manager changed (moves, raising, focus, new/gone windows)
+        int dx, dy, dw, dh;
+        if (wmTakeDamage(&dx, &dy, &dw, &dh))
+            renderAddDamage(dx, dy, dw, dh);
 
         pending = sceneDirty || cursorDirty || renderHasDamage;
         if (pending && renderVisible && uticks() - lastFrame >= FRAME_MS)
         {
             if (sceneDirty)
             {
-                renderFrame();              // layout changed: recompose and present everything
+                renderFrame();              // start or screen regained: recompose and present everything
             }
             else
             {

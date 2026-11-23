@@ -56,8 +56,10 @@ import wm;
 import cursor;
 
 enum uint COLOR_DESKTOP      = 0x00203A5A;
-enum uint COLOR_BORDER       = 0x00707070;
-enum uint COLOR_BORDER_FOCUS = 0x00FFC040;
+enum uint COLOR_FRAME        = 0x00505050;      // border and title bar
+enum uint COLOR_FRAME_FOCUS  = 0x003A6EA5;
+enum uint COLOR_CLOSE        = 0x00B03030;
+enum uint COLOR_CLOSE_X      = 0x00FFFFFF;
 enum uint CURSOR_KEY         = 0x00FF00FF;      // transparent pixels in cursor.d
 
 __gshared Canvas renderScene;       // desktop and windows, no cursor
@@ -129,6 +131,21 @@ private void renderPresentRect(int x, int y, int w, int h)
     ugfxServerPresent(renderScreen.pixels, &r, 0);
 }
 
+// The frame of a window: border and title bar in one colour, a close button on the title bar.
+// `c` is a view of the scene that starts at rx, ry: coordinates are shifted by that.
+// A title (text) would go here, as soon as there is a font.
+private void renderDecoration(Canvas* c, const(WmWindow)* w, bool focused, int rx, int ry)
+{
+    c.fillRect(wmFrameX(w) - rx, wmFrameY(w) - ry, wmFrameW(w), wmFrameH(w),
+               focused ? COLOR_FRAME_FOCUS : COLOR_FRAME);
+
+    int bx = wmCloseX(w) - rx;
+    int by = w.y - WM_TITLE_H - ry;
+    c.fillRect(bx + 2, by + 2, WM_TITLE_H - 4, WM_TITLE_H - 4, COLOR_CLOSE);
+    c.line(bx + 6, by + 6, bx + WM_TITLE_H - 7, by + WM_TITLE_H - 7, COLOR_CLOSE_X);
+    c.line(bx + WM_TITLE_H - 7, by + 6, bx + 6, by + WM_TITLE_H - 7, COLOR_CLOSE_X);
+}
+
 // Recomposes the part rx, ry, rw, rh (inside the screen) of the scene: desktop first, then the
 // windows back to front. Everything is drawn on a clipped view of the scene (Canvas.sub), so a
 // window that only partly overlaps the rectangle just contributes its overlapping part.
@@ -142,9 +159,7 @@ private void renderScenePart(int rx, int ry, int rw, int rh)
     {
         int idx = wmOrder[i];
         WmWindow* w = &wmWindows[idx];
-        uint border = (idx == wmFocus) ? COLOR_BORDER_FOCUS : COLOR_BORDER;
-        // coordinates relative to the view
-        c.rect(w.x - 1 - rx, w.y - 1 - ry, w.canvas.width + 2, w.canvas.height + 2, border);
+        renderDecoration(&c, w, idx == wmFocus, rx, ry);
         c.blit(&w.canvas, w.x - rx, w.y - ry);
     }
 }

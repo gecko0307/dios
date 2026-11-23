@@ -30,19 +30,40 @@ module wm;
  * Window logic of the graphics server: which windows exist, where they are, in which order
  * they overlap, who has the keyboard, and what a mouse click or a key press means.
  *
- * A "window" here is a kernel surface (the client's drawable area, mapped into this program)
- * plus a position. There is no decoration, no dragging, no resizing yet - this is the file to
- * grow all of that in. Ideas, roughly in order:
- *   - title bar + close button (draw in render.d; a click on it sends GFX_EV_CLOSE)
- *   - dragging windows (state next to wmGrab: a click on the title bar starts a drag)
- *   - a taskbar / launcher, desktop icons
- *   - per-window dirty rectangles (see GFX_EV_SURFACE_DAMAGE) instead of redrawing everything
+ * A "window" is a kernel surface (the client's drawable area, mapped into this program) plus a
+ * position, and a frame around it: a border and a title bar ABOVE the drawable area. (x, y) is
+ * the top left of the drawable area, so clients never see the decoration.
+ *
+ *        +---------------------------+   <- frame (WM_BORDER wide)
+ *        | title bar            [ X ]|   <- WM_TITLE_H high; X = close button
+ *        +---------------------------+
+ *        |                           |
+ *        |   drawable area (x, y)    |
+ *        +---------------------------+
+ *
+ * Mouse: dragging the title bar moves the window; pressing and releasing the close button sends
+ * the client GFX_EV_CLOSE (it decides what to do); a click anywhere raises the window and gives
+ * it the keyboard. Everything on the drawable area is forwarded to the client.
+ *
+ * This module only decides; drawing is render.d. Changes to what is on screen are reported as
+ * damage rectangles (wmTakeDamage), so that render.d redraws just those.
+ *
+ * Ideas to continue: resizing (a new surface + an event to the client), minimize, a taskbar,
+ * keyboard shortcuts (Alt+Tab needs a modifier the kernel does not report yet), snapping.
  */
 
 import ulib.dios;
 import ulib.gfx;
 
 enum int WM_MAX_WINDOWS = 32;
+enum int WM_TITLE_H = 20;               // title bar height; the close button is this wide, too
+enum int WM_BORDER = 2;
+
+// Which part of a window a point is on
+enum int WM_PART_NONE   = 0;
+enum int WM_PART_CLIENT = 1;            // the drawable area
+enum int WM_PART_TITLE  = 2;            // title bar and border
+enum int WM_PART_CLOSE  = 3;            // the close button
 
 struct WmWindow
 {
@@ -58,23 +79,120 @@ __gshared WmWindow[WM_MAX_WINDOWS] wmWindows;
 __gshared int[WM_MAX_WINDOWS] wmOrder;      // indices into wmWindows, back to front
 __gshared int wmCount;                      // how many entries of wmOrder are valid
 __gshared int wmFocus = -1;                 // window that gets the keyboard, -1: none
-__gshared int wmGrab = -1;                  // window that gets the mouse while a button is down
+__gshared int wmGrab = -1;                  // window a mouse button press started on, until all buttons are up
+__gshared bool wmGrabClient;                // ... and it was on the drawable area (so the client gets the events)
+__gshared int wmDrag = -1;                  // window being moved by its title bar
+__gshared int wmDragDx;                     // mouse position inside the window when the drag started
+__gshared int wmDragDy;
+__gshared int wmCloseArmed = -1;            // window whose close button is pressed (fires on release)
 __gshared int wmCascade;                    // where the next window goes
 __gshared int wmMouseX;
 __gshared int wmMouseY;
 __gshared uint wmButtons;
-__gshared bool wmChanged;                   // windows, their order or the focus changed: the scene needs recomposing
+__gshared int wmScreenW;
+__gshared int wmScreenH;
 
-void wmInit()
+// Pending damage in screen coordinates (bounding box, half open); see wmTakeDamage()
+__gshared bool wmHasDamage;
+__gshared int wmDx0;
+__gshared int wmDy0;
+__gshared int wmDx1;
+__gshared int wmDy1;
+
+void wmInit(int screenW, int screenH)
 {
     for (int i = 0; i < WM_MAX_WINDOWS; i++)
         wmWindows[i].used = false;
     wmCount = 0;
     wmFocus = -1;
     wmGrab = -1;
+    wmDrag = -1;
+    wmCloseArmed = -1;
     wmCascade = 0;
-    wmChanged = true;
+    wmScreenW = screenW;
+    wmScreenH = screenH;
+    wmHasDamage = false;
 }
+
+// ---- geometry ----
+
+int wmFrameX(const(WmWindow)* w) { return w.x - WM_BORDER; }
+int wmFrameY(const(WmWindow)* w) { return w.y - WM_TITLE_H - WM_BORDER; }
+int wmFrameW(const(WmWindow)* w) { return w.canvas.width + 2 * WM_BORDER; }
+int wmFrameH(const(WmWindow)* w) { return w.canvas.height + WM_TITLE_H + 2 * WM_BORDER; }
+
+/// Left edge of the close button (it sits at the right end of the title bar; top is w.y - WM_TITLE_H)
+int wmCloseX(const(WmWindow)* w) { return w.x + w.canvas.width - WM_TITLE_H; }
+
+/// The part of window `idx` at a screen position.
+int wmHitPart(int idx, int px, int py)
+{
+    const(WmWindow)* w = &wmWindows[idx];
+    if (px >= w.x && py >= w.y && px < w.x + w.canvas.width && py < w.y + w.canvas.height)
+        return WM_PART_CLIENT;
+    if (px < wmFrameX(w) || py < wmFrameY(w) || px >= wmFrameX(w) + wmFrameW(w) || py >= wmFrameY(w) + wmFrameH(w))
+        return WM_PART_NONE;
+    int cx = wmCloseX(w);
+    if (px >= cx && px < cx + WM_TITLE_H && py >= w.y - WM_TITLE_H && py < w.y)
+        return WM_PART_CLOSE;
+    return WM_PART_TITLE;
+}
+
+/// The topmost window whose frame is under a screen position, -1 if there is none.
+int wmWindowAt(int x, int y)
+{
+    for (int i = wmCount - 1; i >= 0; i--)
+    {
+        int idx = wmOrder[i];
+        if (wmHitPart(idx, x, y) != WM_PART_NONE)
+            return idx;
+    }
+    return -1;
+}
+
+// ---- damage ----
+
+/// Something changed on screen: x, y, w, h in screen coordinates (render.d clips them).
+void wmAddDamage(int x, int y, int w, int h)
+{
+    if (w <= 0 || h <= 0)
+        return;
+    if (!wmHasDamage)
+    {
+        wmHasDamage = true;
+        wmDx0 = x;
+        wmDy0 = y;
+        wmDx1 = x + w;
+        wmDy1 = y + h;
+        return;
+    }
+    if (x < wmDx0) wmDx0 = x;
+    if (y < wmDy0) wmDy0 = y;
+    if (x + w > wmDx1) wmDx1 = x + w;
+    if (y + h > wmDy1) wmDy1 = y + h;
+}
+
+/// The frame of window `idx` (decoration included) has to be redrawn.
+void wmDamageFrame(int idx)
+{
+    const(WmWindow)* w = &wmWindows[idx];
+    wmAddDamage(wmFrameX(w), wmFrameY(w), wmFrameW(w), wmFrameH(w));
+}
+
+/// Hands over (and forgets) what changed since the last call. False if nothing did.
+bool wmTakeDamage(int* x, int* y, int* w, int* h)
+{
+    if (!wmHasDamage)
+        return false;
+    wmHasDamage = false;
+    *x = wmDx0;
+    *y = wmDy0;
+    *w = wmDx1 - wmDx0;
+    *h = wmDy1 - wmDy0;
+    return true;
+}
+
+// ---- windows ----
 
 /// Index of the window of a kernel surface, -1 if we do not have one.
 int wmFind(uint surface)
@@ -93,29 +211,65 @@ private void wmSendFocus(int idx, int gained)
     ugfxSend(wmWindows[idx].surface, &e);
 }
 
-/// Gives the keyboard to window `idx` (-1: nobody). The windows are told.
+private void wmSendClose(int idx)
+{
+    GfxEvent e;
+    e.type = GFX_EV_CLOSE;
+    ugfxSend(wmWindows[idx].surface, &e);
+}
+
+/// Gives the keyboard to window `idx` (-1: nobody). The windows are told, the frames redrawn.
 void wmSetFocus(int idx)
 {
     if (idx == wmFocus)
         return;
-    wmChanged = true;
     if (wmFocus >= 0)
+    {
         wmSendFocus(wmFocus, 0);
+        wmDamageFrame(wmFocus);
+    }
     wmFocus = idx;
     if (idx >= 0)
+    {
         wmSendFocus(idx, 1);
+        wmDamageFrame(idx);
+    }
 }
 
 /// Moves window `idx` in front of all others.
 void wmRaise(int idx)
 {
-    wmChanged = true;
+    if (wmCount > 0 && wmOrder[wmCount - 1] == idx)
+        return;                             // already on top
     int j = 0;
     for (int i = 0; i < wmCount; i++)
         if (wmOrder[i] != idx)
             wmOrder[j++] = wmOrder[i];
     wmOrder[j++] = idx;
     wmCount = j;
+    wmDamageFrame(idx);
+}
+
+/// Moves window `idx` so that its drawable area starts at nx, ny. Keeps part of the title bar on screen.
+void wmMoveWindow(int idx, int nx, int ny)
+{
+    WmWindow* w = &wmWindows[idx];
+    int minY = WM_TITLE_H + WM_BORDER;
+    if (ny < minY)
+        ny = minY;
+    if (ny > wmScreenH - WM_TITLE_H)
+        ny = wmScreenH - WM_TITLE_H;
+    int keep = 3 * WM_TITLE_H;
+    if (nx < keep - w.canvas.width)
+        nx = keep - w.canvas.width;
+    if (nx > wmScreenW - keep)
+        nx = wmScreenW - keep;
+    if (nx == w.x && ny == w.y)
+        return;
+    wmDamageFrame(idx);                     // where it was
+    w.x = nx;
+    w.y = ny;
+    wmDamageFrame(idx);                     // where it is now
 }
 
 /// A program created a surface (GFX_EV_SURFACE_NEW): map it and give it a window.
@@ -148,11 +302,11 @@ int wmAdd(uint surface, uint owner)
     w.canvas.height = cast(int)d.height;
     w.canvas.stride = cast(int)(d.stride / 4);
     w.x = 40 + (wmCascade % 8) * 32;
-    w.y = 40 + (wmCascade % 8) * 32;
+    w.y = 60 + (wmCascade % 8) * 32;
     wmCascade++;
 
     wmOrder[wmCount++] = slot;
-    wmChanged = true;
+    wmDamageFrame(slot);
     wmSetFocus(slot);                       // new windows get the keyboard
     return slot;
 }
@@ -163,10 +317,11 @@ void wmRemove(uint surface)
     int idx = wmFind(surface);
     if (idx >= 0)
     {
+        wmDamageFrame(idx);                 // the place it leaves has to be redrawn
+
         // Forget the window BEFORE letting go of the memory: nothing may touch its pixels afterwards.
         wmWindows[idx].used = false;
         wmWindows[idx].canvas.pixels = null;
-        wmChanged = true;
 
         int j = 0;
         for (int i = 0; i < wmCount; i++)
@@ -176,6 +331,10 @@ void wmRemove(uint surface)
 
         if (wmGrab == idx)
             wmGrab = -1;
+        if (wmDrag == idx)
+            wmDrag = -1;
+        if (wmCloseArmed == idx)
+            wmCloseArmed = -1;
         if (wmFocus == idx)
         {
             wmFocus = -1;                   // the window is gone, no FOCUS event for it
@@ -186,18 +345,7 @@ void wmRemove(uint surface)
     ugfxServerUnmap(surface);
 }
 
-/// The topmost window under a screen position, -1 if there is none.
-int wmWindowAt(int x, int y)
-{
-    for (int i = wmCount - 1; i >= 0; i--)
-    {
-        int idx = wmOrder[i];
-        WmWindow* w = &wmWindows[idx];
-        if (x >= w.x && y >= w.y && x < w.x + w.canvas.width && y < w.y + w.canvas.height)
-            return idx;
-    }
-    return -1;
-}
+// ---- input ----
 
 /// A key press (GFX_EV_KEY). Goes to the window that has the keyboard.
 void wmHandleKey(const(GfxEvent)* ev)
@@ -215,7 +363,33 @@ void wmHandleMouse(const(GfxEvent)* ev)
     uint pressed = buttons & ~wmButtons;
     wmButtons = buttons;
 
+    // A window is being dragged: the mouse belongs to the window manager until the button is up
+    if (wmDrag >= 0)
+    {
+        wmMoveWindow(wmDrag, wmMouseX - wmDragDx, wmMouseY - wmDragDy);
+        if (buttons == 0)
+        {
+            wmDrag = -1;
+            wmGrab = -1;
+        }
+        return;
+    }
+
+    // The close button is pressed: it only counts if the button is released on it, too
+    if (wmCloseArmed >= 0)
+    {
+        if (buttons == 0)
+        {
+            if (wmHitPart(wmCloseArmed, wmMouseX, wmMouseY) == WM_PART_CLOSE)
+                wmSendClose(wmCloseArmed);
+            wmCloseArmed = -1;
+            wmGrab = -1;
+        }
+        return;
+    }
+
     int hit = wmWindowAt(wmMouseX, wmMouseY);
+    int part = (hit >= 0) ? wmHitPart(hit, wmMouseX, wmMouseY) : WM_PART_NONE;
 
     // A click brings the window to the front and gives it the keyboard. From then on, until
     // all buttons are up, the mouse belongs to that window (so dragging out of it works).
@@ -229,9 +403,35 @@ void wmHandleMouse(const(GfxEvent)* ev)
         else
             wmSetFocus(-1);
         wmGrab = hit;
+        wmGrabClient = (part == WM_PART_CLIENT);
+
+        if ((pressed & GFX_BTN_LEFT) != 0)
+        {
+            if (part == WM_PART_TITLE)
+            {
+                wmDrag = hit;
+                wmDragDx = wmMouseX - wmWindows[hit].x;
+                wmDragDy = wmMouseY - wmWindows[hit].y;
+                return;
+            }
+            if (part == WM_PART_CLOSE)
+            {
+                wmCloseArmed = hit;
+                return;
+            }
+        }
     }
 
-    int target = (wmGrab >= 0) ? wmGrab : hit;
+    // Only the drawable area belongs to the client; the decoration is ours
+    int target = -1;
+    if (wmGrab >= 0)
+    {
+        if (wmGrabClient)
+            target = wmGrab;
+    }
+    else if (part == WM_PART_CLIENT)
+        target = hit;
+
     if (target >= 0)
     {
         GfxEvent fwd = *ev;
