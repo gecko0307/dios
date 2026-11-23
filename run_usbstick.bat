@@ -1,1 +1,1 @@
-qemu-system-x86_64 -cdrom dios64.iso -m 512M -bios OVMF.fd -vga std -device qemu-xhci,id=xhci -device usb-mouse,bus=xhci.0,port=1 -drive if=none,id=usbstick,file=usbstick.img,format=raw -device usb-storage,bus=xhci.0,port=2,drive=usbstick -d guest_errors
+qemu-system-x86_64 -cpu max,+rdrand -cdrom dios64.iso -m 512M -bios OVMF.fd -vga std -device qemu-xhci,id=xhci -device usb-mouse,bus=xhci.0,port=1 -drive if=none,id=usbstick,file=usbstick.img,format=raw -device usb-storage,bus=xhci.0,port=2,drive=usbstick -d guest_errors

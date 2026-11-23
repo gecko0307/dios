@@ -69,3 +69,10 @@ bool cpuHasX2Apic() @nogc nothrow
     cpuCpuid(1, 0, r.ptr);
     return (r[2] & (1u << 21)) != 0;
 }
+
+bool cpuHasRdrand() @nogc nothrow
+{
+    uint[4] r;
+    cpuCpuid(1, 0, r.ptr);
+    return (r[2] & (1u << 30)) != 0;
+}

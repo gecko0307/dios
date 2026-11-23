@@ -55,6 +55,7 @@ import dios.core.usbstor;
 import dios.core.fs;
 import dios.core.datetime;
 import dios.core.heap;
+import dios.core.csprng;
 import dios.bootloader.limine;
 
 struct BootInfo
@@ -220,6 +221,11 @@ void run() @nogc nothrow
 
     // CMOS date-time
     datetimeInit();
+    
+    // RNG
+    randomInit();
+    if (!randomInit())
+        kPanic("RDRAND is not supported on this CPU\n");
 
     // PS/2
     bool havePs2 = ps2Init();
@@ -256,7 +262,7 @@ void run() @nogc nothrow
     enum ulong BLINK_MS = 100;
     ulong nextBlink = nowMs() + BLINK_MS;
 
-    while (1)
+    while(1)
     {
         usbPoll();
 

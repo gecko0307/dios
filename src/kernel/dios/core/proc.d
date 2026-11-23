@@ -87,6 +87,7 @@ import dios.core.vmem;
 import dios.core.heap;
 import dios.core.xhci;
 import dios.core.datetime;
+import dios.core.csprng;
 
 enum ulong USER_IMAGE_MIN = 0x400000;
 enum ulong USER_IMAGE_MAX = 0x40000000;
@@ -117,6 +118,7 @@ enum ulong SYS_BRK = 13;
 enum ulong SYS_YIELD = 14;
 enum ulong SYS_GETPID = 15;
 enum ulong SYS_DATETIME = 16;
+enum ulong SYS_RANDOM = 17;
 
 enum uint MSR_EFER = 0xC0000080;
 enum uint MSR_STAR = 0xC0000081;
@@ -1090,6 +1092,40 @@ long sysDateTime(ulong out_dt) @nogc nothrow
     return 0;
 }
 
+long sysRandom(void* buffer, size_t size) @nogc nothrow
+{
+    if (size == 0)
+        return 0;
+
+    if (buffer is null)
+        return -1;
+
+    auto dst = cast(ubyte*)buffer;
+    size_t remaining = size;
+
+    while (remaining >= 8)
+    {
+        ulong value;
+        if (!rdrand64(&value))
+            return cast(long)(size - remaining);
+        *cast(ulong*)dst = value;
+        dst += 8;
+        remaining -= 8;
+    }
+
+    if (remaining > 0)
+    {
+        ulong value;
+        if (!rdrand64(&value))
+            return cast(long)(size - remaining);
+        auto src = cast(ubyte*)&value;
+        for (size_t i = 0; i < remaining; i++)
+            dst[i] = src[i];
+    }
+
+    return cast(long)size;
+}
+
 // Called from the SYSCALL entry stub (cpu.s) on the task's kernel stack, interrupts off.
 long syscallDispatch(ulong nr, ulong a0, ulong a1, ulong a2) @nogc nothrow
 {
@@ -1134,6 +1170,8 @@ long syscallDispatch(ulong nr, ulong a0, ulong a1, ulong a2) @nogc nothrow
             return cur.id;
         case SYS_DATETIME:
             return sysDateTime(a0);
+        case SYS_RANDOM:
+            return sysRandom(cast(void*)a0, a1);
         default:
             return -1;
     }

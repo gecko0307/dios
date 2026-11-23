@@ -49,6 +49,7 @@ enum ulong SYS_BRK = 13;
 enum ulong SYS_YIELD = 14;
 enum ulong SYS_GETPID = 15;
 enum ulong SYS_DATETIME = 16;
+enum ulong SYS_RANDOM = 17;
 
 // uopen() flags
 enum int O_RDONLY = 0;
@@ -212,4 +213,10 @@ void* ubrk(void* newBreak) @nogc nothrow
 void udatetime(DateTime* dt) @nogc nothrow
 {
     sys_call(SYS_DATETIME, cast(ulong)dt, 0, 0);
+}
+
+/// 
+void urandom(void* buffer, size_t size) @nogc nothrow
+{
+    sys_call(SYS_RANDOM, cast(ulong)buffer, size, 0);
 }
