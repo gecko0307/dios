@@ -43,6 +43,7 @@ __gshared
 {
     CMOS cmos;
     DateTime startTime;
+    ulong startTicks;
 }
 
 extern(C):
@@ -51,11 +52,12 @@ void datetimeInit() @nogc nothrow
 {
     cmosRead(&cmos);
     startTime = datetimeGetFromCMOS(&cmos);
+    startTicks = clockNowNs();
 }
 
 void datetimeNow(DateTime* outDateTime) @nogc nothrow
 {
-    ulong elapsed = clockNowNs() / 1_000_000_000;
+    ulong elapsed = (clockNowNs() - startTicks) / 1_000_000_000;
 
     // Seconds since midnight at system startup
     ulong startSeconds =

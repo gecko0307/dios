@@ -185,8 +185,6 @@ ulong nowMs() @nogc nothrow
 /// Starts graphics; initializes memory manager and boot peripherals; runs the shell
 void run() @nogc nothrow
 {
-    datetimeInit();
-    
     size_t hhdmOffset = bootInfo.ramInfo.hhdmOffset;
     Framebuffer* frontBuffer = &bootInfo.videoBuffer;
     size_t framebufferSize = frontBuffer.height * frontBuffer.pitch;
@@ -220,6 +218,10 @@ void run() @nogc nothrow
     // (if the machine has a local APIC at all)
     interruptsInit(hhdmOffset);
 
+    // CMOS date-time
+    datetimeInit();
+
+    // PS/2
     bool havePs2 = ps2Init();
     if (havePs2 && interruptStatus.ioapic)
         ps2StartIrq(interruptStatus.apicId);

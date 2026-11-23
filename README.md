@@ -18,7 +18,7 @@ DIOS is a monolithic kernel that contains all the device drivers in itself. It i
 - UEFI GOP (or VESA) framebuffer
 - IDT, GDT
 - Bitmap page-frame allocator
-- HPET timer (plus legacy PIT fallback)
+- Low-latency HPET-based timer (plus legacy PIT fallback). System tick frequency is 1000 Hz
 - Minimal ACPI table reader
 - I/O APIC, Local APIC
 - CMOS date-time

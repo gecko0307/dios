@@ -48,6 +48,7 @@ enum ulong SYS_GETCWD = 12;
 enum ulong SYS_BRK = 13;
 enum ulong SYS_YIELD = 14;
 enum ulong SYS_GETPID = 15;
+enum ulong SYS_DATETIME = 16;
 
 // uopen() flags
 enum int O_RDONLY = 0;
@@ -59,7 +60,6 @@ enum int SEEK_SET = 0;
 enum int SEEK_CUR = 1;
 enum int SEEK_END = 2;
 
-// Layouts shared with the kernel (sysfile.d)
 struct UStat
 {
     ulong size;
@@ -83,6 +83,17 @@ enum int KEY_RIGHT = 0x104;
 enum int KEY_HOME = 0x105;
 enum int KEY_END = 0x106;
 enum int KEY_DELETE = 0x107;
+
+struct DateTime
+{
+    ushort year;
+    ubyte month;
+    ubyte day;
+    ubyte weekday;
+    ubyte hour;
+    ubyte minute;
+    ubyte second;
+}
 
 extern(C):
 
@@ -195,4 +206,10 @@ void* ubrk(void* newBreak) @nogc nothrow
 {
     long result = sys_call(SYS_BRK, cast(ulong)newBreak, 0, 0);
     return result < 0 ? null : cast(void*)result;
+}
+
+/// Retrieves the current UTC date-time.
+void udatetime(DateTime* dt) @nogc nothrow
+{
+    sys_call(SYS_DATETIME, cast(ulong)dt, 0, 0);
 }

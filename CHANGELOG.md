@@ -1,7 +1,9 @@
 DIOS 0.5.0 - TBD
 ----------------
+- **Kernel**:
+  - New system call `SYS_DATETIME`
 - **ulib**:
-  - New functions `memcmp`, `uputi`, `uprintf`, `alignUp`, `alignDown`
+  - New functions `memcmp`,  `alignUp`, `alignDown`, `uputi`, `uprintf`, `udatetime`
   - Buffered output.
 
 DIOS 0.4.0 - 23 Nov, 2026

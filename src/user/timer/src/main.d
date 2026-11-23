@@ -71,8 +71,8 @@ bool parseDuration(string str, out ulong milliseconds)
 
 void printUsage()
 {
-    uputs("Usage: timer.elf Ns|Nm|Nh\n");
-    uputs(" N - time in seconds, minutes, or hours\n");
+    uprintf("Usage: timer.elf Ns|Nm|Nh\n");
+    uprintf(" N - time in seconds, minutes, or hours\n");
 }
 
 int main(string[] args)
@@ -92,8 +92,12 @@ int main(string[] args)
     
     if (durationMs > 0)
     {
+        DateTime dt;
+        udatetime(&dt);
+        uprintf("Timer started at %d:%d:%d\n", dt.hour, dt.minute, dt.second);
+        
         usleep(durationMs);
-        uputs("Time is up!\n");
+        uprintf("Time is up!\n");
     }
     else
         printUsage();

@@ -38,6 +38,8 @@ DIOS kernel functions.
 
 `void* ubrk(void* newBreak)`
 
+`void udatetime(DateTime* dt)`
+
 ## ulib.dios.alloc
 
 Heap allocator like C's `malloc`/`free`.

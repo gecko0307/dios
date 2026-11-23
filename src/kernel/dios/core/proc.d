@@ -86,6 +86,7 @@ import dios.core.usbstor;
 import dios.core.vmem;
 import dios.core.heap;
 import dios.core.xhci;
+import dios.core.datetime;
 
 enum ulong USER_IMAGE_MIN = 0x400000;
 enum ulong USER_IMAGE_MAX = 0x40000000;
@@ -115,6 +116,7 @@ enum ulong SYS_GETCWD = 12;
 enum ulong SYS_BRK = 13;
 enum ulong SYS_YIELD = 14;
 enum ulong SYS_GETPID = 15;
+enum ulong SYS_DATETIME = 16;
 
 enum uint MSR_EFER = 0xC0000080;
 enum uint MSR_STAR = 0xC0000081;
@@ -1082,6 +1084,12 @@ long sysGetCwd(ulong buf, ulong len) @nogc nothrow
     return cast(long)n;
 }
 
+long sysDateTime(ulong out_dt) @nogc nothrow
+{
+    datetimeNow(cast(DateTime*)out_dt);
+    return 0;
+}
+
 // Called from the SYSCALL entry stub (cpu.s) on the task's kernel stack, interrupts off.
 long syscallDispatch(ulong nr, ulong a0, ulong a1, ulong a2) @nogc nothrow
 {
@@ -1124,6 +1132,8 @@ long syscallDispatch(ulong nr, ulong a0, ulong a1, ulong a2) @nogc nothrow
             return 0;
         case SYS_GETPID:
             return cur.id;
+        case SYS_DATETIME:
+            return sysDateTime(a0);
         default:
             return -1;
     }
