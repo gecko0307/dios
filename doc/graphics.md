@@ -63,7 +63,7 @@ TODO
 
 `bool windowCreate(Window* win, uint width, uint height)`
 
-Opens a window of width x height pixels (black). False if it could not be created (too big, too many windows, out of memory).
+Opens a window of `width` x `height` pixels. Returns `false` if it could not be created (too big, too many windows, out of memory).
 
 `void windowCommit(Window* win)`
 
@@ -71,7 +71,7 @@ Tells the server that all of the window changed.
 
 `void windowCommitRect(Window* win, int x, int y, int w, int h)`
 
-Tells the server that only x, y, w, h changed (cheaper when it can do something with that).
+Tells the server that only `x`, `y`, `w`, `h` changed (cheaper when it can do something with that).
 
 `bool windowPoll(Window* win, GfxEvent* ev, long timeoutMs)`
 
