@@ -47,6 +47,7 @@ import dios.core.gdt;
 import dios.core.lapic;
 import dios.core.stdio;
 import dios.core.error;
+import dios.core.gfx;
 import dios.core.vmem;
 
 enum uint VEC_PIC_BASE     = 0x20;
@@ -190,6 +191,7 @@ void exceptionDump(InterruptFrame* f) @nogc nothrow
     if (inException)
         hcf();
     inException = true;
+    gfxEmergency();     // a graphics server may own the screen: the dump must be seen
 
     uint v = cast(uint)f.vector;
     kprintf("\n*** CPU EXCEPTION %u: %s ***\n", v, exceptionNames[v & 31].ptr);

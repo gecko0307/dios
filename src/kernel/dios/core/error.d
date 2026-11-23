@@ -26,6 +26,7 @@ DEALINGS IN THE SOFTWARE.
 module dios.core.error;
 
 import dios.core.stdio;
+import dios.core.gfx;
 
 extern(C):
 
@@ -40,6 +41,7 @@ void hcf() @nogc nothrow
 
 void kPanic(string message = "") @nogc nothrow
 {
+    gfxEmergency();     // a graphics server may own the screen: the message must be seen
     kprintf(message);
     for (;;) asm @nogc nothrow
     {

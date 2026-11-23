@@ -184,9 +184,32 @@ void keyCapsToggle() @nogc nothrow
     keyCapsLock = !keyCapsLock;
 }
 
+/// Kernel hotkeys: Ctrl+F1, Ctrl+F2, Ctrl+F3. They never enter the queue, so no program
+/// (a graphics server, say) can swallow them; the main loop picks them up with
+/// keyTakeHotkey(). They are idempotent on purpose: key auto-repeat just repeats them.
+enum ubyte KEY_HOTKEY_F1 = 0x3B;
+enum ubyte KEY_HOTKEY_F2 = 0x3C;
+enum ubyte KEY_HOTKEY_F3 = 0x3D;
+
+__gshared ubyte keyHotkeyPending;   // set-1 code of the last hotkey, 0 if none
+
+/// The hotkey pressed since the last call (KEY_HOTKEY_F1..F3), or 0.
+ubyte keyTakeHotkey() @nogc nothrow
+{
+    ubyte k = keyHotkeyPending;
+    keyHotkeyPending = 0;
+    return k;
+}
+
 /// Queue a key press. Returns false (and counts a drop) if the queue is full.
 bool keyPush(ubyte scancode, bool shift, bool extended, bool ctrl = false) @nogc nothrow
 {
+    if (ctrl && !extended && scancode >= KEY_HOTKEY_F1 && scancode <= KEY_HOTKEY_F3)
+    {
+        keyHotkeyPending = scancode;
+        return true;
+    }
+
     uint next = keyQueue.head + 1;
     if (next - keyQueue.tail > KEYQ_SIZE)
     {

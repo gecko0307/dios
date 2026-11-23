@@ -50,6 +50,7 @@ import dios.core.proc;
 import dios.core.error;
 import dios.core.mouse;
 import dios.core.gfx;
+import dios.core.gfxsrv;
 import dios.core.xhci;
 import dios.core.usbstor;
 import dios.core.fs;
@@ -257,6 +258,7 @@ void run() @nogc nothrow
     usbStorageProbe();
     fsAutoMount();
     procInit();
+    gfxsrvInit(); // graphics server support: system calls 16..26, Ctrl+F1/F2/F3
     shellInit();
 
     enum ulong BLINK_MS = 100;
@@ -271,7 +273,7 @@ void run() @nogc nothrow
         kprintfHook = &shellMessageBegin;
         usbHotplugPoll();
         if (kprintfHook is null)
-            shellMessageEnd();                  // something was printed
+            shellMessageEnd(); // something was printed
         kprintfHook = null;
 
         if (ps2State.irqMode)
@@ -279,13 +281,22 @@ void run() @nogc nothrow
         else
             ps2Poll();
 
+        // Ctrl+F1 shell, Ctrl+F2 graphics server, Ctrl+F3 stop it. Handled here, in the kernel,
+        // so that a server that hangs or misbehaves can never lock the machine up.
+        gfxsrvPoll();
+
+        // While the graphics server is on screen it gets the keyboard and the mouse. This comes
+        // before procPoll(): a Ctrl+C meant for the server must not kill a foreground program.
+        if (gfxsrvVisible())
+            gfxsrvPumpInput();
+
         // Finished programs, Ctrl+C for the foreground program
         procPoll();
 
-        // Every key press, in order (Shift state was captured when it went down). While a
-        // program runs in the foreground the keys stay queued for it.
+        // Every key press, in order (Shift state was captured when it went down).
+        // While a program runs in the foreground the keys stay queued for it.
         KeyEvent ev;
-        while (!procHasForeground() && keyPopEvent(&ev))
+        while (!gfxsrvVisible() && !procHasForeground() && keyPopEvent(&ev))
         {
             shellHandleKey(&ev);
         }
@@ -301,8 +312,8 @@ void run() @nogc nothrow
         // blinking cursor, or the mouse moved) - and then only those pixels
         gfxPresent();
 
-        // Sleep until the next interrupt (at most 1 ms: the timer tick). Without a
-        // working tick there would be nothing to wake us, so keep spinning then
+        // Sleep until the next interrupt (at most 1 ms: the timer tick).
+        // Without a working tick there would be nothing to wake us, so keep spinning then
         if (interruptStatus.tick && !procOthersReady())
             cpuHlt();
 

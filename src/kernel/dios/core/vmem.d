@@ -45,6 +45,9 @@ enum: ulong
     PTE_PSE       = 1UL << 7, // for PDE 2MiB / PDPTE 1GiB, PS = 1
     PTE_GLOBAL    = 1UL << 8,
     // bits 9-11 are available to OS
+    // Software bit: the page belongs to someone else (a graphics surface mapped into a
+    // program). procFreeSpace() leaves such pages alone; whoever owns them frees them.
+    PTE_SHARED    = 1UL << 9,
     PTE_NX        = 1UL << 63,
 
     // Bits 12..51 hold the physical address. The old code used ~0xFFF, which

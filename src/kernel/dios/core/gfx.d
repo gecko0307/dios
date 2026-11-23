@@ -58,6 +58,7 @@ struct GfxState
     bool mouseDrawn;
     int mouseX, mouseY; // where the cursor was last drawn
     bool ready;
+    bool suspended;     // a graphics server owns the screen: gfxPresent() must not touch it
 }
 
 __gshared GfxState gfx;
@@ -72,6 +73,42 @@ void gfxInit(Framebuffer* front, Framebuffer* scene) @nogc nothrow
     gfx.scene = scene;
     gfx.fullDirty = true; // first present copies everything
     gfx.ready = true;
+}
+
+/// Hand the screen over to a graphics server (gfxsrv.d). While suspended, gfxPresent()
+/// leaves video memory alone, but the console keeps drawing into the scene buffer, so
+/// nothing is lost: gfxResume() brings the whole console back.
+void gfxSuspend() @nogc nothrow
+{
+    gfx.suspended = true;
+}
+
+/// Take the screen back: the next gfxPresent() repaints everything from the scene.
+void gfxResume() @nogc nothrow
+{
+    gfx.suspended = false;
+    gfx.fullDirty = true;
+    gfx.mouseDrawn = false;
+    gfx.numDirty = 0;
+}
+
+bool gfxIsSuspended() @nogc nothrow
+{
+    return gfx.suspended;
+}
+
+/// The real framebuffer (video memory), or null before gfxInit().
+Framebuffer* gfxFrontBuffer() @nogc nothrow
+{
+    return gfx.ready ? gfx.front : null;
+}
+
+/// For panic and exception paths: whatever is on the screen, the console must be visible.
+/// Does nothing but flip state, so it is safe to call from anywhere.
+void gfxEmergency() @nogc nothrow
+{
+    if (gfx.ready && gfx.suspended)
+        gfxResume();
 }
 
 // Clip a rectangle to the screen. Returns false if nothing is left.
@@ -190,7 +227,7 @@ void gfxDrawCursor(int mx, int my) @nogc nothrow
 // Bring the screen up to date. Cheap (a few comparisons) when nothing changed.
 void gfxPresent() @nogc nothrow
 {
-    if (!gfx.ready)
+    if (!gfx.ready || gfx.suspended)
         return;
 
     int mx = mouse.x, my = mouse.y;

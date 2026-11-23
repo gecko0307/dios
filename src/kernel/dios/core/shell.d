@@ -34,6 +34,7 @@ import dios.core.blockdev;
 import dios.core.diag;
 import dios.core.exfat;
 import dios.core.fs;
+import dios.core.gfxsrv;
 import dios.core.interrupts;
 import dios.core.keyboard;
 import dios.core.klog;
@@ -50,13 +51,13 @@ import dios.core.xhci;
 enum size_t SHELL_LINE_CAPACITY = 128;
 enum size_t SHELL_HISTORY_CAPACITY = 16;
 
-immutable string[34] SHELL_COMMANDS = [
+immutable string[35] SHELL_COMMANDS = [
     "help", "about", "mem", "time", "uptime", "clock",
     "irq", "pci", "history", "echo", "poweroff",
     "reboot", "clear", "cpuinfo", "acpi", "irqstat",
     "sleep", "hexdump", "crash", "version", "ls", "run", "memmap",
     "programs", "disk", "mount", "cd", "pwd", "cat", "dmesg", "usb",
-    "ps", "kill", "fg"
+    "ps", "kill", "fg", "gfx"
 ];
 
 __gshared char[SHELL_LINE_CAPACITY] shellLine;
@@ -207,6 +208,74 @@ bool shellTakeAmp(const(char)* args) @nogc nothrow
         n--;
     s[n] = 0;
     return true;
+}
+
+// gfx [status | start [NAME] | stop | show | hide]
+void shellGfx(const(char)* args) @nogc nothrow
+{
+    // first word: the subcommand; the rest (if any) is its argument
+    char[16] sub;
+    uint n = 0;
+    const(char)* p = args;
+    while (*p != 0 && *p != ' ' && *p != '\t' && n + 1 < sub.length)
+        sub[n++] = *p++;
+    sub[n] = 0;
+    while (*p != 0 && *p != ' ' && *p != '\t')
+        p++;                                    // (a longer word cannot match anything)
+    while (*p == ' ' || *p == '\t')
+        p++;
+
+    if (n == 0 || shellEquals(sub.ptr, "status"))
+    {
+        gfxsrvPrintStatus();
+    }
+    else if (shellEquals(sub.ptr, "start"))
+    {
+        if (gfxsrvRunning())
+        {
+            cprintf("The graphics server is already running (task %u). 'gfx show' to switch to it.\n", gfxsrvTaskId());
+            return;
+        }
+        // The server is an ordinary program: a boot module, or an ELF on the mounted disk
+        char[FS_PATH_MAX] name;
+        uint len = 0;
+        const(char)* q = (*p != 0) ? p : "gfxd".ptr;
+        while (*q != 0 && *q != ' ' && *q != '\t' && len + 1 < FS_PATH_MAX)
+            name[len++] = *q++;
+        name[len] = 0;
+
+        int index = procFind(name.ptr);
+        if (index >= 0)
+            shellRunProgram(cast(uint)index, "".ptr, true);
+        else if (rootMount.mounted)
+            shellRunFile(name.ptr, "".ptr, true);
+        else
+        {
+            cprintf("No such program: %s\n", name.ptr);
+            return;
+        }
+        cprintf("It takes the screen as soon as it is up. Ctrl+F1: back to this shell.\n");
+    }
+    else if (shellEquals(sub.ptr, "stop"))
+    {
+        if (!gfxsrvStop())
+            cprintf("No graphics server is running.\n");
+    }
+    else if (shellEquals(sub.ptr, "show"))
+    {
+        if (!gfxsrvRunning())
+            cprintf("No graphics server is running ('gfx start').\n");
+        else
+            gfxsrvShow();
+    }
+    else if (shellEquals(sub.ptr, "hide"))
+    {
+        gfxsrvHide();
+    }
+    else
+    {
+        cprintf("Usage: gfx [status | start [NAME] | stop | show | hide]\n");
+    }
 }
 
 // Called (from procPoll) for every task that ended.
@@ -635,12 +704,14 @@ void shellExecute() @nogc nothrow
         cprintf("  ps               List running programs\n");
         cprintf("  kill ID          Kill a program\n");
         cprintf("  fg [ID]          Bring a background program to the foreground\n");
+        cprintf("  gfx [CMD]        Graphics server: status, start [NAME], stop, show, hide\n");
         cprintf("  clear            Clear the screen\n");
         cprintf("  crash pf|ud|div|gp  Trigger a CPU exception (kernel halts)\n");
         cprintf("  reboot           Restart the computer\n");
         cprintf("  poweroff         Shut down the computer\n");
         cprintf("Keys: arrows/Home/End/Del edit, Up/Down history, Tab completes,\n");
         cprintf("      Ctrl+A/E start/end, Ctrl+U clear line, Ctrl+L redraw, Ctrl+C cancel\n");
+        cprintf("      Ctrl+F1 this shell, Ctrl+F2 graphics server, Ctrl+F3 stop the graphics server\n");
     }
     else if (shellEquals(shellLine.ptr, "about"))
     {
@@ -877,6 +948,10 @@ void shellExecute() @nogc nothrow
             cprintf("Usage: kill ID   (ids in 'ps')\n");
         else if (!procKillId(cast(uint)id))
             cprintf("No such task: %llu\n", id);
+    }
+    else if (shellEquals(shellLine.ptr, "gfx"))
+    {
+        shellGfx(args);
     }
     else if (shellEquals(shellLine.ptr, "fg"))
     {

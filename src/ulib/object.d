@@ -25,6 +25,8 @@ For more information, please refer to <https://unlicense.org>
 */
 module object;
 
+import ulib.dios.sys;
+
 // Minimal runtime for user programs (the kernel has its own, in src/object.d).
 alias size_t = typeof(int.init.sizeof);
 alias ptrdiff_t = typeof(cast(void*)0 - cast(void*)0);
@@ -57,6 +59,4 @@ extern(C)
         sys_call(0, 134, 0, 0);
         for (;;) {}
     }
-
-    long sys_call(ulong nr, ulong a0, ulong a1, ulong a2) @nogc nothrow;
 }

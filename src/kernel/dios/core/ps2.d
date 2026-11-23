@@ -220,6 +220,19 @@ void ps2HandleKeyByte(ubyte sc) @nogc nothrow
             ps2State.shiftMask = cast(ubyte)(ps2State.shiftMask | bit);
         return;
     }
+    
+    // Ctrl: 0x1D left, E0 0x1D right
+    if (code == 0x1D)
+    {
+        ubyte bit = cast(ubyte)(ext ? 2 : 1);
+
+        if (release)
+            ps2State.ctrlMask = cast(ubyte)(ps2State.ctrlMask & ~bit);
+        else
+            ps2State.ctrlMask = cast(ubyte)(ps2State.ctrlMask | bit);
+
+        return;
+    }
 
     if (release)
         return; // key release

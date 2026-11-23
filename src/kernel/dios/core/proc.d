@@ -45,7 +45,8 @@ module dios.core.proc;
  *
  * Address space of a program (PML4 slot 0 is private, everything else is the kernel's, shared):
  *   0x0000000000400000 - 0x0000000040000000   program image (PT_LOAD segments)
- *   0x0000000040000000 - ...                  heap (brk)
+ *   0x0000000040000000 - 0x0000000070000000   heap (brk)
+ *   0x0000000070000000 - 0x000000007FFF0000   shared memory (graphics surfaces, see gfxsrv.d)
  *   0x000000007FFF0000 - 0x0000000080000000   stack (64 KiB), arguments at its top
  * The kernel keeps running on the program's page tables during a syscall; user
  * pointers are validated page by page (present + user + writable if written).
@@ -65,6 +66,9 @@ module dios.core.proc;
  *   13 brk(requested)
  *   14 yield()
  *   15 getpid()
+ *   16 datetime()
+ *   17 random()
+ *   18..33 reserved for extensions that register syscallExtHook (currently the graphics server)
  */
 import dios.bootloader.limine;
 import dios.core.clock;
@@ -99,7 +103,9 @@ enum uint PROC_MAX_PROGRAMS = 16;
 enum uint PROC_NAME_MAX = 32;
 
 enum ulong USER_HEAP_BASE  = USER_IMAGE_MAX;
-enum ulong USER_HEAP_LIMIT = USER_STACK_TOP - USER_STACK_PAGES * 4096;
+enum ulong USER_SHM_BASE   = 0x70000000;                                    // shared memory window
+enum ulong USER_SHM_LIMIT  = USER_STACK_TOP - USER_STACK_PAGES * 4096;
+enum ulong USER_HEAP_LIMIT = USER_SHM_BASE;                                 // the heap stops where it starts
 
 enum ulong SYS_EXIT = 0;
 enum ulong SYS_WRITE = 1;
@@ -119,6 +125,8 @@ enum ulong SYS_YIELD = 14;
 enum ulong SYS_GETPID = 15;
 enum ulong SYS_DATETIME = 16;
 enum ulong SYS_RANDOM = 17;
+enum ulong SYS_EXT_FIRST = 18; // 18..33: handled by syscallExtHook
+enum ulong SYS_EXT_LAST = 33;
 
 enum uint MSR_EFER = 0xC0000080;
 enum uint MSR_STAR = 0xC0000081;
@@ -198,6 +206,10 @@ struct Task
 alias TaskExitHook = extern(C) void function(uint id, const(char)* name, long code, bool wasForeground) @nogc nothrow;
 /// Bracket the output of a background task when the shell is sitting at its prompt.
 alias TaskOutHook = extern(C) void function() @nogc nothrow;
+/// System calls SYS_EXT_FIRST..SYS_EXT_LAST. Runs on the calling task's kernel stack.
+alias SyscallExtHook = extern(C) long function(ulong nr, ulong a0, ulong a1, ulong a2) @nogc nothrow;
+/// A task has been reaped: its slot, its id. Its address space is already gone.
+alias TaskDeathHook = extern(C) void function(uint slot, uint id) @nogc nothrow;
 
 __gshared Program[PROC_MAX_PROGRAMS] programs;
 __gshared uint programCount;
@@ -209,6 +221,8 @@ __gshared uint sliceTicks;
 __gshared TaskExitHook taskExitHook;
 __gshared TaskOutHook taskOutBegin;
 __gshared TaskOutHook taskOutEnd;
+__gshared SyscallExtHook syscallExtHook;
+__gshared TaskDeathHook taskDeathHook;
 align(16) __gshared ubyte[TASK_STACK_SIZE][TASK_MAX] taskStacks;
 
 extern(C):
@@ -355,7 +369,7 @@ void procFreeSpace(ulong pml4Phys) @nogc nothrow
                     continue;
                 ulong* pt = cast(ulong*)vmemPhysToVirt(e2 & PTE_ADDR_MASK);
                 for (uint k = 0; k < 512; k++)
-                    if (pt[k] & PTE_PRESENT)
+                    if ((pt[k] & PTE_PRESENT) && !(pt[k] & PTE_SHARED))     // shared pages have an owner
                         pmmFreePage(pt[k] & PTE_ADDR_MASK);
                 pmmFreePage(e2 & PTE_ADDR_MASK);
             }
@@ -403,6 +417,30 @@ bool procUnmapUserPage(ulong vaddr) @nogc nothrow
     vmemInvalidatePage(vaddr);
 
     return pmmFreePage(phys);
+}
+
+// Map a physical page that somebody else owns (a graphics surface) at `vaddr` of ANY
+// address space (not just the running one). The page is marked PTE_SHARED, so tearing the
+// address space down leaves it alone. False if `vaddr` is taken or there is no memory
+// for a page table.
+bool procMapShared(ulong pml4Phys, ulong vaddr, ulong phys) @nogc nothrow
+{
+    ulong* pte = procPte(pml4Phys, vaddr, true);
+    if (pte is null || (*pte & PTE_PRESENT))
+        return false;
+    *pte = phys | PTE_PRESENT | PTE_USER | PTE_RW | PTE_SHARED;
+    return true;
+}
+
+// Undo procMapShared for one page. Only touches pages marked PTE_SHARED. (The TLB of another
+// address space is flushed when that task is switched to: every switch reloads CR3.)
+void procUnmapShared(ulong pml4Phys, ulong vaddr) @nogc nothrow
+{
+    ulong* pte = procPte(pml4Phys, vaddr, false);
+    if (pte is null || !(*pte & PTE_PRESENT) || !(*pte & PTE_SHARED))
+        return;
+    *pte = 0;
+    vmemInvalidatePage(vaddr);
 }
 
 // Change the current process' heap break.
@@ -731,6 +769,8 @@ void taskReap() @nogc nothrow
 
         procFreeSpace(t.pml4Phys);
         t.pml4Phys = 0;
+        if (taskDeathHook !is null)
+            taskDeathHook(i, id);               // shared resources (gfxsrv.d) go back now
         t.state = TaskState.Free;
 
         if (taskExitHook !is null)
@@ -1173,6 +1213,8 @@ long syscallDispatch(ulong nr, ulong a0, ulong a1, ulong a2) @nogc nothrow
         case SYS_RANDOM:
             return sysRandom(cast(void*)a0, a1);
         default:
+            if (nr >= SYS_EXT_FIRST && nr <= SYS_EXT_LAST && syscallExtHook !is null)
+                return syscallExtHook(nr, a0, a1, a2);
             return -1;
     }
 }
