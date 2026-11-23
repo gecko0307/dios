@@ -1,13 +1,13 @@
-DIOS 0.5.0 - TBD
-----------------
+DIOS 0.5.0 - 24 Nov, 2026
+-------------------------
 - **Kernel**:
-  - User-space graphics server support that can give ownership of the screen to a userspace service and switch back to the kernel shell. `Ctrl+F1` switches back to the shell, `Ctrl+F2` shows the server, `Ctrl+F3` stops it
+  - User-space graphics server support. Kernel now can give ownership of the screen to a userspace service. `Ctrl+F1` switches back to the shell, `Ctrl+F2` shows the server, `Ctrl+F3` stops it
   - New system calls `SYS_DATETIME`, `SYS_RANDOM`
   - Syscall extension hooks
 - **ulib**:
-  - `ulib.gfx`, a graphics API. `ulib.gfx.proto` provides a kernel graphics protocol; `ulib.gfx.canvas` implements a simple 2D canvas
-  - New functions `memcmp`,  `alignUp`, `alignDown`, `uputi`, `uprintf`, `udatetime`
-  - Buffered output
+  - `ulib.gfx`, a graphics API. `ulib.gfx.proto` provides a kernel graphics protocol; `ulib.gfx.canvas` implements a simple 2D canvas; `ulib.gfx.window` implements a window abstraction
+  - New functions `urandom`, `memcmp`,  `alignUp`, `alignDown`, `uputi`, `uprintf`, `udatetime`
+  - Buffered standard output
 - **GFXD**
   - A userspace graphics server. Not much is implemented in it at the moment, but it already allows applications to render something on the screen.
 
