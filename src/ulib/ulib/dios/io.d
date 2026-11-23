@@ -56,6 +56,24 @@ void uputu(ulong v) @nogc nothrow
     uwrite(d.ptr + k, 20 - k);
 }
 
+/// Writes a signed integer to the standard output.
+void uputi(long v) @nogc nothrow
+{
+    char[21] d; // 20 digits max + 1 byte for '-'
+    uint k = 21;
+    const bool neg = v < 0;
+    // Cast to ulong before negating so long.min wraps cleanly to 9223372036854775808UL
+    ulong u = neg ? -cast(ulong)v : cast(ulong)v;
+    do
+    {
+        d[--k] = cast(char)('0' + u % 10);
+        u /= 10;
+    } while (u != 0);
+    if (neg)
+        d[--k] = '-';
+    uwrite(d.ptr + k, 21 - k);
+}
+
 /// Writes an unsigned integer in hexadecimal format to the standard output.
 void uputhex(ulong v) @nogc nothrow
 {

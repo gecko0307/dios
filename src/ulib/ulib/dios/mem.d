@@ -64,6 +64,19 @@ void* memmove(void* dst, const(void)* src, size_t n) @nogc nothrow
     return dst;
 }
 
+/**
+ * Returns 0 if the memory blocks are identical,
+ * a negative number if the first differing byte in `vl` is less
+ * than the corresponding byte in `vr`, and a positive number if it is greater.
+ */
+int memcmp(const(void)* vl, const(void)* vr, size_t n) @nogc nothrow
+{
+    ubyte* l = cast(ubyte*)vl;
+    ubyte* r = cast(ubyte*)vr;
+    for (; n && *l == *r; n--, l++, r++) {}
+    return n ? *l - *r : 0;
+}
+
 ///
 size_t ustrlen(const(char)* s) @nogc nothrow
 {

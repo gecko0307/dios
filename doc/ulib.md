@@ -62,6 +62,8 @@ Memory helpers.
 
 `void* memmove(void* dst, const(void)* src, size_t n)`
 
+`int memcmp(const(void)* vl, const(void)* vr, size_t n)`
+
 `size_t ustrlen(const(char)* s)`
 
 ## ulib.dios.io
@@ -73,6 +75,8 @@ Basic input/output functions.
 `void uputc(char c)`
 
 `void uputu(ulong v)`
+
+`void uputi(long v)`
 
 `void uputhex(ulong v)`
 

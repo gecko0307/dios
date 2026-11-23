@@ -114,6 +114,11 @@ int main(string[] args)
     uputs("\nBlocks: ");
     uputu(stats.allocatedBlocks + stats.freeBlocks);
     uputs("\n");
+    
+    int[6] a1 = [0, 1, 2, 3, 4, 5];
+    int[6] a2 = [5, 4, 3, 2, 1, 0];
+    uputu(memcmp(a1.ptr, a2.ptr, 6) == 0);
+    uputs("\n");
 
     uputs("All tests passed\n");
     return 0;
