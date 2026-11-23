@@ -1,6 +1,6 @@
 {
     "name": "gfxd",
-    "description": "DIOS graphics server",
+    "description": "DIOS graphics server and window manager",
     "homepage": "",
     "license": "Unlicense",
     "authors": [

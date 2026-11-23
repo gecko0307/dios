@@ -114,7 +114,7 @@ void wmInit(int screenW, int screenH)
     wmHasDamage = false;
 }
 
-// ---- geometry ----
+// geometry
 
 int wmFrameX(const(WmWindow)* w) { return w.x - WM_BORDER; }
 int wmFrameY(const(WmWindow)* w) { return w.y - WM_TITLE_H - WM_BORDER; }
@@ -150,7 +150,7 @@ int wmWindowAt(int x, int y)
     return -1;
 }
 
-// ---- damage ----
+// damage
 
 /// Something changed on screen: x, y, w, h in screen coordinates (render.d clips them).
 void wmAddDamage(int x, int y, int w, int h)
@@ -192,7 +192,7 @@ bool wmTakeDamage(int* x, int* y, int* w, int* h)
     return true;
 }
 
-// ---- windows ----
+// windows
 
 /// Index of the window of a kernel surface, -1 if we do not have one.
 int wmFind(uint surface)
@@ -345,7 +345,7 @@ void wmRemove(uint surface)
     ugfxServerUnmap(surface);
 }
 
-// ---- input ----
+// input
 
 /// A key press (GFX_EV_KEY). Goes to the window that has the keyboard.
 void wmHandleKey(const(GfxEvent)* ev)

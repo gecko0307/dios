@@ -1,6 +1,7 @@
 DIOS 0.6.0 - TBD
 ----------------
 - **GFXD**
+  - Window decorations and dragging
   - Many performance improvements.
 
 DIOS 0.5.0 - 24 Nov, 2026
