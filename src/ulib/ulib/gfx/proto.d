@@ -59,6 +59,7 @@ enum ulong SYS_GFX_POLL            = SYS_GFX + 10;
 
 // Event types (GfxEvent.type). Meaning of the fields a, b, c, d:
 enum uint GFX_EV_NONE           = 0;
+
 // kernel -> server
 enum uint GFX_EV_SURFACE_NEW    = 1;    // surface; a = width, b = height, c = owner task id
 enum uint GFX_EV_SURFACE_DAMAGE = 2;    // surface; a, b, c, d = x, y, w, h that changed (merged)
@@ -66,11 +67,14 @@ enum uint GFX_EV_SURFACE_GONE   = 3;    // surface; the owner is gone. Drop it, 
 enum uint GFX_EV_VISIBLE        = 4;    // a = 1: you own the screen now (repaint ALL), 0: you lost it
 enum uint GFX_EV_KEY            = 16;   // a = set-1 scancode, b = ASCII (0: none), c = GFX_MOD_*. Presses only
 enum uint GFX_EV_MOUSE          = 17;   // a = x, b = y, c = buttons (1 left, 2 right, 4 middle), d = wheel delta
+
 // kernel -> client
 enum uint GFX_EV_SERVER         = 32;   // surface; a = 1: a server is running now, 0: it stopped
+
 // server -> client: conventions only, the kernel passes them on untouched
 enum uint GFX_EV_FOCUS          = 33;   // a = 1 gained, 0 lost keyboard focus
 enum uint GFX_EV_CLOSE          = 34;   // the user asked to close the window
+
 // From here on: free for you. Clients may only send these (to the server); the server may send anything.
 enum uint GFX_EV_USER           = 0x1000;
 
@@ -150,7 +154,7 @@ int ugfxSend(uint surface, const(GfxEvent)* ev) @nogc nothrow
     return cast(int)sys_call(SYS_GFX_SEND, cast(ulong)surface, cast(ulong)ev, 0);
 }
 
-// ---- client ----
+// client
 
 /// Creates a drawable area: fill in `width` and `height`; on success `id`, `stride` and
 /// `pixels` are set and 0 is returned. The pixels start out black (0).
@@ -171,7 +175,7 @@ int ugfxSurfaceDestroy(uint surface) @nogc nothrow
     return cast(int)sys_call(SYS_GFX_SURFACE_DESTROY, cast(ulong)surface, 0, 0);
 }
 
-// ---- server ----
+// server
 
 /// Becomes THE graphics server and takes the screen. Fails (-1) if there already is one.
 /// Surfaces of programs that are already running are announced as GFX_EV_SURFACE_NEW.
