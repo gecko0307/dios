@@ -68,7 +68,10 @@ module dios.core.proc;
  *   15 getpid()
  *   16 datetime()
  *   17 random()
- *   1000..1999 reserved for an extension that registers syscallExtHook (currently the graphics server)
+ *   1000..1999 reserved for an extension that registers syscallExtHook1 (currently the graphics server)
+ *   2000..2999 reserved for an extension that registers syscallExtHook2
+ *   3000..3999 reserved for an extension that registers syscallExtHook3
+ *   4000..4999 reserved for an extension that registers syscallExtHook4
  */
 import dios.bootloader.limine;
 import dios.core.clock;
@@ -210,7 +213,7 @@ struct Task
 alias TaskExitHook = extern(C) void function(uint id, const(char)* name, long code, bool wasForeground) @nogc nothrow;
 /// Bracket the output of a background task when the shell is sitting at its prompt.
 alias TaskOutHook = extern(C) void function() @nogc nothrow;
-/// System calls SYS_EXT_FIRST..SYS_EXT_LAST. Runs on the calling task's kernel stack.
+/// Extended system calls. Runs on the calling task's kernel stack.
 alias SyscallExtHook = extern(C) long function(ulong nr, ulong a0, ulong a1, ulong a2) @nogc nothrow;
 /// A task has been reaped: its slot, its id. Its address space is already gone.
 alias TaskDeathHook = extern(C) void function(uint slot, uint id) @nogc nothrow;
