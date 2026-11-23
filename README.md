@@ -85,7 +85,7 @@ Most of its functions are libc-like and self-explanatory. Full list of them can 
 
 ## GFXD
 
-[GFXD](src/user/gfxd) is a graphics server that allows other applications to draw graphics on the screen. It is something akin to X Server in Unix.
+[GFXD](src/user/gfxd) is a graphics server that allows other applications to draw graphics on the screen.
 
 GFXD is a userspace program that is provided to the kernel as a binary module via Limine (see `limine.conf`). It must be present as `cdroot/user/gfxd.elf` before building the ISO image. DIOS repository provides a prebuilt GFXD binary for convenience.
 
