@@ -32,16 +32,20 @@ module render;
  *   renderScene   desktop + windows, WITHOUT the mouse cursor
  *   renderScreen  what the screen shows: the scene plus the cursor; this is what is presented
  *
- * Two kinds of update, because they cost very differently:
+ * Three kinds of update, because they cost very differently:
  *
- *   renderFrame()       something in the scene changed (window content, order, focus):
- *                       recompose everything, copy it to renderScreen, present it all.
- *   renderCursorMove()  only the mouse moved: restore the pixels under the old cursor from
- *                       the scene, draw the cursor at the new place, present just those two
- *                       small rectangles.
+ *   renderFrame()        the layout changed (window added/removed/raised, focus, screen regained):
+ *                        recompose everything, copy it to renderScreen, present it all.
+ *   renderFlushDamage()  a window drew something (GFX_EV_SURFACE_DAMAGE): the changed
+ *                        rectangles are collected with renderAddDamage(); this recomposes,
+ *                        copies and presents only their bounding box.
+ *   renderCursorMove()   only the mouse moved: restore the pixels under the old cursor from
+ *                        the scene, draw the cursor at the new place, present just those two
+ *                        small rectangles.
  *
- * Further steps when this is not fast enough: recompose and present only the damage
- * rectangle of a window (GFX_EV_SURFACE_DAMAGE, moved by the window position).
+ * Further steps when this is not fast enough: keep a LIST of damage rectangles instead of one
+ * bounding box (two animated windows far apart currently cost the area between them), and
+ * skip windows that are completely covered.
  *
  * Image loading, fonts, window decorations, alpha blending: all of that goes here.
  */
@@ -62,6 +66,13 @@ __gshared bool renderVisible;       // does the server have the screen? (GFX_EV_
 __gshared bool renderCursorDrawn;   // is there a cursor in renderScreen, and where:
 __gshared int renderCursorX;
 __gshared int renderCursorY;
+
+// Pending damage: bounding box in screen coordinates, half open [x0, x1) x [y0, y1)
+__gshared bool renderHasDamage;
+__gshared int renderDx0;
+__gshared int renderDy0;
+__gshared int renderDx1;
+__gshared int renderDy1;
 
 private bool renderAlloc(Canvas* c, uint width, uint height)
 {
@@ -118,24 +129,83 @@ private void renderPresentRect(int x, int y, int w, int h)
     ugfxServerPresent(renderScreen.pixels, &r, 0);
 }
 
-/// Recomposes the whole picture and presents all of it.
-void renderFrame()
+// Recomposes the part rx, ry, rw, rh (inside the screen) of the scene: desktop first, then the
+// windows back to front. Everything is drawn on a clipped view of the scene (Canvas.sub), so a
+// window that only partly overlaps the rectangle just contributes its overlapping part.
+private void renderScenePart(int rx, int ry, int rw, int rh)
 {
-    // back to front
-    renderScene.clear(COLOR_DESKTOP);
+    Canvas c = renderScene.sub(rx, ry, rw, rh);
+    if (!c.valid())
+        return;
+    c.clear(COLOR_DESKTOP);
     for (int i = 0; i < wmCount; i++)
     {
         int idx = wmOrder[i];
         WmWindow* w = &wmWindows[idx];
         uint border = (idx == wmFocus) ? COLOR_BORDER_FOCUS : COLOR_BORDER;
-        renderScene.rect(w.x - 1, w.y - 1, w.canvas.width + 2, w.canvas.height + 2, border);
-        renderScene.blit(&w.canvas, w.x, w.y);
+        // coordinates relative to the view
+        c.rect(w.x - 1 - rx, w.y - 1 - ry, w.canvas.width + 2, w.canvas.height + 2, border);
+        c.blit(&w.canvas, w.x - rx, w.y - ry);
     }
+}
+
+/// A window changed: x, y, w, h in SCREEN coordinates. Collected until renderFlushDamage().
+void renderAddDamage(int x, int y, int w, int h)
+{
+    int x0 = (x < 0) ? 0 : x;
+    int y0 = (y < 0) ? 0 : y;
+    int x1 = (x + w > renderScreen.width) ? renderScreen.width : x + w;
+    int y1 = (y + h > renderScreen.height) ? renderScreen.height : y + h;
+    if (x0 >= x1 || y0 >= y1)
+        return;
+    if (!renderHasDamage)
+    {
+        renderHasDamage = true;
+        renderDx0 = x0;
+        renderDy0 = y0;
+        renderDx1 = x1;
+        renderDy1 = y1;
+        return;
+    }
+    if (x0 < renderDx0) renderDx0 = x0;
+    if (y0 < renderDy0) renderDy0 = y0;
+    if (x1 > renderDx1) renderDx1 = x1;
+    if (y1 > renderDy1) renderDy1 = y1;
+}
+
+/// Recomposes the whole picture and presents all of it.
+void renderFrame()
+{
+    renderHasDamage = false;            // everything is redrawn anyway
+    renderScenePart(0, 0, renderScene.width, renderScene.height);
 
     // The kernel does not draw the mouse cursor while we have the screen: it is ours.
     renderScreen.blit(&renderScene, 0, 0);
     renderCursorDraw(wmMouseX, wmMouseY);
     ugfxServerPresent(renderScreen.pixels, null, 0);
+}
+
+/// Recomposes, copies and presents only what renderAddDamage() collected.
+void renderFlushDamage()
+{
+    if (!renderHasDamage)
+        return;
+    renderHasDamage = false;
+    int x = renderDx0;
+    int y = renderDy0;
+    int w = renderDx1 - renderDx0;
+    int h = renderDy1 - renderDy0;
+
+    renderScenePart(x, y, w, h);
+    renderScreen.blitRect(&renderScene, x, y, w, h, x, y);
+
+    // The copy wiped the cursor if it was in there: put it back where it was drawn (a pending
+    // mouse move is renderCursorMove's business)
+    if (renderCursorDrawn && renderCursorX < x + w && renderCursorX + CURSOR_WIDTH > x
+        && renderCursorY < y + h && renderCursorY + CURSOR_HEIGHT > y)
+        renderCursorDraw(renderCursorX, renderCursorY);
+
+    renderPresentRect(x, y, w, h);
 }
 
 /// Only the mouse moved: update just the pixels around the old and the new cursor.

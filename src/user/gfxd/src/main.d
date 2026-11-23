@@ -65,9 +65,12 @@ void handleEvent(const(GfxEvent)* ev)
 
         case GFX_EV_SURFACE_DAMAGE:
             // ev.a, ev.b, ev.c, ev.d: the rectangle that changed, relative to the surface.
-            // We just redraw everything; this is where per-window dirty rectangles would start.
-            sceneDirty = true;
+        {
+            int idx = wmFind(ev.surface);
+            if (idx >= 0)
+                renderAddDamage(wmWindows[idx].x + ev.a, wmWindows[idx].y + ev.b, ev.c, ev.d);
             break;
+        }
 
         case GFX_EV_SURFACE_GONE:
             wmRemove(ev.surface);
@@ -125,7 +128,8 @@ int main(string[] args)
     {
         // Sleep until something happens - but when a picture is due, only until it is time.
         long timeout = -1;
-        if ((sceneDirty || cursorDirty) && renderVisible)
+        bool pending = sceneDirty || cursorDirty || renderHasDamage;
+        if (pending && renderVisible)
         {
             ulong since = uticks() - lastFrame;
             timeout = (since >= FRAME_MS) ? 0 : cast(long)(FRAME_MS - since);
@@ -147,12 +151,20 @@ int main(string[] args)
             wmChanged = false;
         }
 
-        if ((sceneDirty || cursorDirty) && renderVisible && uticks() - lastFrame >= FRAME_MS)
+        pending = sceneDirty || cursorDirty || renderHasDamage;
+        if (pending && renderVisible && uticks() - lastFrame >= FRAME_MS)
         {
             if (sceneDirty)
-                renderFrame();          // recompose, present everything
+            {
+                renderFrame();              // layout changed: recompose and present everything
+            }
             else
-                renderCursorMove();     // present two small rectangles
+            {
+                if (renderHasDamage)
+                    renderFlushDamage();    // window content: only the changed area
+                if (cursorDirty)
+                    renderCursorMove();     // two small rectangles
+            }
             sceneDirty = false;
             cursorDirty = false;
             lastFrame = uticks();
