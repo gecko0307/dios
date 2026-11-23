@@ -1,3 +1,8 @@
+DIOS 0.6.0 - TBD
+----------------
+- **GFXD**
+  - Many performance improvements.
+
 DIOS 0.5.0 - 24 Nov, 2026
 -------------------------
 - **Kernel**:
