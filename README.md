@@ -28,9 +28,10 @@ DIOS is a monolithic kernel that contains all the device drivers in itself. It i
 - A shell with built-in kernel commands
 - Basic multi-tasking userspace in Ring 3; system calls; a simple standard library for applications
 - A single-mount read-only filesystem
-- Running applications from a USB stick.
+- Running applications from a USB stick
+- Userspace graphics server (GFXD) and graphical applications.
 
-DIOS is planned as a graphical OS: all rendering features are built into the kernel (but there's no full-featured GUI yet).
+DIOS is planned as a graphical OS, but there's no full-featured GUI yet. Graphical features are work-in-progress.
 
 DIOS is now 64-bit only, x86 support was dropped.
 
@@ -84,7 +85,7 @@ Most of its functions are libc-like and self-explanatory. Full list of them can 
 
 ## GFXD
 
-GFXD is a graphics server that allows other applications to draw graphics on the screen. It is something akin to X Server in Unix.
+[GFXD](src/user/gfxd) is a graphics server that allows other applications to draw graphics on the screen. It is something akin to X Server in Unix.
 
 GFXD is a userspace program that is provided to the kernel as a binary module via Limine (see `limine.conf`). It must be present as `cdroot/user/gfxd.elf` before building the ISO image with the system. DIOS repository provides a prebuilt GFXD binary for convenience.
 
