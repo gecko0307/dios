@@ -12,7 +12,7 @@ DIOS is an ELF kernel that requires a bootloader to run. Default setup in this r
 
 ## Features
 
-DIOS is a monolithic kernel that contains all the device drivers in itself. It is designed for modern computers and doesn't support legacy hardware.
+DIOS is a monolithic kernel that contains all the device drivers in itself. It is mostly designed for modern computers and doesn't support legacy hardware.
 
 - Boots using Limine startup protocol; supports both UEFI and legacy BIOS
 - UEFI GOP (or VESA) framebuffer
