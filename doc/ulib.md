@@ -22,7 +22,7 @@ DIOS kernel functions.
 
 `void uclear()`
 
-`int uopen(const(char)* path)`
+`int uopen(const(char)* path, int flags)`
 
 `long uread(int fd, void* buf, size_t n)`
 

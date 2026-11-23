@@ -147,7 +147,7 @@ void uclear() @nogc nothrow
  */
 int uopen(const(char)* path, int flag) @nogc nothrow
 {
-    return cast(int)sys_call(SYS_OPEN, cast(ulong)path, 0, 0);
+    return cast(int)sys_call(SYS_OPEN, cast(ulong)path, cast(ulong)flag, 0);
 }
 
 /// Reads bytes from the file at the current offset. Returns the number of bytes read (0 = end of file), or -1 on error.
