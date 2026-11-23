@@ -26,11 +26,11 @@ For more information, please refer to <https://unlicense.org>
 module umain;
 
 /*
- * Runtime entry point.
+ * D runtime entry point.
  * Allocates an arguments array and calls compiler-generated `_Dmain`.
  */
 
-import ulib.dios;
+import ulib.dios.alloc;
 
 private bool isSpace(char c) @nogc nothrow
 {

@@ -23,7 +23,7 @@ Supported function numbers:
 - `SYS_STAT` (10) - retrieves file stats. `a0` is the file descriptor, `a1` is the pointer to an output `UStat` structure. Returns 0 on success, -1 if the path does not exist
 - `SYS_READDIR` (11) - retrieves the next entry of an opened directory. `a0` is the directory descriptor, `a1` is the pointer to an output `UDirent` structure. Returns 1 if filled in, 0 if there are no more entries, -1 on error
 - `SYS_GETCWD` (12) - writes current working directory into a provided character buffer. `a0` is the pointer, `a1` is the buffer length. Returns CWD length or -1 on error
-- `SYS_BRK` (13) - moves the program break. Moving it upward increases the amount of available heap memory (allocation), moving it downward decreases it (deallocation)
+- `SYS_BRK` (13) - changes the program break. If `a0` is 0, returns the current break; otherwise sets the break to requested, returns the new break or -1 on error
 - `SYS_YIELD` (14) - let other programs run now
 - `SYS_GETPID` (15) - task ID of this program.
 

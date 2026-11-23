@@ -26,11 +26,11 @@ DEALINGS IN THE SOFTWARE.
 module dios.core.proc;
 
 /**
- * Tasks and user programs.
+ * User-space processes.
  *
- * Task 0 is the kernel itself: the shell and the main loop. Every other task runs an
- * ELF64 program in ring 3 in its own address space and talks to the kernel through
- * SYSCALL. Each task has its own kernel stack (taskStacks), its own page tables, break,
+ * Task 0 is the kernel itself. Every other task runs an ELF64 program in ring 3
+ * in its own address space and talks to the kernel through SYSCALL.
+ * Each task has its own kernel stack (taskStacks), its own page tables, break,
  * and table of open files.
  *
  * Scheduling: round robin on one CPU.
@@ -43,13 +43,7 @@ module dios.core.proc;
  *   - Task 0 never blocks, so there is always something to run. When no program is runnable the
  *     main loop sleeps in HLT until the next interrupt.
  *
- * Jobs: `run NAME` starts a program in the foreground (it owns the keyboard and the shell waits
- * for it), `run NAME &` in the background. Only the foreground task receives keys; Ctrl+C
- * (seen by the main loop) kills it. A background task that wants keys waits until `fg` brings
- * it to the front.
- *
- * Address space of a program (PML4 slot 0 is private, everything else is the
- * kernel's, shared):
+ * Address space of a program (PML4 slot 0 is private, everything else is the kernel's, shared):
  *   0x0000000000400000 - 0x0000000040000000   program image (PT_LOAD segments)
  *   0x0000000040000000 - ...                  heap (brk)
  *   0x000000007FFF0000 - 0x0000000080000000   stack (64 KiB), arguments at its top
@@ -61,8 +55,16 @@ module dios.core.proc;
  * procPoll() and reports the exit through taskExitHook.
  *
  * System calls (rax = number; rdi, rsi, rdx = arguments; result in rax):
- *   0 exit(code)   1 write(buf, len)   2 getkey(block)   3 sleep(ms)   4 ticks() -> ms
- *   5 clear()   6..12 files   13 brk   14 yield()   15 getpid()
+ *   0 exit(code)
+ *   1 write(buf, len)
+ *   2 getkey(block)
+ *   3 sleep(ms)
+ *   4 ticks()
+ *   5 clear()
+ *   6..12 files
+ *   13 brk(requested)
+ *   14 yield()
+ *   15 getpid()
  */
 import dios.bootloader.limine;
 import dios.core.clock;

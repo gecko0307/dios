@@ -1,8 +1,7 @@
-; user/ulib.s - program entry point and the raw system call stub
+; stub.s - program entry point
 bits 64
 
 global _start
-global sys_call
 extern umain
 
 section .text
@@ -16,12 +15,3 @@ _start:
     syscall
 .hang:
     jmp .hang
-
-; long sys_call(ulong nr, ulong a0, ulong a1, ulong a2)
-sys_call:
-    mov rax, rdi
-    mov rdi, rsi
-    mov rsi, rdx
-    mov rdx, rcx
-    syscall
-    ret
