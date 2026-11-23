@@ -47,7 +47,7 @@
     
     "postBuildCommands-windows": [
         "move /Y gfxd.elf.exe gfxd.elf",
-        "if not exist ..\\..\\..\\usbstick mkdir ..\\..\\..\\usbstick",
-        "copy /Y gfxd.elf ..\\..\\..\\usbstick\\gfxd.elf"
+        "if not exist ..\\..\\..\\cdroot\\user mkdir ..\\..\\..\\cdroot\\user",
+        "copy /Y gfxd.elf ..\\..\\..\\cdroot\\user\\gfxd.elf"
     ]
 }
