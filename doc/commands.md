@@ -28,6 +28,7 @@
 - `ps` - list running programs
 - `kill ID` - stop a program
 - `fg [ID]` - bring a background program to the foreground
+- `gfx [CMD]` - manage graphics server. CMD can be `status`, `start [NAME]`, `stop`, `show`, `hide`
 - `clear` - clear the screen
 - `crash pf|ud|div|gp` - trigger a CPU exception (kernel halts)
 - `reboot` - restart the computer

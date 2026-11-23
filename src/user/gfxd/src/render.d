@@ -40,6 +40,7 @@ module render;
 import ulib.dios;
 import ulib.gfx;
 import wm;
+import cursor;
 
 enum uint COLOR_DESKTOP      = 0x00203A5A;
 enum uint COLOR_BORDER       = 0x00707070;
@@ -62,14 +63,23 @@ bool renderInit(uint width, uint height)
     return true;
 }
 
-// A placeholder arrow, tip at (x, y). Replace it with a bitmap when you have image loading
 private void renderCursor(int x, int y)
 {
+    /*
     for (int r = 0; r < 12; r++)
     {
         renderScreen.fillRect(x, y + r, r + 1, 1, 0x00000000);
         if (r > 1 && r < 11)
             renderScreen.fillRect(x + 1, y + r, r - 1, 1, 0x00FFFFFF);
+    }
+    */
+    
+    for (int cy = 0; cy < CURSOR_HEIGHT; cy++)
+    for (int cx = 0; cx < CURSOR_WIDTH; cx++)
+    {
+        uint pix = CURSOR[cast(size_t)(cy * CURSOR_WIDTH + cx)];
+        if (pix != 0x00FF00FF)
+            renderScreen.setPixel(x + cx, y + cy, pix);
     }
 }
 

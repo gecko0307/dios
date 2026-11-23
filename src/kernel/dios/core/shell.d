@@ -711,7 +711,7 @@ void shellExecute() @nogc nothrow
         cprintf("  poweroff         Shut down the computer\n");
         cprintf("Keys: arrows/Home/End/Del edit, Up/Down history, Tab completes,\n");
         cprintf("      Ctrl+A/E start/end, Ctrl+U clear line, Ctrl+L redraw, Ctrl+C cancel\n");
-        cprintf("      Ctrl+F1 this shell, Ctrl+F2 graphics server, Ctrl+F3 stop the graphics server\n");
+        cprintf("      Ctrl+F1 shows the shell, Ctrl+F2 shows the graphics server, Ctrl+F3 stops the graphics server\n");
     }
     else if (shellEquals(shellLine.ptr, "about"))
     {
