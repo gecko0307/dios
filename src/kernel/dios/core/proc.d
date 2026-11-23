@@ -68,7 +68,7 @@ module dios.core.proc;
  *   15 getpid()
  *   16 datetime()
  *   17 random()
- *   18..33 reserved for extensions that register syscallExtHook (currently the graphics server)
+ *   1000..1999 reserved for an extension that registers syscallExtHook (currently the graphics server)
  */
 import dios.bootloader.limine;
 import dios.core.clock;
@@ -125,8 +125,12 @@ enum ulong SYS_YIELD = 14;
 enum ulong SYS_GETPID = 15;
 enum ulong SYS_DATETIME = 16;
 enum ulong SYS_RANDOM = 17;
-enum ulong SYS_EXT_FIRST = 18; // 18..33: handled by syscallExtHook
-enum ulong SYS_EXT_LAST = 33;
+
+// Extended syscall functions, handled by corresponding syscallExtHook*
+enum ulong SYS_EXT1 = 1000; // [1000..1999 - SYS_EXT1]
+enum ulong SYS_EXT2 = 2000; // [2000..2999 - SYS_EXT2]
+enum ulong SYS_EXT3 = 3000; // [3000..3999 - SYS_EXT3]
+enum ulong SYS_EXT4 = 4000; // [4000..4999 - SYS_EXT4]
 
 enum uint MSR_EFER = 0xC0000080;
 enum uint MSR_STAR = 0xC0000081;
@@ -221,7 +225,10 @@ __gshared uint sliceTicks;
 __gshared TaskExitHook taskExitHook;
 __gshared TaskOutHook taskOutBegin;
 __gshared TaskOutHook taskOutEnd;
-__gshared SyscallExtHook syscallExtHook;
+__gshared SyscallExtHook syscallExtHook1;
+__gshared SyscallExtHook syscallExtHook2;
+__gshared SyscallExtHook syscallExtHook3;
+__gshared SyscallExtHook syscallExtHook4;
 __gshared TaskDeathHook taskDeathHook;
 align(16) __gshared ubyte[TASK_STACK_SIZE][TASK_MAX] taskStacks;
 
@@ -1213,8 +1220,14 @@ long syscallDispatch(ulong nr, ulong a0, ulong a1, ulong a2) @nogc nothrow
         case SYS_RANDOM:
             return sysRandom(cast(void*)a0, a1);
         default:
-            if (nr >= SYS_EXT_FIRST && nr <= SYS_EXT_LAST && syscallExtHook !is null)
-                return syscallExtHook(nr, a0, a1, a2);
+            if (nr >= SYS_EXT1 && nr < SYS_EXT1 + 1000 && syscallExtHook1 !is null)
+                return syscallExtHook1(nr - SYS_EXT1, a0, a1, a2);
+            if (nr >= SYS_EXT2 && nr < SYS_EXT2 + 1000 && syscallExtHook2 !is null)
+                return syscallExtHook2(nr - SYS_EXT2, a0, a1, a2);
+            if (nr >= SYS_EXT3 && nr < SYS_EXT3 + 1000 && syscallExtHook3 !is null)
+                return syscallExtHook3(nr - SYS_EXT3, a0, a1, a2);
+            if (nr >= SYS_EXT4 && nr < SYS_EXT4 + 1000 && syscallExtHook4 !is null)
+                return syscallExtHook4(nr - SYS_EXT4, a0, a1, a2);
             return -1;
     }
 }

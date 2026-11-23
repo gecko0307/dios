@@ -51,6 +51,12 @@ enum ulong SYS_GETPID = 15;
 enum ulong SYS_DATETIME = 16;
 enum ulong SYS_RANDOM = 17;
 
+// Extended kernel function numbers
+enum ulong SYS_EXT1 = 1000;
+enum ulong SYS_EXT2 = 2000;
+enum ulong SYS_EXT3 = 3000;
+enum ulong SYS_EXT4 = 4000;
+
 // uopen() flags
 enum int O_RDONLY = 0;
 enum int O_WRONLY = 1;

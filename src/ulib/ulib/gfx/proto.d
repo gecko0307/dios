@@ -44,17 +44,18 @@ module ulib.gfx.proto;
 
 import ulib.dios.sys;
 
-enum ulong SYS_GFX_INFO            = 18;
-enum ulong SYS_GFX_SERVER_BEGIN    = 19;
-enum ulong SYS_GFX_SERVER_END      = 20;
-enum ulong SYS_GFX_SERVER_PRESENT  = 21;
-enum ulong SYS_GFX_SERVER_MAP      = 22;
-enum ulong SYS_GFX_SERVER_UNMAP    = 23;
-enum ulong SYS_GFX_SURFACE_CREATE  = 24;
-enum ulong SYS_GFX_SURFACE_COMMIT  = 25;
-enum ulong SYS_GFX_SURFACE_DESTROY = 26;
-enum ulong SYS_GFX_SEND            = 27;
-enum ulong SYS_GFX_POLL            = 28;
+enum ulong SYS_GFX                 = SYS_EXT1;
+enum ulong SYS_GFX_INFO            = SYS_GFX + 0;
+enum ulong SYS_GFX_SERVER_BEGIN    = SYS_GFX + 1;
+enum ulong SYS_GFX_SERVER_END      = SYS_GFX + 2;
+enum ulong SYS_GFX_SERVER_PRESENT  = SYS_GFX + 3;
+enum ulong SYS_GFX_SERVER_MAP      = SYS_GFX + 4;
+enum ulong SYS_GFX_SERVER_UNMAP    = SYS_GFX + 5;
+enum ulong SYS_GFX_SURFACE_CREATE  = SYS_GFX + 6;
+enum ulong SYS_GFX_SURFACE_COMMIT  = SYS_GFX + 7;
+enum ulong SYS_GFX_SURFACE_DESTROY = SYS_GFX + 8;
+enum ulong SYS_GFX_SEND            = SYS_GFX + 9;
+enum ulong SYS_GFX_POLL            = SYS_GFX + 10;
 
 // Event types (GfxEvent.type). Meaning of the fields a, b, c, d:
 enum uint GFX_EV_NONE           = 0;

@@ -59,17 +59,17 @@ module dios.core.gfxsrv;
  * clients itself.
  *
  * System calls (all fail with -1 for task 0; layouts are shared with ulib/gfx/proto.d):
- *   16 gfx_info(UserGfxInfo*)                        anybody
- *   17 gfx_server_begin()                            become THE graphics server, take the screen
- *   18 gfx_server_end()                              give up the server role
- *   19 gfx_server_present(pixels, rect*|0, pitch|0)  server: copy back buffer to the screen
- *   20 gfx_server_map(UserGfxSurface*)               server: map surface `id` into this program
- *   21 gfx_server_unmap(id)                          server: let go of a surface
- *   22 gfx_surface_create(UserGfxSurface*)           client: new drawable area
- *   23 gfx_surface_commit(id, rect*|0)               client: "I changed this part"
- *   24 gfx_surface_destroy(id)                       client: done with it
- *   25 gfx_send(surface id, UserGfxEvent*)           server -> owner of the surface, or client -> server
- *   26 gfx_poll(UserGfxEvent*, timeoutMs)            next event for this program (0: none, 1: got one)
+ *   0  gfx_info(UserGfxInfo*)                        anybody
+ *   1  gfx_server_begin()                            become THE graphics server, take the screen
+ *   2  gfx_server_end()                              give up the server role
+ *   3  gfx_server_present(pixels, rect*|0, pitch|0)  server: copy back buffer to the screen
+ *   4  gfx_server_map(UserGfxSurface*)               server: map surface `id` into this program
+ *   5  gfx_server_unmap(id)                          server: let go of a surface
+ *   6  gfx_surface_create(UserGfxSurface*)           client: new drawable area
+ *   7  gfx_surface_commit(id, rect*|0)               client: "I changed this part"
+ *   8  gfx_surface_destroy(id)                       client: done with it
+ *   9  gfx_send(surface id, UserGfxEvent*)           server -> owner of the surface, or client -> server
+ *   10 gfx_poll(UserGfxEvent*, timeoutMs)            next event for this program (0: none, 1: got one)
  *
  * Everything runs in the kernel's single-threaded, non-preemptive context (see proc.d), so
  * there are no locks. The only place a task can be switched out inside this file is the
@@ -85,17 +85,17 @@ import dios.core.paging;
 import dios.core.proc;
 import dios.core.stdio;
 
-enum ulong SYS_GFX_INFO            = 18;
-enum ulong SYS_GFX_SERVER_BEGIN    = 19;
-enum ulong SYS_GFX_SERVER_END      = 20;
-enum ulong SYS_GFX_SERVER_PRESENT  = 21;
-enum ulong SYS_GFX_SERVER_MAP      = 22;
-enum ulong SYS_GFX_SERVER_UNMAP    = 23;
-enum ulong SYS_GFX_SURFACE_CREATE  = 24;
-enum ulong SYS_GFX_SURFACE_COMMIT  = 25;
-enum ulong SYS_GFX_SURFACE_DESTROY = 26;
-enum ulong SYS_GFX_SEND            = 27;
-enum ulong SYS_GFX_POLL            = 28;
+enum ulong SYS_GFX_INFO            = 0;
+enum ulong SYS_GFX_SERVER_BEGIN    = 1;
+enum ulong SYS_GFX_SERVER_END      = 2;
+enum ulong SYS_GFX_SERVER_PRESENT  = 3;
+enum ulong SYS_GFX_SERVER_MAP      = 4;
+enum ulong SYS_GFX_SERVER_UNMAP    = 5;
+enum ulong SYS_GFX_SURFACE_CREATE  = 6;
+enum ulong SYS_GFX_SURFACE_COMMIT  = 7;
+enum ulong SYS_GFX_SURFACE_DESTROY = 8;
+enum ulong SYS_GFX_SEND            = 9;
+enum ulong SYS_GFX_POLL            = 10;
 
 // Event types (UserGfxEvent.type). Meaning of the fields a, b, c, d:
 enum uint GFX_EV_NONE           = 0;
@@ -651,7 +651,7 @@ void gfxsrvInit() @nogc nothrow
     gsrv.taskId = 0;
     gsrv.slot = 0;
     gsrv.visible = false;
-    syscallExtHook = &gfxsrvSyscall;
+    syscallExtHook1 = &gfxsrvSyscall;
     taskDeathHook = &gfxsrvTaskDied;
 }
 
