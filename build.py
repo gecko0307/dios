@@ -1,3 +1,4 @@
+import argparse
 import os
 import subprocess
 import shutil
@@ -26,17 +27,11 @@ NASM = shutil.which("nasm")
 LD = shutil.which("ld.lld")
 XORRISO = shutil.which("xorriso")
 
-if not LDC:
-    raise RuntimeError("ldc2 not found")
-
-if not NASM:
-    raise RuntimeError("nasm not found")
-
-if not LD:
-    raise RuntimeError("ld.lld not found")
-
-if not XORRISO:
-    raise RuntimeError("xorriso not found")
+def require(**tools):
+    """Fail early with a clear message when a needed tool is missing."""
+    for name, path in tools.items():
+        if not path:
+            raise RuntimeError(f"{name} not found")
 
 D_FLAGS_KERNEL = [
     "-c",
@@ -102,6 +97,7 @@ def compile_asm(path, src, obj_dir):
     return output
 
 def compile_kernel():
+    require(ldc2=LDC, nasm=NASM, **{"ld.lld": LD})
     d_files = sorted(SRC_KERNEL.rglob("*.d"))
     asm_files = sorted(SRC_KERNEL.rglob("*.s"))
 
@@ -164,9 +160,8 @@ def build_rootfs():
     print(f"rootfs: {out.relative_to(ROOT)} from {ROOTFS.relative_to(ROOT)}/ "
           f"({len(entries)} entries, {out.stat().st_size} bytes)")
 
-def main():
-    compile_kernel()
-    build_rootfs()
+def build_iso():
+    require(xorriso=XORRISO)
     run([
         XORRISO,
         "-as", "mkisofs",
@@ -184,6 +179,21 @@ def main():
         "-o", "dios64.iso",
         "./cdroot",
     ])
+
+def main():
+    parser = argparse.ArgumentParser(description="Build the DIOS kernel, the root file system image and the ISO.")
+    parser.add_argument("--skip-kernel", "--rootfs-only", dest="skip_kernel", action="store_true",
+                        help="do not compile the kernel: rebuild only cdroot/rootfs.tar and dios64.iso "
+                             "(reuses the existing cdroot/kernel64.bin)")
+    args = parser.parse_args()
+
+    if args.skip_kernel:
+        if not (CDROOT / "kernel64.bin").is_file():
+            raise RuntimeError("cdroot/kernel64.bin does not exist yet: run build.py once without --skip-kernel")
+    else:
+        compile_kernel()
+    build_rootfs()
+    build_iso()
 
 if __name__ == "__main__":
     main()

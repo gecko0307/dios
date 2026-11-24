@@ -126,4 +126,4 @@ Userspace services and sample programs are built with DUB:
 dub build
 ```
 
-*.elf binaries are automatically copied to `rootfs/bin` directory. To include them to the root filesystem, you should run `build.py` *after* building sample programs.
+*.elf binaries are automatically copied to `rootfs/bin` directory. To include them to the root filesystem, you should run `python build.py --skip-kernel` to rebuild the image if the kernel is already compiled.
