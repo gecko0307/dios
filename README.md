@@ -131,3 +131,13 @@ dub build
 ```
 
 *.elf binaries are automatically copied to `rootfs/bin`. To include them to the root filesystem, you should run `python build.py --skip-kernel` to rebuild the image (if the kernel is already compiled).
+
+## What Next?
+
+If you see the blue kernel shell with a blinking cursor, congratulations: DIOS is up and running! With a few more steps you can open an image viewer window as shown on the screenshot above:
+
+1. Type `cd home` and press Enter.
+2. Type `image lake.tga &` and press Enter.
+3. Type `gfx start` and enjoy the graphics mode!
+
+You can always switch back to the shell with Ctrl+F1 and to the graphics mode with Ctrl+F2.
