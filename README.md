@@ -34,7 +34,8 @@ You are free to use this code as a base to create your own OS. PRs implementing 
 - Basic multi-tasking userspace in Ring 3; system calls; a simple standard library for applications
 - Virtual filesystem; multiple mount points
 - RAM filesystem image loaded from a TAR archive (`rootfs.tar`) provided by the bootloader
-- Userspace graphics server (GFXD), windowed applications.
+- Userspace graphics server (GFXD), windowed applications
+- Simple image viewer.
 
 ## Kernel Shell Commands
 
@@ -51,7 +52,7 @@ Simple examples of what can be done in DIOS userspace.
 - `timer.elf` - a timer that can be run in background (for example, `timer 10s &`)
 - `math.elf` - floating-point math functions test
 - `random.elf` - random number generator test
-- `gfxdemo.elf` - a graphical application demo. Run `gfxdemo &` to start it in background, then switch to graphics mode (see below).
+- `gfxdemo.elf` - a graphical demo (simple painting app). Run `gfxdemo &` to start it in background, then switch to graphics mode (see below).
 
 Applications are also written in D, but they actually can be written in any language that can make platform-independent ELF64 binaries.
 
@@ -71,6 +72,7 @@ DIOS project consists of a several structural layers, each with its own workflow
 - `src/user` contains userspace services and built-in programs:
   - `src/user/gfxd` - **GFXD**, the DIOS Graphics Server
   - `src/user/timer` - a simple background timer program (`timer 10s &`)
+  - `src/user/image` - work-in-progress image viewer. Currently supports only TGA format (`image img.tga &`, then start/switch to graphics mode)
 - `src/demos` contains sample applications:
   - `src/demos/hello`
   - `src/demos/file`
