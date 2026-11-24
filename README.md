@@ -136,8 +136,8 @@ dub build
 
 If you see the blue kernel shell with a blinking cursor, congratulations: DIOS is up and running! With a few more steps you can open an image viewer window as shown on the screenshot above:
 
-1. Type `cd home` and press Enter.
-2. Type `image lake.tga &` and press Enter.
-3. Type `gfx start` and enjoy the graphics mode!
+1. Enter `cd home`.
+2. Enter `image lake.tga &`.
+3. Enter `gfx start` and enjoy the graphics mode!
 
 You can always switch back to the shell with Ctrl+F1 and to the graphics mode with Ctrl+F2.
