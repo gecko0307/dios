@@ -318,12 +318,7 @@ void usbStorageRemoveGone() @nogc nothrow
             continue;
         BlockDev* b = &blockDevs[u.blk];
         kprintf("%s: removed\n", b.name.ptr);
-        if (rootMount.mounted && partitions[rootMount.partition].dev == u.blk)
-        {
-            rootMount.mounted = false;
-            sysfileReset();                         // open files of a running program are dead now
-            kprintf("Unmounted /\n");
-        }
+        fsUnmountDevice(u.blk);                     // only the volumes of this disk; their open files die with them
         blockUnregister(b);
         u.used = false;
     }
@@ -406,7 +401,6 @@ void usbHotplugPoll() @nogc nothrow
     if (xhciTopologyGen != usbSeenGen)
     {
         usbStorageProbe();
-        if (!rootMount.mounted)
-            fsAutoMount();
+        fsAutoMount();                              // every new readable volume gets its own mount point
     }
 }

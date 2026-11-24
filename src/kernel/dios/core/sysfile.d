@@ -58,7 +58,8 @@ struct OpenFile
 {
     bool used;
     bool isDir;
-    uint generation; // sysfileGeneration when opened; stale after a volume change
+    int mount; // mount slot the file lives on, or FS_ROOT for the virtual root directory
+    uint generation; // mounts[mount].generation when opened; stale after that volume went away
     ExfatEntry entry;
     ExfatFile file;
     ulong pos; // file offset, or the next directory index
@@ -67,9 +68,6 @@ struct OpenFile
 /// Every task owns an OpenFile[SYSFILE_MAX_OPEN] table; the scheduler points this at the
 /// running task's table (sysfileBind). Task 0 (the shell) has one too, but never uses it.
 __gshared OpenFile* openFiles;
-
-/// Bumped when the volume goes away: every descriptor of every task becomes invalid.
-__gshared uint sysfileGeneration;
 
 struct DirPick
 {
@@ -80,12 +78,6 @@ struct DirPick
 }
 
 extern(C):
-
-/// The volume changed or vanished: all open files of all tasks are dead.
-void sysfileReset() @nogc nothrow
-{
-    sysfileGeneration++;
-}
 
 /// Close everything in a fresh task's table.
 void sysfileClear(OpenFile* table) @nogc nothrow
@@ -100,9 +92,17 @@ void sysfileBind(OpenFile* table) @nogc nothrow
     openFiles = table;
 }
 
+/// A descriptor is live while its volume is still mounted and was not remounted since.
+/// Descriptors on other volumes are not affected when one volume goes away.
 bool sysfileLive(const(OpenFile)* f) @nogc nothrow
 {
-    return f.used && f.generation == sysfileGeneration;
+    if (!f.used)
+        return false;
+    if (f.mount == FS_ROOT)
+        return true;
+    if (f.mount < 0 || f.mount >= cast(int)FS_MAX_MOUNTS)
+        return false;
+    return mounts[f.mount].mounted && mounts[f.mount].generation == f.generation;
 }
 
 OpenFile* sysfileGet(ulong fd) @nogc nothrow
@@ -115,7 +115,7 @@ OpenFile* sysfileGet(ulong fd) @nogc nothrow
 /// Open a file or directory. Returns the descriptor, or -1.
 long sysfileOpen(const(char)* path) @nogc nothrow
 {
-    if (!rootMount.mounted || openFiles is null)
+    if (openFiles is null)
         return -1;
     uint fd = 0;
     while (fd < SYSFILE_MAX_OPEN && sysfileLive(&openFiles[fd]))
@@ -124,13 +124,15 @@ long sysfileOpen(const(char)* path) @nogc nothrow
         return -1;
 
     OpenFile* f = &openFiles[fd];
-    if (!fsStat(path, &f.entry))
+    int slot;
+    if (!fsStat(path, &f.entry, &slot))
         return -1;
     f.isDir = f.entry.isDir;
     f.pos = 0;
     if (!f.isDir && !exfatOpen(&f.file, &f.entry))
         return -1;
-    f.generation = sysfileGeneration;
+    f.mount = slot;
+    f.generation = (slot == FS_ROOT) ? 0 : mounts[slot].generation;
     f.used = true;
     return fd;
 }
@@ -158,7 +160,7 @@ long sysfileRead(ulong fd, void* dst, ulong len) @nogc nothrow
     if (len > 1024 * 1024)
         len = 1024 * 1024;
 
-    ulong got = exfatRead(&rootMount.vol, &f.file, f.pos, dst, len);
+    ulong got = fsRead(f.mount, &f.file, f.pos, dst, len);
     if (got == 0)
         return -1;
     f.pos += got;
@@ -221,7 +223,7 @@ long sysfileReaddir(ulong fd, UserDirent* out_) @nogc nothrow
 
     DirPick pick;
     pick.want = f.pos;
-    if (!exfatIterate(&rootMount.vol, &f.entry, &sysfilePickCb, &pick))
+    if (!fsIterate(f.mount, &f.entry, &sysfilePickCb, &pick))
         return -1;
     if (!pick.found)
         return 0;

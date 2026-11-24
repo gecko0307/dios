@@ -51,13 +51,13 @@ import dios.core.xhci;
 enum size_t SHELL_LINE_CAPACITY = 128;
 enum size_t SHELL_HISTORY_CAPACITY = 16;
 
-immutable string[36] SHELL_COMMANDS = [
+immutable string[37] SHELL_COMMANDS = [
     "help", "about", "mem", "time", "uptime", "clock",
     "irq", "pci", "history", "echo", "poweroff", "shutdown",
     "reboot", "clear", "cpuinfo", "acpi", "irqstat",
     "sleep", "hexdump", "crash", "version", "ls", "run", "memmap",
     "programs", "disk", "mount", "cd", "pwd", "cat", "dmesg", "usb",
-    "ps", "kill", "fg", "gfx"
+    "ps", "kill", "fg", "gfx", "umount"
 ];
 
 __gshared char[SHELL_LINE_CAPACITY] shellLine;
@@ -247,7 +247,7 @@ void shellGfx(const(char)* args) @nogc nothrow
         int index = procFind(name.ptr);
         if (index >= 0)
             shellRunProgram(cast(uint)index, "".ptr, true);
-        else if (rootMount.mounted)
+        else if (fsMountCount() > 0)
             shellRunFile(name.ptr, "".ptr, true);
         else
         {
@@ -359,15 +359,22 @@ extern(C) bool shellListCb(const(ExfatEntry)* e, void* ctx) @nogc nothrow
 {
     ShellListCtx* c = cast(ShellListCtx*)ctx;
     uint t = e.mtime;
-    shellPad(1980 + (t >> 25), 4);
-    consolePrintChar('-');
-    shellPad2((t >> 21) & 0xF);
-    consolePrintChar('-');
-    shellPad2((t >> 16) & 0x1F);
-    consolePrintChar(' ');
-    shellPad2((t >> 11) & 0x1F);
-    consolePrintChar(':');
-    shellPad2((t >> 5) & 0x3F);
+    if (t == 0)
+    {
+        consolePrintString("                ");       // no timestamp (mount points)
+    }
+    else
+    {
+        shellPad(1980 + (t >> 25), 4);
+        consolePrintChar('-');
+        shellPad2((t >> 21) & 0xF);
+        consolePrintChar('-');
+        shellPad2((t >> 16) & 0x1F);
+        consolePrintChar(' ');
+        shellPad2((t >> 11) & 0x1F);
+        consolePrintChar(':');
+        shellPad2((t >> 5) & 0x3F);
+    }
     consolePrintString("  ");
     if (e.isDir)
     {
@@ -387,7 +394,7 @@ extern(C) bool shellListCb(const(ExfatEntry)* e, void* ctx) @nogc nothrow
 
 bool shellNeedVolume() @nogc nothrow
 {
-    if (!rootMount.mounted)
+    if (fsMountCount() == 0)
     {
         cprintf("No volume mounted. 'disk' shows what was found, 'mount N' mounts a partition.\n");
         return false;
@@ -403,7 +410,8 @@ void shellLs(const(char)* path) @nogc nothrow
         path = ".";
 
     ExfatEntry e;
-    if (!fsStat(path, &e))
+    int slot;
+    if (!fsStat(path, &e, &slot))
     {
         cprintf("Not found: %s\n", path);
         return;
@@ -412,7 +420,7 @@ void shellLs(const(char)* path) @nogc nothrow
     ShellListCtx ctx;
     if (e.isDir)
     {
-        if (!exfatIterate(&rootMount.vol, &e, &shellListCb, &ctx))
+        if (!fsIterate(slot, &e, &shellListCb, &ctx))
             cprintf("Read error while listing the directory.\n");
     }
     else
@@ -428,12 +436,13 @@ void shellCat(const(char)* path) @nogc nothrow
     if (!shellNeedVolume())
         return;
     ExfatEntry e;
+    int slot;
     if (path[0] == 0)
     {
         cprintf("Usage: cat FILE\n");
         return;
     }
-    if (!fsStat(path, &e) || e.isDir)
+    if (!fsStat(path, &e, &slot) || e.isDir)
     {
         cprintf("Not a file: %s\n", path);
         return;
@@ -450,7 +459,7 @@ void shellCat(const(char)* path) @nogc nothrow
             want = shellIo.length;
         if (off + want > LIMIT)
             want = LIMIT - off;
-        ulong got = exfatRead(&rootMount.vol, &f, off, shellIo.ptr, want);
+        ulong got = fsRead(slot, &f, off, shellIo.ptr, want);
         if (got == 0)
         {
             cprintf("\n[read error]\n");
@@ -494,9 +503,12 @@ void shellDisk() @nogc nothrow
             Partition* p = &partitions[i];
             if (!p.valid || p.dev != d)
                 continue;
-            cprintf("  [%u] partition %u: start %llu, %llu MiB, %s%s\n", i, cast(uint)p.number,
-                    p.startLba, (p.sectors * b.sectorSize) >> 20, p.kind.ptr,
-                    (rootMount.mounted && rootMount.partition == i) ? "   <- mounted as /".ptr : "".ptr);
+            int ms = fsMountOfPartition(i);
+            cprintf("  [%u] partition %u: start %llu, %llu MiB, %s", i, cast(uint)p.number,
+                    p.startLba, (p.sectors * b.sectorSize) >> 20, p.kind.ptr);
+            if (ms >= 0)
+                cprintf("   <- mounted as /%s", mounts[ms].name.ptr);
+            cprintf("\n");
             shown++;
         }
         if (shown == 0)
@@ -508,29 +520,83 @@ void shellMount(const(char)* args) @nogc nothrow
 {
     if (args[0] == 0)
     {
-        if (!fsAutoMount())
+        uint added = fsAutoMount();
+        if (added == 0 && fsMountCount() == 0)
             cprintf("No exFAT or FAT32 volume found ('disk' lists the partitions).\n");
+        else if (added == 0)
+            cprintf("Nothing new to mount. 'ls /' lists the mount points.\n");
         return;
     }
     ulong n;
-    if (diagParseNumber(args, &n) is null || n >= partitionCount)
+    const(char)* rest = diagParseNumber(args, &n);
+    if (rest is null || n >= partitionCount)
     {
-        cprintf("Usage: mount [PARTITION-NUMBER]   (numbers in brackets in 'disk')\n");
+        cprintf("Usage: mount [PARTITION-NUMBER [NAME]]   (numbers in brackets in 'disk')\n");
         return;
     }
-    if (!fsMountPartition(cast(uint)n))
-        cprintf("Partition %llu is not a readable exFAT or FAT32 volume.\n", n);
-    else
-        cprintf("Mounted %s volume '%s' as /\n", rootMount.vol.fat32 ? "FAT32".ptr : "exFAT".ptr, rootMount.vol.label.ptr);
+    while (*rest == ' ' || *rest == '\t')
+        rest++;
+    if (*rest == '/')
+        rest++;                     // "mount 1 /usb" is fine too
+
+    int slot = fsMountPartition(cast(uint)n, rest);
+    if (slot >= 0)
+    {
+        cprintf("Mounted %s volume '%s' as /%s\n", mounts[slot].vol.fat32 ? "FAT32".ptr : "exFAT".ptr,
+                mounts[slot].vol.label.ptr, mounts[slot].name.ptr);
+        return;
+    }
+    switch (slot)
+    {
+        case FS_ERR_ALREADY:
+            cprintf("Partition %llu is already mounted as /%s\n", n, mounts[fsMountOfPartition(cast(uint)n)].name.ptr);
+            break;
+        case FS_ERR_NO_SLOT:
+            cprintf("Too many mounts (max %u). Use 'umount NAME' first.\n", FS_MAX_MOUNTS);
+            break;
+        case FS_ERR_BAD_NAME:
+            cprintf("Bad mount name: use 1..%u characters, no '/' or blanks.\n", FS_NAME_MAX - 1);
+            break;
+        case FS_ERR_NAME_TAKEN:
+            cprintf("The name /%s is already in use.\n", rest);
+            break;
+        case FS_ERR_BAD_PARTITION:
+            cprintf("No such partition: %llu\n", n);
+            break;
+        default:
+            cprintf("Partition %llu is not a readable exFAT or FAT32 volume.\n", n);
+            break;
+    }
+}
+
+void shellUmount(const(char)* args) @nogc nothrow
+{
+    if (*args == '/')
+        args++;
+    int slot = (*args == 0) ? -1 : fsFindMount(args);
+    if (slot < 0)
+    {
+        cprintf("Usage: umount NAME   (mounted now:");
+        for (uint i = 0; i < FS_MAX_MOUNTS; i++)
+            if (mounts[i].mounted)
+                cprintf(" %s", mounts[i].name.ptr);
+        if (fsMountCount() == 0)
+            cprintf(" none");
+        cprintf(")\n");
+        return;
+    }
+    cprintf("Unmounted /%s\n", mounts[slot].name.ptr);
+    fsUnmount(slot);
 }
 
 // Run an ELF file from the mounted volume. Tries `path`, then `path.elf`.
 void shellRunFile(const(char)* path, const(char)* args, bool background) @nogc nothrow
 {
     ExfatEntry e;
+    int slot;
     char[FS_PATH_MAX + 8] withExt;
 
-    bool found = fsStat(path, &e) && !e.isDir;
+    bool found = fsStat(path, &e, &slot) && !e.isDir;
     if (!found)
     {
         uint n = 0;
@@ -542,7 +608,7 @@ void shellRunFile(const(char)* path, const(char)* args, bool background) @nogc n
         const(char)* ext = ".elf";
         for (uint i = 0; i < 5; i++)
             withExt[n + i] = ext[i];
-        found = fsStat(withExt.ptr, &e) && !e.isDir;
+        found = fsStat(withExt.ptr, &e, &slot) && !e.isDir;
         if (found)
             path = withExt.ptr;
     }
@@ -576,7 +642,7 @@ void shellRunFile(const(char)* path, const(char)* args, bool background) @nogc n
         ulong want = e.size - off;
         if (want > 65536)
             want = 65536;
-        ulong got = exfatRead(&rootMount.vol, &f, off, image + off, want);
+        ulong got = fsRead(slot, &f, off, image + off, want);
         if (got == 0)
             break;
         off += got;
@@ -695,8 +761,9 @@ void shellExecute() @nogc nothrow
         cprintf("  dmesg [N [SKIP]]    Kernel log (last N lines, SKIP lines before the end)\n");
         cprintf("  usb                 List the USB devices (hubs, keyboards, disks...)\n");
         cprintf("  disk                Show USB disks and partitions\n");
-        cprintf("  mount [N]           Mount an exFAT or FAT32 partition as /\n");
-        cprintf("  ls [PATH]           List a directory on the mounted volume\n");
+        cprintf("  mount [N [NAME]]    Mount partition N as /NAME (no args: mount all volumes found)\n");
+        cprintf("  umount NAME         Unmount /NAME\n");
+        cprintf("  ls [PATH]           List a directory ('ls /' shows the mount points)\n");
         cprintf("  cat FILE            Print a text file\n");
         cprintf("  cd [DIR]            Change the current directory\n");
         cprintf("  pwd                 Show the current directory\n");
@@ -891,6 +958,10 @@ void shellExecute() @nogc nothrow
     {
         shellMount(args);
     }
+    else if (shellEquals(shellLine.ptr, "umount"))
+    {
+        shellUmount(args);
+    }
     else if (shellEquals(shellLine.ptr, "cat"))
     {
         shellCat(args);
@@ -925,7 +996,7 @@ void shellExecute() @nogc nothrow
             int index = procFind(name.ptr);
             if (index >= 0)
                 shellRunProgram(cast(uint)index, p, bg);
-            else if (rootMount.mounted)
+            else if (fsMountCount() > 0)
                 shellRunFile(name.ptr, p, bg);          // a path on the mounted volume
             else
                 cprintf("No such program: %s\n", name.ptr);
@@ -973,7 +1044,7 @@ void shellExecute() @nogc nothrow
         {
             shellRunProgram(cast(uint)index, args, bg);
         }
-        else if (rootMount.mounted && (fsStat(shellLine.ptr, &shellProbe) && !shellProbe.isDir))
+        else if (fsMountCount() > 0 && (fsStat(shellLine.ptr, &shellProbe) && !shellProbe.isDir))
         {
             shellRunFile(shellLine.ptr, args, bg);          // "./hello" or "/bin/hello" on the disk
         }

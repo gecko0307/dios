@@ -1123,8 +1123,7 @@ long sysReaddir(ulong fd, ulong out_) @nogc nothrow
 
 long sysGetCwd(ulong buf, ulong len) @nogc nothrow
 {
-    if (!rootMount.mounted)
-        return -1;
+    fsInitCwd();
     ulong n = 0;
     while (fsCwd[n] != 0)
         n++;
