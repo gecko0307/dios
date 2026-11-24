@@ -23,7 +23,7 @@ OTHER DEALINGS IN THE SOFTWARE.
 
 For more information, please refer to <https://unlicense.org>
 */
-module image;
+module ulib.gfx.image;
 
 import ulib.gfx.canvas;
 
@@ -31,14 +31,16 @@ import ulib.gfx.canvas;
  * Pixels are stored as 4 bytes per pixel in memory order B, G, R, A.
  * On a little-endian machine that is exactly a uint 0xAARRGGBB, which is what Canvas expects.
  */
-struct RGBAImage
+struct ImageBGRA
 {
     uint width;
     uint height;
     ubyte[] data;
 }
 
-void imageAsCanvas(RGBAImage* img, Canvas* outCanvas)
+extern(C):
+
+void imageAsCanvas(ImageBGRA* img, Canvas* outCanvas) @nogc nothrow
 {
     outCanvas.pixels = cast(uint*)img.data.ptr;
     outCanvas.width = img.width;

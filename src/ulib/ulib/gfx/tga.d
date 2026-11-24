@@ -23,14 +23,18 @@ OTHER DEALINGS IN THE SOFTWARE.
 
 For more information, please refer to <https://unlicense.org>
 */
-module tga;
+module ulib.gfx.tga;
+
+/**
+ * TGA image decoder.
+ */
 
 import ulib.dios;
-import image;
+import ulib.gfx.image;
 
 align(1) struct TGAHeader
 {
-    align(1):
+   align(1):
     ubyte idLength;
     ubyte colmapType;
     ubyte encoding;
@@ -64,7 +68,7 @@ enum TGAOrigin: ubyte
     Upper = 0x20
 }
 
-bool readTGAHeader(const(ubyte)[] buffer, TGAHeader* outHdr)
+private bool readTGAHeader(const(ubyte)[] buffer, TGAHeader* outHdr) @nogc nothrow
 {
     if (buffer.length < TGAHeader.sizeof)
         return false;
@@ -101,7 +105,7 @@ bool readTGAHeader(const(ubyte)[] buffer, TGAHeader* outHdr)
     return true;
 }
 
-bool readRawRGB(const(ubyte)[] input, const(TGAHeader)* hdr, RGBAImage* outImg)
+private bool readRawRGB(const(ubyte)[] input, const(TGAHeader)* hdr, ImageBGRA* outImg) @nogc nothrow
 {
     if (hdr.bpp != 24 && hdr.bpp != 32)
     {
@@ -161,7 +165,7 @@ bool readRawRGB(const(ubyte)[] input, const(TGAHeader)* hdr, RGBAImage* outImg)
     return true;
 }
 
-bool readRLERGB(const(ubyte)[] input, const(TGAHeader)* hdr, RGBAImage* outImg)
+bool readRLERGB(const(ubyte)[] input, const(TGAHeader)* hdr, ImageBGRA* outImg) @nogc nothrow
 {
     if (hdr.bpp != 24 && hdr.bpp != 32)
     {
@@ -286,7 +290,9 @@ bool readRLERGB(const(ubyte)[] input, const(TGAHeader)* hdr, RGBAImage* outImg)
     return true;
 }
 
-bool loadTGA(const(ubyte)[] input, RGBAImage* img)
+extern(C):
+
+bool loadTGA(const(ubyte)[] input, ImageBGRA* img) @nogc nothrow
 {
     size_t inputPos = 0;
     

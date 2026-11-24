@@ -28,7 +28,9 @@ module ulib.gfx;
 
 public
 {
-    import ulib.gfx.proto;
     import ulib.gfx.canvas;
+    import ulib.gfx.image;
+    import ulib.gfx.proto;
+    import ulib.gfx.tga;
     import ulib.gfx.window;
 }

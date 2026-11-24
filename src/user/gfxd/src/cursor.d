@@ -26,8 +26,7 @@ DEALINGS IN THE SOFTWARE.
 module cursor;
 
 import ulib.dios;
-import image;
-import tga;
+import ulib.gfx;
 
 __gshared uint CURSOR_WIDTH;
 __gshared uint CURSOR_HEIGHT;
@@ -84,7 +83,7 @@ bool loadCursor()
     
     ubyte[] input = buf[0..len];
     
-    RGBAImage img;
+    ImageBGRA img;
     if (!loadTGA(input, &img))
     {
         uprintf("Error: failed to decode \"%s\"\n", path.ptr);

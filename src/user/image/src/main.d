@@ -32,8 +32,6 @@ module main;
 
 import ulib.dios;
 import ulib.gfx;
-import image;
-import tga;
 
 int main(string[] args)
 {
@@ -87,7 +85,7 @@ int main(string[] args)
     
     ubyte[] input = buf[0..len];
     
-    RGBAImage img;
+    ImageBGRA img;
     scope(exit)
     {
         if (img.data.length > 0)
