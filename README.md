@@ -28,7 +28,7 @@ DIOS is a monolithic kernel that contains all the device drivers in itself. It i
 - A shell with built-in kernel commands
 - Basic multi-tasking userspace in Ring 3; system calls; a simple standard library for applications
 - Virtual filesystem; mount points
-- Running applications from a USB stick
+- RAM filesystem image loaded from a TAR archive (`rootfs.tar`) provided by the bootloader
 - Userspace graphics server (GFXD), windowed applications.
 
 DIOS is planned as a graphical OS, but there's no built-in GUI toolkit yet. Graphical features are work-in-progress.
