@@ -19,7 +19,8 @@
 - `dmesg [N [SKIP]]` - kernel log (last N lines, SKIP lines before the end)
 - `usb` - list USB devices (hubs, keyboards, removable disks...)
 - `disk` - show USB disks and partitions
-- `mount [N]` - mount an exFAT partition N as `/`
+- `mount [N [NAME]]` - mount partition N as /NAME. If no aruments given, mount all volumes found
+- `umount NAME` - unmount `/NAME`
 - `ls [PATH]` - list a directory on the mounted volume
 - `cd [DIR]` - change the current directory
 - `pwd` - show the current directory
@@ -28,7 +29,7 @@
 - `ps` - list running programs
 - `kill ID` - stop a program
 - `fg [ID]` - bring a background program to the foreground
-- `gfx [CMD]` - manage graphics server. CMD can be `status`, `start [NAME]`, `stop`, `show`, `hide`
+- `gfx [CMD]` - manage graphics server. CMD can be `status`, `start [NAME]`, `stop`, `show`, `hide`. Requires `gfxd.elf`
 - `clear` - clear the screen
 - `crash pf|ud|div|gp` - trigger a CPU exception (kernel halts)
 - `reboot` - restart the computer

@@ -27,7 +27,7 @@ DIOS is a monolithic kernel that contains all the device drivers in itself. It i
 - PS/2 keyboard and mouse
 - A shell with built-in kernel commands
 - Basic multi-tasking userspace in Ring 3; system calls; a simple standard library for applications
-- A single-mount read-only filesystem
+- Virtual filesystem; mount points
 - Running applications from a USB stick
 - Userspace graphics server (GFXD), windowed applications.
 
@@ -50,7 +50,7 @@ Simple examples of what can be done in DIOS userspace.
 - `timer.elf` - a timer that can be run in background (for example, `timer.elf 10s &`)
 - `math.elf` - floating-point math functions test
 - `random.elf` - random number generator test
-- `gfxdemo` - graphical application demo. Run `gfxdemo.elf &` to start it in background, then switch to graphics mode (see below).
+- `gfxdemo.elf` - a graphical application demo. Run `gfxdemo.elf &` to start it in background, then switch to graphics mode (see below).
 
 Applications are also written in D, but they actually can be written in any language that can make platform-independent ELF64 binaries.
 

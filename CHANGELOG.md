@@ -1,5 +1,7 @@
 DIOS 0.6.0 - TBD
 ----------------
+- **Kernel**:
+  - Multi-mounting. Block devices are now mounted as virtual directories. `/` is now a virtual directory that only lists the mount points; each volume appears under its own name (e.g. `/usb0p1`)
 - **GFXD**
   - Window decorations and dragging
   - Many performance improvements.

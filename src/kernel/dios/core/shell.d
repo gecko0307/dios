@@ -221,7 +221,7 @@ void shellGfx(const(char)* args) @nogc nothrow
         sub[n++] = *p++;
     sub[n] = 0;
     while (*p != 0 && *p != ' ' && *p != '\t')
-        p++;                                    // (a longer word cannot match anything)
+        p++; // (a longer word cannot match anything)
     while (*p == ' ' || *p == '\t')
         p++;
 
@@ -236,6 +236,7 @@ void shellGfx(const(char)* args) @nogc nothrow
             cprintf("The graphics server is already running (task %u). 'gfx show' to switch to it.\n", gfxsrvTaskId());
             return;
         }
+        
         // The server is an ordinary program: a boot module, or an ELF on the mounted disk
         char[FS_PATH_MAX] name;
         uint len = 0;
