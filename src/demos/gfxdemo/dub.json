@@ -47,7 +47,6 @@
     
     "postBuildCommands-windows": [
         "move /Y gfxdemo.elf.exe gfxdemo.elf",
-        "if not exist ..\\..\\..\\usbstick mkdir ..\\..\\..\\usbstick",
-        "copy /Y gfxdemo.elf ..\\..\\..\\usbstick\\gfxdemo.elf"
+        "copy /Y gfxdemo.elf ..\\..\\..\\rootfs\\bin\\gfxdemo.elf"
     ]
 }

@@ -47,7 +47,6 @@
     
     "postBuildCommands-windows": [
         "move /Y memtest.elf.exe memtest.elf",
-        "if not exist ..\\..\\..\\usbstick mkdir ..\\..\\..\\usbstick",
-        "copy /Y memtest.elf ..\\..\\..\\usbstick\\memtest.elf"
+        "copy /Y memtest.elf ..\\..\\..\\rootfs\\bin\\memtest.elf"
     ]
 }

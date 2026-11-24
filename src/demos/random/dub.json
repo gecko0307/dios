@@ -47,7 +47,6 @@
     
     "postBuildCommands-windows": [
         "move /Y random.elf.exe random.elf",
-        "if not exist ..\\..\\..\\usbstick mkdir ..\\..\\..\\usbstick",
-        "copy /Y random.elf ..\\..\\..\\usbstick\\random.elf"
+        "copy /Y random.elf ..\\..\\..\\rootfs\\bin\\random.elf"
     ]
 }

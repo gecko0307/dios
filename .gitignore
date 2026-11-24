@@ -6,4 +6,5 @@
 *.a
 *.iso
 *.img
+*.tar
 OVMF.fd

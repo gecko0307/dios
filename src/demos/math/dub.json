@@ -47,7 +47,6 @@
     
     "postBuildCommands-windows": [
         "move /Y math.elf.exe math.elf",
-        "if not exist ..\\..\\..\\usbstick mkdir ..\\..\\..\\usbstick",
-        "copy /Y math.elf ..\\..\\..\\usbstick\\math.elf"
+        "copy /Y math.elf ..\\..\\..\\rootfs\\bin\\math.elf"
     ]
 }

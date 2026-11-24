@@ -47,7 +47,6 @@
     
     "postBuildCommands-windows": [
         "move /Y timer.elf.exe timer.elf",
-        "if not exist ..\\..\\..\\usbstick mkdir ..\\..\\..\\usbstick",
-        "copy /Y timer.elf ..\\..\\..\\usbstick\\timer.elf"
+        "copy /Y timer.elf ..\\..\\..\\rootfs\\bin\\timer.elf"
     ]
 }

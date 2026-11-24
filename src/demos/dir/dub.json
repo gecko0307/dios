@@ -47,7 +47,6 @@
     
     "postBuildCommands-windows": [
         "move /Y dir.elf.exe dir.elf",
-        "if not exist ..\\..\\..\\usbstick mkdir ..\\..\\..\\usbstick",
-        "copy /Y dir.elf ..\\..\\..\\usbstick\\dir.elf"
+        "copy /Y dir.elf ..\\..\\..\\rootfs\\bin\\dir.elf"
     ]
 }
