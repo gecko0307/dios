@@ -101,7 +101,7 @@ import ulib.dios;
 
 void main(string[] args)
 {
-    uputs("Hello, World!\n");
+    uprintf("Hello, World!\n");
 }
 ```
 
