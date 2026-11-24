@@ -81,6 +81,10 @@ The next event for this program (see `GFX_EV_*`). Waits up to `timeoutMs`: 0 = d
 
 Closes the window. The canvas must not be used afterwards.
 
+## Image Loading
+
+TODO
+
 ## Usage
 
 TODO

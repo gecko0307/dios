@@ -1,3 +1,8 @@
+DIOS 0.7.0 - TBD
+----------------
+- **ulib**:
+  - TGA loader (`ulib.gfx.tga`).
+
 DIOS 0.6.0 - 25 Nov, 2026
 -------------------------
 - **Kernel**:
