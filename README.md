@@ -8,15 +8,18 @@ Many features of DIOS are inspired by Unix, but this is only to keep a degree of
 
 You are free to use this code as a base to create your own OS. PRs implementing new features are welcome. The code is a bit messy but readable.
 
-DIOS is an ELF kernel that requires a bootloader to run. Default setup in this repo uses [Limine](https://github.com/limine-bootloader/limine) for booting from the CD-ROM. Both UEFI and BIOS are supported. You can also make a bootable USB stick with the DIOS ISO image using [Ventoy](https://www.ventoy.net/en/index.html).
-
 [![Screenshot](media/screenshot.png)](media/screenshot.png)
+
+## Notes
+
+- DIOS is a monolithic kernel that contains all the device drivers in itself. It is mostly designed for modern computers and doesn't support legacy hardware
+- DIOS is now 64-bit only, x86 support was dropped
+- DIOS is planned as a graphical OS, but there's no built-in GUI toolkit yet. Graphical features are work-in-progress
+- DIOS is an ELF kernel that requires a bootloader to run. Currently only [Limine](https://github.com/limine-bootloader/limine) boot protocol is supported; both UEFI and BIOS are supported
+- Default setup in this repo assumes booting from the CD-ROM, but you can also make a bootable USB stick with the DIOS ISO image using [Ventoy](https://www.ventoy.net/en/index.html). Simply copy the `dios64.iso` file onto the flash drive that has Ventoy installed.
 
 ## Features
 
-DIOS is a monolithic kernel that contains all the device drivers in itself. It is mostly designed for modern computers and doesn't support legacy hardware.
-
-- Boots using Limine startup protocol; supports both UEFI and legacy BIOS
 - UEFI GOP (or VESA) framebuffer
 - IDT, GDT
 - Bitmap page-frame allocator
@@ -29,13 +32,9 @@ DIOS is a monolithic kernel that contains all the device drivers in itself. It i
 - PS/2 keyboard and mouse
 - A shell with built-in kernel commands
 - Basic multi-tasking userspace in Ring 3; system calls; a simple standard library for applications
-- Virtual filesystem; mount points
+- Virtual filesystem; multiple mount points
 - RAM filesystem image loaded from a TAR archive (`rootfs.tar`) provided by the bootloader
 - Userspace graphics server (GFXD), windowed applications.
-
-DIOS is planned as a graphical OS, but there's no built-in GUI toolkit yet. Graphical features are work-in-progress.
-
-DIOS is now 64-bit only, x86 support was dropped.
 
 ## Kernel Shell Commands
 
@@ -118,14 +117,14 @@ Prerequisites:
 * [xorriso](https://github.com/Distrotech/xorriso) to generate a bootable CD image
 * Optionally, [fstool](https://github.com/KarpelesLab/fstool) to generate a USB stick image for testing in QEMU
 
-Run `python build.py` to compile the kernel (`cdroot/kernel64.bin`), build the root filesystem image (`rootfs.tar`) and generate a bootable CD image (`dios64.iso`).
+Run `python build.py` to compile the kernel (`cdroot/kernel64.bin`), build the root filesystem image (`cdroot/rootfs.tar`) and generate a bootable CD image (`dios64.iso`).
 
 Run `buildlib.bat` to compile ulib and generate `libulib.a`. This is necessary to build sample programs.
 
-Userspace services and sample programs are built with DUB:
+Userspace services (`src/user`) and sample programs (`src/demos`) are built with DUB:
 
 ```
 dub build
 ```
 
-*.elf binaries are automatically copied to `rootfs/bin` directory. To include them to the root filesystem, you should run `python build.py --skip-kernel` to rebuild the image if the kernel is already compiled.
+*.elf binaries are automatically copied to `rootfs/bin`. To include them to the root filesystem, you should run `python build.py --skip-kernel` to rebuild the image (if the kernel is already compiled).
