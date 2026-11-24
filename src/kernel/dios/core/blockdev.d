@@ -5,6 +5,14 @@ module dios.core.blockdev;
  * with a read function; everything above (partitions, file systems) only ever
  * calls blockRead().
  *
+ * Sector cache: blockRead() keeps recently read data in RAM. The cache is direct mapped
+ * and works on aligned 4 KiB groups of sectors (8 sectors of 512 bytes, 1 of 4096), so a
+ * miss reads the whole group in one transfer - a cheap read-ahead for slow USB disks - and
+ * the small repeated reads of the file system code (FAT entries, directory sectors,
+ * partition tables) are served from memory. Big reads (more than 16 KiB) skip the cache.
+ * The disks are read-only, so there is nothing to write back; a disk's lines are dropped
+ * when it is registered or unplugged.
+ *
  * Partition tables: GPT (when LBA 0 holds a protective MBR) and classic MBR
  * (primary partitions). A disk without a partition table - a "superfloppy" whose
  * first sector is a file system boot sector - shows up as one partition that
@@ -15,6 +23,10 @@ import dios.core.stdio;
 
 enum uint BLK_MAX_DEVICES = 4;
 enum uint BLK_MAX_PARTS = 16;
+
+enum uint BLK_CACHE_LINES = 64;
+enum uint BLK_CACHE_LINE_BYTES = 4096;      // one line = one aligned group of sectors
+enum uint BLK_CACHE_BYPASS_BYTES = 16384;   // bigger reads go straight to the device
 
 alias BlockReadFn = extern(C) bool function(void* ctx, ulong lba, uint count, void* dst) @nogc nothrow;
 
@@ -41,6 +53,19 @@ struct Partition
     ulong sectors;
     string kind;            // human readable guess, NUL terminated literal
 }
+
+struct CacheLine
+{
+    bool valid;
+    ubyte dev;                  // index into blockDevs
+    ulong group;                // first sector / sectors per group
+    uint sectors;               // sectors held (fewer than a full group at the end of a disk)
+    ubyte[BLK_CACHE_LINE_BYTES] data;
+}
+
+__gshared CacheLine[BLK_CACHE_LINES] blockCache;
+__gshared ulong blockCacheHits;
+__gshared ulong blockCacheMisses;
 
 __gshared BlockDev[BLK_MAX_DEVICES] blockDevs;
 __gshared uint blockDevCount;
@@ -80,6 +105,7 @@ BlockDev* blockRegister(const(char)* name, const(char)* model, ulong sectors, ui
         blockDevCount++;
     }
     BlockDev* b = &blockDevs[slot];
+    blockCacheInvalidate(slot);         // nothing of an earlier disk in this slot may be served
     *b = BlockDev.init;
     uint i = 0;
     while (name[i] != 0 && i + 1 < b.name.length)
@@ -110,13 +136,67 @@ bool blockRead(BlockDev* b, ulong lba, uint count, void* dst) @nogc nothrow
         return false;
     if (lba >= b.sectors || b.sectors - lba < count)
         return false;
-    return b.read(b.ctx, lba, count, dst);
+
+    uint ss = b.sectorSize;
+    if (ss == 0 || ss > BLK_CACHE_LINE_BYTES || BLK_CACHE_LINE_BYTES % ss != 0 ||
+        cast(ulong)count * ss > BLK_CACHE_BYPASS_BYTES)
+        return b.read(b.ctx, lba, count, dst);
+
+    uint perGroup = BLK_CACHE_LINE_BYTES / ss;
+    uint dev = blockDevIndex(b);
+    ubyte* out_ = cast(ubyte*)dst;
+
+    while (count != 0)
+    {
+        ulong group = lba / perGroup;
+        uint first = cast(uint)(lba % perGroup);
+        uint n = perGroup - first;
+        if (n > count)
+            n = count;
+
+        CacheLine* line = &blockCache[cast(uint)((group + dev * 31) % BLK_CACHE_LINES)];
+        if (line.valid && line.dev == dev && line.group == group && first + n <= line.sectors)
+        {
+            blockCacheHits++;
+        }
+        else
+        {
+            // Miss: load the whole group (up to the end of the disk) in one transfer.
+            ulong start = group * perGroup;
+            uint load = perGroup;
+            if (b.sectors - start < load)
+                load = cast(uint)(b.sectors - start);
+            line.valid = false;
+            blockCacheMisses++;
+            if (!b.read(b.ctx, start, load, line.data.ptr))
+                return b.read(b.ctx, lba, count, out_);     // the rest, uncached, so the device reports the error
+            line.valid = true;
+            line.dev = cast(ubyte)dev;
+            line.group = group;
+            line.sectors = load;
+        }
+
+        memcpy(out_, line.data.ptr + first * ss, n * ss);
+        out_ += n * ss;
+        lba += n;
+        count -= n;
+    }
+    return true;
+}
+
+/// Forget everything cached for block device `dev` (an index into blockDevs).
+void blockCacheInvalidate(uint dev) @nogc nothrow
+{
+    for (uint i = 0; i < BLK_CACHE_LINES; i++)
+        if (blockCache[i].valid && blockCache[i].dev == dev)
+            blockCache[i].valid = false;
 }
 
 /// The disk is gone: its partitions disappear with it.
 void blockUnregister(BlockDev* b) @nogc nothrow
 {
     uint idx = blockDevIndex(b);
+    blockCacheInvalidate(idx);
     for (uint i = 0; i < partitionCount; i++)
         if (partitions[i].valid && partitions[i].dev == idx)
             partitions[i].valid = false;

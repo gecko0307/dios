@@ -2,7 +2,7 @@
 
 DIOS implements a root filesystem conceptually analogous to Unix filesystem. The root is `/`. The following standard directories are used:
 
-- `/bin` - contains programs. These are system services and utilities provided with the OS
+- `/bin` - contains programs. These are system services and utilities provided with the OS. Programs in DIOS are ELF64 binaries with `*.elf` extension. Extension can be omitted when run from the shell, so all programs in `/bin` are treated as system commands, like in Unix
 - `/etc` - contains data and configuration files used by the programs
 - `/home` - user's home folder, contains custom files
 - `/mnt` - contains mount points for disks (e.g. `/mnt/usb0p1`).

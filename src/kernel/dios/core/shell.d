@@ -557,6 +557,7 @@ void shellDisk() @nogc nothrow
         if (shown == 0)
             cprintf("  no partitions found\n");
     }
+    cprintf("Sector cache: %llu hits, %llu misses\n", blockCacheHits, blockCacheMisses);
 }
 
 void shellMount(const(char)* args) @nogc nothrow

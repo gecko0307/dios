@@ -70,12 +70,12 @@ DIOS project consists of a several structural layers, each with its own workflow
   - `src/ulib/umain.d` - runtime entry point. Allocates an arguments array and calls compiler-generated `_Dmain`
 - `src/user` contains userspace services and built-in programs:
   - `src/user/gfxd` - **GFXD**, the DIOS Graphics Server
+  - `src/user/timer` - a simple background timer program (`timer 10s &`)
 - `src/demos` contains sample applications:
   - `src/demos/hello`
   - `src/demos/file`
   - `src/demos/dir`
   - `src/demos/memtest`
-  - `src/demos/timer`
   - `src/demos/math`
   - `src/demos/random`
   - `src/demos/gfxdemo`
