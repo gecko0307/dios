@@ -42,7 +42,7 @@
         "-static",
         "--gc-sections",
         "-u", "_start",
-        "../../../libulib.a"
+        "../../../rootfs/lib/libulib.a"
     ],
     
     "postBuildCommands-windows": [
