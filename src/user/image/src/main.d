@@ -23,8 +23,12 @@ OTHER DEALINGS IN THE SOFTWARE.
 
 For more information, please refer to <https://unlicense.org>
 */
-
 module main;
+
+/*
+ * DIOS image viewer.
+ * Supports only TGA format at the moment (both raw RGB and RLE-compressed).
+ */
 
 import ulib.dios;
 import ulib.gfx;

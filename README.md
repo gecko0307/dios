@@ -8,7 +8,8 @@ Many features of DIOS are inspired by Unix, but this is only to keep a degree of
 
 You are free to use this code as a base to create your own OS. PRs implementing new features are welcome. The code is a bit messy but readable.
 
-[![Screenshot](media/screenshot.png)](media/screenshot.png)
+[![Screenshot1](media/screenshot.png)](media/screenshot1.png)
+[![Screenshot2](media/screenshot.png)](media/screenshot2.jpg)
 
 ## Notes
 

@@ -161,6 +161,131 @@ bool readRawRGB(const(ubyte)[] input, const(TGAHeader)* hdr, RGBAImage* outImg)
     return true;
 }
 
+bool readRLERGB(const(ubyte)[] input, const(TGAHeader)* hdr, RGBAImage* outImg)
+{
+    if (hdr.bpp != 24 && hdr.bpp != 32)
+    {
+        uprintf("Error: unsupported bit depth %d (need 24 or 32)\n", hdr.bpp);
+        return false;
+    }
+
+    size_t channels = hdr.bpp / 8;
+    size_t w = hdr.width;
+    size_t h = hdr.height;
+
+    if (w == 0 || h == 0)
+        return false;
+
+    size_t pixelCount = w * h;
+
+    if (pixelCount > size_t.max / 4)
+        return false;
+
+    size_t rawImgSize = pixelCount * 4;
+
+    ubyte* buf = cast(ubyte*)umalloc(rawImgSize);
+    if (buf is null)
+        return false;
+
+    bool fromTop = (hdr.descriptor & TGAOrigin.Upper) != 0;
+    bool fromRight = (hdr.descriptor & TGAOrigin.Right) != 0;
+
+    const(ubyte) alphaBits = cast(ubyte)(hdr.descriptor & 0xf);
+    bool hasAlpha = channels == 4 && alphaBits != 0;
+
+    size_t inputPos = 0;
+    size_t outputPos = 0;
+
+    while (outputPos < pixelCount)
+    {
+        // Read packet header.
+        if (inputPos >= input.length)
+        {
+            ufree(buf);
+            return false;
+        }
+
+        ubyte packetHeader = input[inputPos++];
+
+        bool isRLE = (packetHeader & 0x80) != 0;
+        size_t packetCount = (packetHeader & 0x7f) + 1;
+
+        // A packet must not exceed the remaining image pixels.
+        if (packetCount > pixelCount - outputPos)
+        {
+            ufree(buf);
+            return false;
+        }
+
+        if (isRLE)
+        {
+            // One pixel is repeated packetCount times.
+            if (channels > input.length - inputPos)
+            {
+                ufree(buf);
+                return false;
+            }
+
+            const(ubyte)* s = input.ptr + inputPos;
+            inputPos += channels;
+
+            for (size_t i = 0; i < packetCount; i++)
+            {
+                size_t index = outputPos + i;
+                size_t x = index % w;
+                size_t y = index / w;
+
+                size_t dstX = fromRight ? w - 1 - x : x;
+                size_t dstY = fromTop ? y : h - 1 - y;
+
+                ubyte* d = buf + (dstY * w + dstX) * 4;
+
+                d[0] = s[0]; // B
+                d[1] = s[1]; // G
+                d[2] = s[2]; // R
+                d[3] = hasAlpha ? s[3] : 255;
+            }
+        }
+        else
+        {
+            // Raw packet: read packetCount individual pixels.
+            if (packetCount > (input.length - inputPos) / channels)
+            {
+                ufree(buf);
+                return false;
+            }
+
+            for (size_t i = 0; i < packetCount; i++)
+            {
+                const(ubyte)* s = input.ptr + inputPos;
+                inputPos += channels;
+
+                size_t index = outputPos + i;
+                size_t x = index % w;
+                size_t y = index / w;
+
+                size_t dstX = fromRight ? w - 1 - x : x;
+                size_t dstY = fromTop ? y : h - 1 - y;
+
+                ubyte* d = buf + (dstY * w + dstX) * 4;
+
+                d[0] = s[0]; // B
+                d[1] = s[1]; // G
+                d[2] = s[2]; // R
+                d[3] = hasAlpha ? s[3] : 255;
+            }
+        }
+
+        outputPos += packetCount;
+    }
+
+    outImg.width = hdr.width;
+    outImg.height = hdr.height;
+    outImg.data = buf[0..rawImgSize];
+
+    return true;
+}
+
 bool loadTGA(const(ubyte)[] input, RGBAImage* img)
 {
     size_t inputPos = 0;
@@ -205,12 +330,13 @@ bool loadTGA(const(ubyte)[] input, RGBAImage* img)
         return false;
     }
     
+    auto pixelData = input[inputPos..$];
+    
     bool result = false;
     if (hdr.encoding == TGAEncoding.RGB)
-        result = readRawRGB(input[inputPos..$], &hdr, img);
-    //TODO
-    //else if (hdr.encoding == TGAEncoding.RLE_RGB)
-    //    img = readRLERGB(hdr);
+        result = readRawRGB(pixelData, &hdr, img);
+    else if (hdr.encoding == TGAEncoding.RLE_RGB)
+        result = readRLERGB(pixelData, &hdr, img);
     else
     {
         uprintf("TGA error: only RGB images are supported\n");
