@@ -47,10 +47,10 @@ Simple examples of what can be done in DIOS userspace.
 - `file.elf FILE [OFFSET]` - print a text file, optionally starting at a byte offset.
 - `dir.elf [PATH]` - lists a directory
 - `memtest.elf` - dynamic memory allocation test
-- `timer.elf` - a timer that can be run in background (for example, `timer.elf 10s &`)
+- `timer.elf` - a timer that can be run in background (for example, `timer 10s &`)
 - `math.elf` - floating-point math functions test
 - `random.elf` - random number generator test
-- `gfxdemo.elf` - a graphical application demo. Run `gfxdemo.elf &` to start it in background, then switch to graphics mode (see below).
+- `gfxdemo.elf` - a graphical application demo. Run `gfxdemo &` to start it in background, then switch to graphics mode (see below).
 
 Applications are also written in D, but they actually can be written in any language that can make platform-independent ELF64 binaries.
 
@@ -116,7 +116,7 @@ Prerequisites:
 * [xorriso](https://github.com/Distrotech/xorriso) to generate a bootable CD image
 * Optionally, [fstool](https://github.com/KarpelesLab/fstool) to generate a USB stick image for testing in QEMU
 
-Run `python build.py` to compile the kernel (`cdroot/kernel64.bin`) and generate `dios64.iso`.
+Run `python build.py` to compile the kernel (`cdroot/kernel64.bin`), build the root filesystem image (`rootfs.tar`) and generate a bootable CD image (`dios64.iso`).
 
 Run `buildlib.bat` to compile ulib and generate `libulib.a`. This is necessary to build sample programs.
 
@@ -126,4 +126,4 @@ Userspace services and sample programs are built with DUB:
 dub build
 ```
 
-*.elf binaries are automatically copied to `usbstick` directory. When running on a real hardware, they are meant to be copied to USB stick alongside with the DIOS kernel. When testing in QEMU, it is recommended to make a USB stick image using fstool (`makestick.bat`) and run the VM via `run_usbstick.bat`.
+*.elf binaries are automatically copied to `rootfs/bin` directory. To include them to the root filesystem, you should run `build.py` *after* building sample programs.
