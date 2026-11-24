@@ -4,9 +4,9 @@
 
 DIOS stands for *D Incomplete Operating System* (because it is a toy project that will likely never be feature-complete). It is a minimalistic multi-tasking x86_64 OS kernel written in [D language](https://dlang.org) with some small parts in NASM assembly, plus a simple system environment also fully written in D. It is tested on a real hardware and emulators like VirtualBox and QEMU. I've written it initially in D1/GDC and ported to D2/LDC in 2025.
 
-Many features of DIOS are inspired by Unix, but this is only to keep a degree of familiarity with existing systems for better user experience; making a full Unix clone is not the goal of the project. The main purpose is experimenting with the OS design and demonstrating D's fitness for system development.
+Although many features of DIOS are inspired by Unix, this is only to keep a degree of familiarity with existing systems for better user experience; making a full Unix clone is not the goal of the project. The main purpose is experimenting with OS design and demonstrating D's fitness for system development.
 
-You are free to use this code as a base to create your own OS. PRs implementing new features are welcome. The code is a bit messy but readable.
+You can use DIOS as a basis for creating your own operating system! PRs implementing new features are welcome. The code is a bit messy but readable.
 
 [![Screenshot1](media/screenshot1.png)](media/screenshot1.png)
 [![Screenshot2](media/screenshot2.jpg)](media/screenshot2.jpg)
