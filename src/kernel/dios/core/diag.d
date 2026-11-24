@@ -79,9 +79,7 @@ immutable DiagFlag[5] FLAGS_EXT1_EDX = [
 
 extern(C):
 
-// ---------------------------------------------------------------------------
-// reboot
-// ---------------------------------------------------------------------------
+// Reboot
 
 /// Restart the machine: ACPI reset register, then the 8042 reset line, then a
 /// deliberate triple fault. Does not return.
@@ -102,9 +100,7 @@ void systemReboot() @nogc nothrow
     cpuTripleFault();
 }
 
-// ---------------------------------------------------------------------------
-// number parsing
-// ---------------------------------------------------------------------------
+// Number parsing
 
 /// Parse "0x1F" / "1f"-less decimal. Returns the pointer after the number, or
 /// null if there is no number. Leading blanks are skipped.
@@ -151,9 +147,7 @@ const(char)* diagParseNumber(const(char)* s, ulong* value) @nogc nothrow
     return s;
 }
 
-// ---------------------------------------------------------------------------
 // cpuinfo
-// ---------------------------------------------------------------------------
 
 void diagPutReg(char* dst, uint reg) @nogc nothrow
 {
@@ -260,9 +254,7 @@ void diagCpuInfo() @nogc nothrow
     }
 }
 
-// ---------------------------------------------------------------------------
-// acpi
-// ---------------------------------------------------------------------------
+// ACPI
 
 void diagAcpi() @nogc nothrow
 {
@@ -317,9 +309,7 @@ void diagAcpi() @nogc nothrow
     }
 }
 
-// ---------------------------------------------------------------------------
 // irqstat
-// ---------------------------------------------------------------------------
 
 string diagVectorName(uint v) @nogc nothrow
 {
@@ -358,9 +348,7 @@ void diagIrqStat() @nogc nothrow
         nmiCount, keyQueue.dropped, ps2q.rawDropped);
 }
 
-// ---------------------------------------------------------------------------
 // hexdump
-// ---------------------------------------------------------------------------
 
 void diagHexByte(ubyte b) @nogc nothrow
 {
@@ -418,9 +406,7 @@ void diagHexdump(ulong addr, ulong len, bool physical) @nogc nothrow
     }
 }
 
-// ---------------------------------------------------------------------------
-// crash (exercises the exception dump and backtrace)
-// ---------------------------------------------------------------------------
+// Crash (exercises the exception dump and backtrace)
 
 __gshared uint diagZero;
 
@@ -452,9 +438,7 @@ void diagCrash(uint kind) @nogc nothrow
     volatileStore(&diagZero, 0);
 }
 
-// ---------------------------------------------------------------------------
-// sleep
-// ---------------------------------------------------------------------------
+// Sleep
 
 /// Wait `ms` milliseconds, keeping input and the screen alive. Ctrl+C ends it
 /// early (returns false); other keys typed meanwhile are discarded.
