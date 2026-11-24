@@ -47,7 +47,6 @@
     
     "postBuildCommands-windows": [
         "move /Y gfxd.elf.exe gfxd.elf",
-        "if not exist ..\\..\\..\\cdroot\\user mkdir ..\\..\\..\\cdroot\\user",
-        "copy /Y gfxd.elf ..\\..\\..\\cdroot\\user\\gfxd.elf"
+        "copy /Y gfxd.elf ..\\..\\..\\rootfs\\bin\\gfxd.elf"
     ]
 }
