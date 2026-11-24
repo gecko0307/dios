@@ -8,6 +8,7 @@ DIOS 0.6.0 - 25 Nov, 2026
   - `gfxd.elf` is not a boot module anymore, it is now stored in the rootfs as `/bin/gfxd.elf`
 - **GFXD**
   - Window decorations and dragging
+  - Cursor is now loaded from `/etc/gfxd/cursor.tga`
   - Many performance improvements.
 
 DIOS 0.5.0 - 24 Nov, 2026
