@@ -2,6 +2,8 @@
 
 ulib is a low-level runtime library for DIOS applications written in D. Most of its functions are libc-like and self-explanatory.
 
+Many functions are prefixed with "u" to avoid conflicts with libc (should libc be introduced in the future), because they are not 100% compatible.
+
 ## ulib.dios.sys
 
 DIOS kernel functions.
