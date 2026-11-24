@@ -58,7 +58,7 @@ struct OpenFile
 {
     bool used;
     bool isDir;
-    int mount; // mount slot the file lives on, or FS_ROOT for the virtual root directory
+    int mount; // mount slot the file lives on, or FS_ROOT for the root file system (ramfs)
     uint generation; // mounts[mount].generation when opened; stale after that volume went away
     ExfatEntry entry;
     ExfatFile file;

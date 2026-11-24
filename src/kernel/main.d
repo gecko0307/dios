@@ -256,6 +256,7 @@ void run() @nogc nothrow
     
     pciScan(); // this also brings up the xHCI controller(s)
     usbStorageProbe();
+    fsInit();           // root file system (rootfs.tar), then the disks below /mnt
     fsAutoMount();
     procInit();
     gfxsrvInit(); // graphics server support: system calls 16..26, Ctrl+F1/F2/F3

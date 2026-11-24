@@ -221,7 +221,7 @@ void shellGfx(const(char)* args) @nogc nothrow
         sub[n++] = *p++;
     sub[n] = 0;
     while (*p != 0 && *p != ' ' && *p != '\t')
-        p++; // (a longer word cannot match anything)
+        p++;                                    // (a longer word cannot match anything)
     while (*p == ' ' || *p == '\t')
         p++;
 
@@ -236,8 +236,8 @@ void shellGfx(const(char)* args) @nogc nothrow
             cprintf("The graphics server is already running (task %u). 'gfx show' to switch to it.\n", gfxsrvTaskId());
             return;
         }
-        
-        // The server is an ordinary program: a boot module, or an ELF on the mounted disk
+        // The server is an ordinary program: /bin/gfxd.elf of the root file system by default,
+        // or any ELF path (a disk under /mnt, say); a boot module of that name still works
         char[FS_PATH_MAX] name;
         uint len = 0;
         const(char)* q = (*p != 0) ? p : "gfxd".ptr;
@@ -248,12 +248,15 @@ void shellGfx(const(char)* args) @nogc nothrow
         int index = procFind(name.ptr);
         if (index >= 0)
             shellRunProgram(cast(uint)index, "".ptr, true);
-        else if (fsMountCount() > 0)
-            shellRunFile(name.ptr, "".ptr, true);
         else
         {
-            cprintf("No such program: %s\n", name.ptr);
-            return;
+            char[FS_PATH_MAX] file;
+            if (!shellResolveProgram(name.ptr, file.ptr))
+            {
+                cprintf("No such program: %s\n", name.ptr);
+                return;
+            }
+            shellRunFile(file.ptr, "".ptr, true);
         }
         cprintf("It takes the screen as soon as it is up. Ctrl+F1: back to this shell.\n");
     }
@@ -312,15 +315,36 @@ extern(C) void shellBgOutEnd() @nogc nothrow
     shellMessageEnd();
 }
 
+extern(C) bool shellProgramsCb(const(ExfatEntry)* e, void* ctx) @nogc nothrow
+{
+    if (e.isDir)
+        return true;
+    uint* count = cast(uint*)ctx;
+    cprintf("  %s  (%llu bytes)\n", e.name.ptr, e.size);
+    (*count)++;
+    return true;
+}
+
+// The programs of the root file system (/bin), plus any ELF modules the bootloader still hands over.
 void shellListPrograms() @nogc nothrow
 {
-    if (programCount == 0)
+    uint count = 0;
+    ExfatEntry bin;
+    int slot;
+    if (fsStat("/bin", &bin, &slot) && bin.isDir)
     {
-        cprintf("No programs found.\n");
-        return;
+        cprintf("/bin:\n");
+        fsIterate(slot, &bin, &shellProgramsCb, &count);
     }
+    if (programCount > 0)
+        cprintf("Boot modules:\n");
     for (uint i = 0; i < programCount; i++)
+    {
         cprintf("  %s  (%llu bytes)\n", programs[i].name.ptr, programs[i].size);
+        count++;
+    }
+    if (count == 0)
+        cprintf("No programs found.\n");
 }
 
 // disks and files
@@ -393,20 +417,40 @@ extern(C) bool shellListCb(const(ExfatEntry)* e, void* ctx) @nogc nothrow
     return true;
 }
 
-bool shellNeedVolume() @nogc nothrow
+// Build prefix + name + suffix in `out_` and say whether that is a file.
+bool shellProgramAt(const(char)* prefix, const(char)* name, const(char)* suffix, char* out_) @nogc nothrow
 {
-    if (fsMountCount() == 0)
-    {
-        cprintf("No volume mounted. 'disk' shows what was found, 'mount N' mounts a partition.\n");
+    uint n = 0;
+    while (*prefix != 0 && n + 1 < FS_PATH_MAX)
+        out_[n++] = *prefix++;
+    while (*name != 0 && n + 1 < FS_PATH_MAX)
+        out_[n++] = *name++;
+    while (*suffix != 0 && n + 1 < FS_PATH_MAX)
+        out_[n++] = *suffix++;
+    out_[n] = 0;
+    ExfatEntry e;
+    return fsStat(out_, &e) && !e.isDir;
+}
+
+/// Find the program file for a command name: the name as a path, then with ".elf", and for a
+/// plain name (no '/') also /bin/NAME and /bin/NAME.elf of the root file system.
+bool shellResolveProgram(const(char)* name, char* out_) @nogc nothrow
+{
+    if (name[0] == 0)
         return false;
-    }
-    return true;
+    bool plain = true;
+    for (const(char)* p = name; *p != 0; p++)
+        if (*p == '/')
+            plain = false;
+
+    if (!plain || *name == '.')
+        return shellProgramAt("", name, "", out_) || shellProgramAt("", name, ".elf", out_);
+    return shellProgramAt("", name, "", out_) || shellProgramAt("", name, ".elf", out_) ||
+           shellProgramAt("/bin/", name, "", out_) || shellProgramAt("/bin/", name, ".elf", out_);
 }
 
 void shellLs(const(char)* path) @nogc nothrow
 {
-    if (!shellNeedVolume())
-        return;
     if (path[0] == 0)
         path = ".";
 
@@ -434,8 +478,6 @@ void shellLs(const(char)* path) @nogc nothrow
 
 void shellCat(const(char)* path) @nogc nothrow
 {
-    if (!shellNeedVolume())
-        return;
     ExfatEntry e;
     int slot;
     if (path[0] == 0)
@@ -508,7 +550,7 @@ void shellDisk() @nogc nothrow
             cprintf("  [%u] partition %u: start %llu, %llu MiB, %s", i, cast(uint)p.number,
                     p.startLba, (p.sectors * b.sectorSize) >> 20, p.kind.ptr);
             if (ms >= 0)
-                cprintf("   <- mounted as /%s", mounts[ms].name.ptr);
+                cprintf("   <- mounted as /mnt/%s", mounts[ms].name.ptr);
             cprintf("\n");
             shown++;
         }
@@ -525,7 +567,7 @@ void shellMount(const(char)* args) @nogc nothrow
         if (added == 0 && fsMountCount() == 0)
             cprintf("No exFAT or FAT32 volume found ('disk' lists the partitions).\n");
         else if (added == 0)
-            cprintf("Nothing new to mount. 'ls /' lists the mount points.\n");
+            cprintf("Nothing new to mount. 'ls /mnt' lists the mount points.\n");
         return;
     }
     ulong n;
@@ -537,20 +579,18 @@ void shellMount(const(char)* args) @nogc nothrow
     }
     while (*rest == ' ' || *rest == '\t')
         rest++;
-    if (*rest == '/')
-        rest++;                     // "mount 1 /usb" is fine too
 
     int slot = fsMountPartition(cast(uint)n, rest);
     if (slot >= 0)
     {
-        cprintf("Mounted %s volume '%s' as /%s\n", mounts[slot].vol.fat32 ? "FAT32".ptr : "exFAT".ptr,
+        cprintf("Mounted %s volume '%s' as /mnt/%s\n", mounts[slot].vol.fat32 ? "FAT32".ptr : "exFAT".ptr,
                 mounts[slot].vol.label.ptr, mounts[slot].name.ptr);
         return;
     }
     switch (slot)
     {
         case FS_ERR_ALREADY:
-            cprintf("Partition %llu is already mounted as /%s\n", n, mounts[fsMountOfPartition(cast(uint)n)].name.ptr);
+            cprintf("Partition %llu is already mounted as /mnt/%s\n", n, mounts[fsMountOfPartition(cast(uint)n)].name.ptr);
             break;
         case FS_ERR_NO_SLOT:
             cprintf("Too many mounts (max %u). Use 'umount NAME' first.\n", FS_MAX_MOUNTS);
@@ -559,7 +599,7 @@ void shellMount(const(char)* args) @nogc nothrow
             cprintf("Bad mount name: use 1..%u characters, no '/' or blanks.\n", FS_NAME_MAX - 1);
             break;
         case FS_ERR_NAME_TAKEN:
-            cprintf("The name /%s is already in use.\n", rest);
+            cprintf("The name %s is already in use.\n", rest);
             break;
         case FS_ERR_BAD_PARTITION:
             cprintf("No such partition: %llu\n", n);
@@ -572,8 +612,8 @@ void shellMount(const(char)* args) @nogc nothrow
 
 void shellUmount(const(char)* args) @nogc nothrow
 {
-    if (*args == '/')
-        args++;
+    if (args[0] == '/' && args[1] == 'm' && args[2] == 'n' && args[3] == 't' && args[4] == '/')
+        args += 5;                  // "umount /mnt/usb0p1" is fine too
     int slot = (*args == 0) ? -1 : fsFindMount(args);
     if (slot < 0)
     {
@@ -586,7 +626,7 @@ void shellUmount(const(char)* args) @nogc nothrow
         cprintf(")\n");
         return;
     }
-    cprintf("Unmounted /%s\n", mounts[slot].name.ptr);
+    cprintf("Unmounted /mnt/%s\n", mounts[slot].name.ptr);
     fsUnmount(slot);
 }
 
@@ -758,17 +798,17 @@ void shellExecute() @nogc nothrow
         cprintf("  history             Show recent commands\n");
         cprintf("  echo TEXT           Print TEXT\n");
         cprintf("  sleep SECONDS       Wait (Ctrl+C aborts)\n");
-        cprintf("  programs            List programs on the boot media\n");
+        cprintf("  programs            List the programs in /bin\n");
         cprintf("  dmesg [N [SKIP]]    Kernel log (last N lines, SKIP lines before the end)\n");
         cprintf("  usb                 List the USB devices (hubs, keyboards, disks...)\n");
         cprintf("  disk                Show USB disks and partitions\n");
-        cprintf("  mount [N [NAME]]    Mount partition N as /NAME (no args: mount all volumes found)\n");
-        cprintf("  umount NAME         Unmount /NAME\n");
-        cprintf("  ls [PATH]           List a directory ('ls /' shows the mount points)\n");
+        cprintf("  mount [N [NAME]]    Mount partition N as /mnt/NAME (no args: mount all volumes found)\n");
+        cprintf("  umount NAME         Unmount /mnt/NAME\n");
+        cprintf("  ls [PATH]           List a directory ('ls /mnt' shows the mounted disks)\n");
         cprintf("  cat FILE            Print a text file\n");
         cprintf("  cd [DIR]            Change the current directory\n");
         cprintf("  pwd                 Show the current directory\n");
-        cprintf("  run NAME [ARGS] [&] Run a boot program or an ELF from the disk (& = background)\n");
+        cprintf("  run NAME [ARGS] [&] Run /bin/NAME or an ELF by path (& = background); plain NAME works too\n");
         cprintf("  ps                  List running programs\n");
         cprintf("  kill ID             Kill a program\n");
         cprintf("  fg [ID]             Bring a background program to the foreground\n");
@@ -969,12 +1009,11 @@ void shellExecute() @nogc nothrow
     }
     else if (shellEquals(shellLine.ptr, "pwd"))
     {
-        if (shellNeedVolume())
-            cprintf("%s\n", fsCwd.ptr);
+        cprintf("%s\n", fsCwd.ptr);
     }
     else if (shellEquals(shellLine.ptr, "cd"))
     {
-        if (shellNeedVolume() && !fsChdir(args[0] == 0 ? "/".ptr : args))
+        if (!fsChdir(args[0] == 0 ? "/".ptr : args))
             cprintf("Not a directory: %s\n", args);
     }
     else if (shellEquals(shellLine.ptr, "run"))
@@ -997,10 +1036,14 @@ void shellExecute() @nogc nothrow
             int index = procFind(name.ptr);
             if (index >= 0)
                 shellRunProgram(cast(uint)index, p, bg);
-            else if (fsMountCount() > 0)
-                shellRunFile(name.ptr, p, bg);          // a path on the mounted volume
             else
-                cprintf("No such program: %s\n", name.ptr);
+            {
+                char[FS_PATH_MAX] file;
+                if (shellResolveProgram(name.ptr, file.ptr))
+                    shellRunFile(file.ptr, p, bg);      // /bin/NAME, or a path on any mounted volume
+                else
+                    cprintf("No such program: %s\n", name.ptr);
+            }
         }
     }
     else if (shellEquals(shellLine.ptr, "poweroff") || shellEquals(shellLine.ptr, "shutdown"))
@@ -1045,14 +1088,18 @@ void shellExecute() @nogc nothrow
         {
             shellRunProgram(cast(uint)index, args, bg);
         }
-        else if (fsMountCount() > 0 && (fsStat(shellLine.ptr, &shellProbe) && !shellProbe.isDir))
-        {
-            shellRunFile(shellLine.ptr, args, bg);          // "./hello" or "/bin/hello" on the disk
-        }
         else
         {
-            cprintf("Unknown command: %s\n", shellLine.ptr);
-            cprintf("Type 'help' for available commands.\n");
+            char[FS_PATH_MAX] file;
+            if (shellResolveProgram(shellLine.ptr, file.ptr))
+            {
+                shellRunFile(file.ptr, args, bg);           // "hello" (= /bin/hello.elf), "./hello", "/mnt/usb0p1/hello"
+            }
+            else
+            {
+                cprintf("Unknown command: %s\n", shellLine.ptr);
+                cprintf("Type 'help' for available commands.\n");
+            }
         }
     }
 

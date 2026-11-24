@@ -1,28 +1,29 @@
 module dios.core.fs;
 
 /**
- * Mounted volumes (exFAT / FAT32, read-only) and path handling for the shell and
- * for user programs.
+ * The file system tree: a read-only root in RAM (ramfs.d, loaded from rootfs.tar by the
+ * bootloader) with exFAT / FAT32 volumes mounted below /mnt.
  *
- * Several volumes can be mounted at the same time. "/" is a virtual directory that
- * only lists the mount points; each volume appears under its own name:
+ *     /bin/gfxd.elf            from the root file system image
+ *     /mnt/usb0p1/hello.elf   first partition of the first USB disk
+ *     /mnt/MYSTICK/docs/a.txt a volume mounted with `mount N MYSTICK`
  *
- *     /usb0p1/hello.elf        first partition of the first USB disk
- *     /MYSTICK/docs/a.txt      a volume mounted with `mount N MYSTICK`
- *
- * Every mount has its own generation counter, so unplugging or unmounting one volume
- * invalidates only the open files that live on it.
+ * Several volumes can be mounted at once. /mnt is a real directory of the root; listing it
+ * also shows the mount points. Every mount has its own generation counter, so unplugging
+ * or unmounting one volume invalidates only the open files that live on it. The root
+ * itself can never go away.
  */
 import dios.core.blockdev;
 import dios.core.exfat;
 import dios.core.fat32;
+import dios.core.ramfs;
 import dios.core.stdio;
 
 enum uint FS_PATH_MAX = 256;
 enum uint FS_MAX_MOUNTS = 8;
 enum uint FS_NAME_MAX = 32;
 
-enum int FS_ROOT = -1;                  // "mount index" of the virtual root directory
+enum int FS_ROOT = -1;                  // "mount index" of files in the root file system (ramfs)
 
 // Results of fsMountPartition()
 enum int FS_ERR_UNREADABLE = -1;        // not an exFAT or FAT32 volume
@@ -45,6 +46,13 @@ __gshared Mount[FS_MAX_MOUNTS] mounts;
 __gshared char[FS_PATH_MAX] fsCwd;           // absolute, "/" when empty (see fsInitCwd)
 
 extern(C):
+
+/// Build the root file system and start in "/".
+void fsInit() @nogc nothrow
+{
+    ramfsInit();
+    fsInitCwd();
+}
 
 /// Make sure the current directory holds a valid path.
 void fsInitCwd() @nogc nothrow
@@ -206,15 +214,27 @@ int fsMountPartition(uint index, const(char)* name = null) @nogc nothrow
     return cast(int)slot;
 }
 
+/// Mount slot of an absolute path below /mnt ("/mnt/NAME/..."), or -1. `rest` gets the
+/// part after the mount name.
+int fsMountOfPath(const(char)* full, const(char)** rest) @nogc nothrow
+{
+    if (!(full[0] == '/' && full[1] == 'm' && full[2] == 'n' && full[3] == 't' && full[4] == '/'))
+        return -1;
+    const(char)* name = full + 5;
+    const(char)* end = name;
+    while (*end != 0 && *end != '/')
+        end++;
+    int slot = fsFindMountLen(name, cast(uint)(end - name));
+    if (slot >= 0)
+        *rest = end;
+    return slot;
+}
+
 /// If the current directory is inside mount `slot`, go back to "/".
 void fsCwdLeave(int slot) @nogc nothrow
 {
-    const(char)* nm = mounts[slot].name.ptr;
-    uint n = 0;
-    while (nm[n] != 0)
-        n++;
-    if (fsCwd[0] == '/' && fsFindMountLen(fsCwd.ptr + 1, n) == slot &&
-        (fsCwd[1 + n] == 0 || fsCwd[1 + n] == '/'))
+    const(char)* rest;
+    if (fsMountOfPath(fsCwd.ptr, &rest) == slot)
     {
         fsCwd[0] = '/';
         fsCwd[1] = 0;
@@ -239,7 +259,7 @@ uint fsUnmountDevice(uint dev) @nogc nothrow
     {
         if (mounts[i].mounted && partitions[mounts[i].partition].dev == dev)
         {
-            kprintf("Unmounted /%s\n", mounts[i].name.ptr);
+            kprintf("Unmounted /mnt/%s\n", mounts[i].name.ptr);
             fsUnmount(cast(int)i);
             n++;
         }
@@ -262,7 +282,7 @@ uint fsAutoMount() @nogc nothrow
             continue;
         Mount* m = &mounts[slot];
         Partition* p = &partitions[i];
-        kprintf("Mounted %s volume '%s' (%s partition %u) as /%s\n",
+        kprintf("Mounted %s volume '%s' (%s partition %u) as /mnt/%s\n",
                 m.vol.fat32 ? "FAT32".ptr : "exFAT".ptr, m.vol.label.ptr,
                 blockDevs[p.dev].name.ptr, cast(uint)p.number, m.name.ptr);
         added++;
@@ -321,39 +341,35 @@ bool fsResolve(const(char)* path, char* out_) @nogc nothrow
 }
 
 /// Look up `path` (relative to the current directory). On success `mountOut` (if given)
-/// receives the mount slot the entry lives on, or FS_ROOT for the virtual root "/".
+/// receives the mount slot the entry lives on, or FS_ROOT for the root file system.
 bool fsStat(const(char)* path, ExfatEntry* e, int* mountOut = null) @nogc nothrow
 {
     char[FS_PATH_MAX] full;
     if (!fsResolve(path, full.ptr))
         return false;
 
-    if (full[1] == 0)                   // "/": the directory of mount points
+    const(char)* rest;
+    int slot = fsMountOfPath(full.ptr, &rest);
+    if (slot >= 0)
     {
-        *e = ExfatEntry.init;
-        e.name[0] = 0;
-        e.isDir = true;
-        e.attrs = EXFAT_ATTR_DIR;
+        if (!exfatLookup(&mounts[slot].vol, rest, e))
+            return false;
         if (mountOut !is null)
-            *mountOut = FS_ROOT;
+            *mountOut = slot;
         return true;
     }
 
-    const(char)* rest = full.ptr + 1;
-    while (*rest != 0 && *rest != '/')
-        rest++;
-    int slot = fsFindMountLen(full.ptr + 1, cast(uint)(rest - (full.ptr + 1)));
-    if (slot < 0)
+    int node = ramfsFind(full.ptr);
+    if (node < 0)
         return false;
-    if (!exfatLookup(&mounts[slot].vol, rest, e))
-        return false;
+    ramfsFillEntry(cast(uint)node, e);
     if (mountOut !is null)
-        *mountOut = slot;
+        *mountOut = FS_ROOT;
     return true;
 }
 
-// Entries of the virtual root: one directory per mount.
-bool fsIterateRoot(ExfatDirFn fn, void* ctx) @nogc nothrow
+// The volumes as directory entries: they show up when /mnt is listed.
+void fsIterateMounts(ExfatDirFn fn, void* ctx) @nogc nothrow
 {
     for (uint i = 0; i < FS_MAX_MOUNTS; i++)
     {
@@ -370,24 +386,31 @@ bool fsIterateRoot(ExfatDirFn fn, void* ctx) @nogc nothrow
         e.isDir = true;
         e.attrs = EXFAT_ATTR_DIR;
         if (!fn(&e, ctx))
-            return true;
+            return;
     }
-    return true;
 }
 
-/// Walk directory `dir` of mount `slot` (FS_ROOT: the list of mount points).
+/// Walk directory `dir` that lives on mount `slot` (FS_ROOT: the root file system).
 bool fsIterate(int slot, const(ExfatEntry)* dir, ExfatDirFn fn, void* ctx) @nogc nothrow
 {
     if (slot == FS_ROOT)
-        return fsIterateRoot(fn, ctx);
+    {
+        bool stopped;
+        ramfsIterate(dir.firstCluster, fn, ctx, &stopped);
+        if (!stopped && dir.firstCluster == ramMntNode)
+            fsIterateMounts(fn, ctx);
+        return true;
+    }
     if (slot < 0 || slot >= cast(int)FS_MAX_MOUNTS || !mounts[slot].mounted)
         return false;
     return exfatIterate(&mounts[slot].vol, dir, fn, ctx);
 }
 
-/// Read from a file that lives on mount `slot`.
+/// Read from a file that lives on mount `slot` (FS_ROOT: the root file system).
 ulong fsRead(int slot, ExfatFile* f, ulong offset, void* dst, ulong len) @nogc nothrow
 {
+    if (slot == FS_ROOT)
+        return ramfsRead(f.cur.firstCluster, offset, dst, len);
     if (slot < 0 || slot >= cast(int)FS_MAX_MOUNTS || !mounts[slot].mounted)
         return 0;
     return exfatRead(&mounts[slot].vol, f, offset, dst, len);

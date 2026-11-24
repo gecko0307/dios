@@ -1,6 +1,7 @@
 import os
 import subprocess
 import shutil
+import tarfile
 from pathlib import Path
 
 ROOT = Path(__file__).parent.resolve()
@@ -11,6 +12,14 @@ OBJ_KERNEL = OBJ / "kernel"
 CDROOT = ROOT / "cdroot"
 USBSTICK = ROOT / "usbstick"
 KERNEL_LINKER_SCRIPT = SRC_KERNEL / "linker.ld"
+
+# Root file system image (ramfs): the contents of the repository folder `rootfs/` are packed
+# as they are into cdroot/rootfs.tar. The bootloader loads that as a module and the kernel
+# serves it as "/". Put programs in rootfs/bin, config in rootfs/etc, and so on.
+ROOTFS = ROOT / "rootfs"
+ROOTFS_MAX_NODES = 512      # kernel limit (ramfs.d: RAMFS_MAX_NODES), the root and /mnt included
+ROOTFS_NAME_MAX = 63        # kernel limit per path component (RAMFS_NAME_MAX - 1)
+ROOTFS_IGNORE = {".gitkeep", ".gitignore", ".DS_Store", "Thumbs.db"}
 
 LDC = shutil.which("ldc2")
 NASM = shutil.which("nasm")
@@ -113,8 +122,51 @@ def compile_kernel():
         *[str(obj.relative_to(ROOT)) for obj in objects],
     ])
 
+def build_rootfs():
+    """Pack the folder rootfs/ into cdroot/rootfs.tar (plain ustar, read by src/kernel/dios/core/ramfs.d)."""
+    if not ROOTFS.is_dir():
+        raise RuntimeError(f"rootfs folder not found: {ROOTFS}")
+
+    out = CDROOT / "rootfs.tar"
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    entries = []
+    for path in sorted(ROOTFS.rglob("*")):
+        if path.name in ROOTFS_IGNORE:
+            continue
+        rel = path.relative_to(ROOTFS).as_posix()
+        if path.is_symlink():
+            raise RuntimeError(f"rootfs: symbolic links are not supported: {rel}")
+        if not (path.is_dir() or path.is_file()):
+            continue
+        if len(rel) > 100 or any(len(part) > ROOTFS_NAME_MAX for part in rel.split("/")):
+            raise RuntimeError(f"rootfs: path too long (max 100 characters, {ROOTFS_NAME_MAX} per name): {rel}")
+        entries.append((rel, path))
+
+    # The kernel adds the root and creates /mnt itself when the folder has none.
+    if len(entries) + 2 > ROOTFS_MAX_NODES:
+        raise RuntimeError(f"rootfs: {len(entries)} entries, the kernel takes at most {ROOTFS_MAX_NODES - 2}")
+
+    with tarfile.open(out, "w", format=tarfile.USTAR_FORMAT) as tar:
+        for rel, path in entries:     # sorted: a directory always comes before its contents
+            info = tarfile.TarInfo(rel)
+            info.mtime = int(path.stat().st_mtime)
+            if path.is_dir():
+                info.type = tarfile.DIRTYPE
+                info.mode = 0o755
+                tar.addfile(info)
+            else:
+                info.size = path.stat().st_size
+                info.mode = 0o755 if rel.startswith("bin/") else 0o644
+                with open(path, "rb") as f:
+                    tar.addfile(info, f)
+
+    print(f"rootfs: {out.relative_to(ROOT)} from {ROOTFS.relative_to(ROOT)}/ "
+          f"({len(entries)} entries, {out.stat().st_size} bytes)")
+
 def main():
     compile_kernel()
+    build_rootfs()
     run([
         XORRISO,
         "-as", "mkisofs",

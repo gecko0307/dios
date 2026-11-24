@@ -88,6 +88,7 @@ import dios.core.paging;
 import dios.core.ps2;
 import dios.core.fs;
 import dios.core.stdio;
+import dios.core.ramfs;
 import dios.core.sysfile;
 import dios.core.usbstor;
 import dios.core.vmem;
@@ -311,8 +312,8 @@ void procInit() @nogc nothrow
     for (ulong i = 0; i < n && programCount < PROC_MAX_PROGRAMS; i++)
     {
         LimineFile* f = moduleRequest.response.modules[i];
-        if (f is null || f.address is null || f.path is null)
-            continue;
+        if (f is null || f.address is null || f.path is null || ramfsIsImagePath(f.path))
+            continue;                   // the root file system image is not a program
         Program* p = &programs[programCount++];
         procMakeName(f.path, p.name.ptr);
         p.image = cast(const(ubyte)*)f.address;
