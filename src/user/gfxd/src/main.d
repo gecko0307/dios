@@ -169,6 +169,7 @@ int main(string[] args)
     }
 
     ugfxServerEnd();                    // the shell gets the screen back
+    renderRelease();
     uputs("gfxd: stopped\n");
     return 0;
 }

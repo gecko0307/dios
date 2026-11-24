@@ -76,6 +76,8 @@ __gshared int renderDy0;
 __gshared int renderDx1;
 __gshared int renderDy1;
 
+__gshared bool haveCursor;
+
 private bool renderAlloc(Canvas* c, uint width, uint height)
 {
     void* mem = umalloc(cast(size_t)width * cast(size_t)height * 4);
@@ -93,12 +95,23 @@ private bool renderAlloc(Canvas* c, uint width, uint height)
 bool renderInit(uint width, uint height)
 {
     renderCursorDrawn = false;
+    haveCursor = loadCursor();
     return renderAlloc(&renderScene, width, height) && renderAlloc(&renderScreen, width, height);
+}
+
+/// Releases rendering resources.
+void renderRelease()
+{
+    deleteCursor();
 }
 
 // Draws the cursor into renderScreen: clip once, then walk rows (no per-pixel checks).
 private void renderCursorDraw(int x, int y)
 {
+    if (!haveCursor)
+        // TODO: draw a fallback cursor
+        return;
+    
     int cx0 = (x < 0) ? -x : 0;
     int cy0 = (y < 0) ? -y : 0;
     int cx1 = (x + CURSOR_WIDTH > renderScreen.width) ? renderScreen.width - x : CURSOR_WIDTH;
