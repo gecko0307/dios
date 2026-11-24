@@ -119,7 +119,7 @@ Prerequisites:
 
 Run `python build.py` to compile the kernel (`cdroot/kernel64.bin`), build the root filesystem image (`cdroot/rootfs.tar`) and generate a bootable CD image (`dios64.iso`).
 
-Run `buildlib.bat` to compile ulib and generate `libulib.a`. This is necessary to build sample programs.
+Run `buildlib.bat` to compile ulib and generate `rootfs/lib/libulib.a`. This is necessary to build GFXD and sample programs.
 
 Userspace services (`src/user`) and sample programs (`src/demos`) are built with DUB:
 
