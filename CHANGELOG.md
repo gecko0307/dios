@@ -1,7 +1,7 @@
 DIOS 0.7.0 - TBD
 ----------------
 - **Kernel**:
-  - **ABI breaking change**: syscall numbers are changed
+  - **ABI breaking change**: syscall numbers were changed
   - Experimental FAT32 writing support. Drives are mounted as read-only by default, to enable writing run e.g. `remount usb0p1 rw`
   - File writing syscalls: `SYS_FWRITE`, `SYS_UNLINK`, `SYS_MKDIR`, `SYS_RMDIR`, `SYS_RENAME`, `SYS_SYNC`
   - New shell commands: `touch`, `mkdir`, `rmdir`, `rm`, `mv`, `cp`, `write`
