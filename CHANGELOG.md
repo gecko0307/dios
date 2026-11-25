@@ -10,6 +10,8 @@ DIOS 0.7.0 - TBD
   - File writing functions: `ufwrite`, `uunlink`, `umkdir`, `urmdir`, `urename`, `usync`
   - TGA loader (`ulib.gfx.tga`)
   - Improved `uprintf`: leading zeros, `%k`, `%X`.
+- **Build System**:
+  - Improved `build.py`. It now compiles ulib and the userspace: a single `python build.py` builds the entire system at once. Build parameters are taken from `build.toml` config.
 
 DIOS 0.6.0 - 25 Nov, 2026
 -------------------------
