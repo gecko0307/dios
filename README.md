@@ -123,17 +123,15 @@ Prerequisites:
 * [xorriso](https://github.com/Distrotech/xorriso) to generate a bootable CD image
 * Optionally, [fstool](https://github.com/KarpelesLab/fstool) to generate a USB stick image for testing in QEMU
 
-Run `python build.py` to compile the kernel (`cdroot/kernel64.bin`), build the root filesystem image (`cdroot/rootfs.tar`) and generate a bootable CD image (`dios64.iso`).
+Run `python build.py` to compile the kernel (`cdroot/kernel64.bin`) and ulib (`rootfs/lib/libulib.a`), build the root filesystem image (`cdroot/rootfs.tar`), and generate a bootable CD image (`dios64.iso`).
 
-Run `buildlib.bat` to compile ulib and generate `rootfs/lib/libulib.a`. This is necessary to build GFXD and sample programs.
-
-Userspace services (`src/user`) and sample programs (`src/demos`) are built with DUB:
+Userspace services (`src/user`) and sample programs (`src/demos`) are built individually with DUB:
 
 ```
 dub build
 ```
 
-*.elf binaries are automatically copied to `rootfs/bin`. To include them to the root filesystem, you should run `python build.py --skip-kernel` to rebuild the image (if the kernel is already compiled).
+*.elf binaries are automatically copied to `rootfs/bin`. To include them to the root filesystem, you should run `python build.py rootfs` to rebuild the image.
 
 ## What Next?
 
