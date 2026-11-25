@@ -94,7 +94,7 @@ int main(string[] args)
     {
         DateTime dt;
         udatetime(&dt);
-        uprintf("Timer started at %d:%d:%d\n", dt.hour, dt.minute, dt.second);
+        uprintf("Timer started at %02d:%02d:%02d\n", dt.hour, dt.minute, dt.second);
         
         usleep(durationMs);
         uprintf("Time is up!\n");

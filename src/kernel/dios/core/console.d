@@ -506,7 +506,7 @@ void consoleFormat(
                 break;
         }
 
-        // String.
+        // String
         if (fmt[i] == 's')
         {
             char* str = va_arg!(char*)(ap);
@@ -522,12 +522,12 @@ void consoleFormat(
                     putChar(ch);
             }
         }
-        // Character.
+        // Character
         else if (fmt[i] == 'c')
         {
             putChar(va_arg!(char)(ap));
         }
-        // Signed decimal.
+        // Signed decimal
         else if (fmt[i] == 'd')
         {
             int value = va_arg!int(ap);
@@ -549,7 +549,7 @@ void consoleFormat(
                 0
             );
         }
-        // Unsigned decimal.
+        // Unsigned decimal
         else if (fmt[i] == 'u')
         {
             ulong value = isLongLong
@@ -568,7 +568,7 @@ void consoleFormat(
                 0
             );
         }
-        // Hexadecimal.
+        // Hexadecimal
         else if (fmt[i] == 'x')
         {
             ulong value = isLongLong
@@ -589,7 +589,7 @@ void consoleFormat(
                 2
             );
         }
-        // 16-bit hexadecimal.
+        // 16-bit hexadecimal
         else if (fmt[i] == 'k')
         {
             ushort value = va_arg!ushort(ap);
@@ -606,7 +606,7 @@ void consoleFormat(
                 2
             );
         }
-        // 8-bit hexadecimal.
+        // 8-bit hexadecimal
         else if (fmt[i] == 'X')
         {
             ubyte value = va_arg!ubyte(ap);
@@ -623,7 +623,7 @@ void consoleFormat(
                 2
             );
         }
-        // Unknown specifier: print it literally.
+        // Unknown specifier: print it literally
         else
         {
             putChar(fmt[i]);

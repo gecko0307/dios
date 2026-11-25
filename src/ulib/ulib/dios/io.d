@@ -93,6 +93,65 @@ void uputu_b(ulong v) @nogc nothrow
     outBuf.puts(d.ptr + k, 20 - k);
 }
 
+immutable char[16] HEXMAP = [
+    '0', '1', '2', '3',
+    '4', '5', '6', '7',
+    '8', '9', 'A', 'B',
+    'C', 'D', 'E', 'F'
+];
+
+/// [Buffered] Writes a formatted integer to the standard output.
+void _uputint_b_fmt(ulong value, bool negative, uint base, uint minDigits, uint width, char pad, const(char)* prefix, uint prefixLen) @nogc nothrow
+{
+    char[20] digits;
+    uint count = 0;
+
+    do
+    {
+        digits[count++] = HEXMAP[value % base];
+        value /= base;
+    }
+    while (value != 0);
+
+    while (count < minDigits)
+        digits[count++] = '0';
+
+    uint totalLen = count + prefixLen + (negative ? 1 : 0);
+    uint padding = (width > totalLen) ? width - totalLen : 0;
+
+    // Space padding goes before the number
+    if (pad != '0')
+    {
+        while (padding > 0)
+        {
+            outBuf.putc(pad);
+            padding--;
+        }
+    }
+
+    // Prefix
+    for (uint i = 0; i < prefixLen; i++)
+        outBuf.putc(prefix[i]);
+
+    // Sign
+    if (negative)
+        outBuf.putc('-');
+
+    // Zero padding goes after prefix and sign
+    if (pad == '0')
+    {
+        while (padding > 0)
+        {
+            outBuf.putc('0');
+            padding--;
+        }
+    }
+
+    // Digits in reverse order
+    while (count > 0)
+        outBuf.putc(digits[--count]);
+}
+
 /// [Buffered] Writes a signed integer to the standard output.
 void uputi_b(long v) @nogc nothrow
 {
@@ -265,23 +324,60 @@ int uprintf(const(char)* fmt, ...) @nogc nothrow
             uputc_b(c);
             continue;
         }
-        else
+        
+        if (++i >= len)
+            break;
+
+        // Parse flags and field width.
+        char pad = ' ';
+        uint width = 0;
+
+        if (fmt[i] == '0')
         {
+            pad = '0';
             i++;
-            c = fmt[i];
-            if (c == 0)
+        }
+
+        while (i < len &&
+               fmt[i] >= '0' &&
+               fmt[i] <= '9')
+        {
+            width = width * 10 + (fmt[i] - '0');
+
+            // Protect against unreasonable field widths.
+            if (width > 64)
+                width = 64;
+
+            i++;
+        }
+
+        if (i >= len)
+            break;
+
+        //i++;
+        //c = fmt[i];
+        //if (c == 0)
+        //    break;
+        
+        // Length modifier: ll
+        bool isLongLong = false;
+        
+        if (fmt[i] == 'l' &&
+            i + 1 < len &&
+            fmt[i + 1] == 'l')
+        {
+            isLongLong = true;
+            i += 2;
+
+            if (i >= len)
                 break;
         }
         
-        // Character
-        if (fmt[i] == 'c')
-        {
-            uputc_b(va_arg!(char)(ap));
-        }
         // Zero-terminated string
-        else if (fmt[i] == 's')
+        if (fmt[i] == 's')
         {
             char* str = va_arg!(char*)(ap);
+
             if (str != null)
             {
                 while (*str != 0)
@@ -290,20 +386,46 @@ int uprintf(const(char)* fmt, ...) @nogc nothrow
             else
                 uputs_b("null");
         }
-        // Signed decimal
-        else if (c == 'd')
+        // Character
+        else if (fmt[i] == 'c')
         {
-            uputi_b(va_arg!long(ap));
+            uputc_b(va_arg!(char)(ap));
+        }
+        // Signed decimal
+        else if (fmt[i] == 'd')
+        {
+            //uputi_b(va_arg!long(ap));
+            long value = va_arg!long(ap);
+            bool negative = value < 0;
+            ulong magnitude = negative? cast(ulong)(-value) : cast(ulong)value;
+            _uputint_b_fmt(magnitude, negative, 10, 1, width, pad, null, 0);
         }
         // Unsigned decimal
         else if (fmt[i] == 'u')
         {
-            uputu_b(va_arg!ulong(ap));
+            //uputu_b(va_arg!ulong(ap));
+            ulong value = va_arg!ulong(ap);
+            _uputint_b_fmt(value, false, 10, 1, width, pad, null, 0);
         }
         // Hexadecimal
         else if (fmt[i] == 'x')
         {
-            uputhex_b(va_arg!ulong(ap));
+            //uputhex_b(va_arg!ulong(ap));
+            ulong value = va_arg!ulong(ap);
+            uint digits = isLongLong ? 16 : 8;
+            _uputint_b_fmt(value, false, 16, digits, width, pad, "0x".ptr, 2);
+        }
+        // 16-bit hexadecimal
+        else if (fmt[i] == 'k')
+        {
+            ushort value = va_arg!ushort(ap);
+            _uputint_b_fmt(value, false, 16, 4, width, pad, "0x".ptr, 2);
+        }
+        // 8-bit hexadecimal
+        else if (fmt[i] == 'X')
+        {
+            ubyte value = va_arg!ubyte(ap);
+            _uputint_b_fmt(value, false, 16, 2, width, pad, "0x".ptr, 2);
         }
         // Floating-point
         else if (fmt[i] == 'f')
