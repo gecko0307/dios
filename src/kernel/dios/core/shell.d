@@ -1084,10 +1084,11 @@ void shellExecute() @nogc nothrow
         cprintf("  rm PATH             Remove a file\n");
         cprintf("  mv SRC DEST         Rename or move within a volume (DEST may be a directory)\n");
         cprintf("  cp SRC DEST         Copy (DEST may be a directory)\n");
-        cprintf("  write FILE TEXT     Replace FILE's content by TEXT (append FILE TEXT adds a line)\n");
+        cprintf("  write PATH TEXT     Replace file's content by TEXT\n");
+        cprintf("  append PATH TEXT    Add a line to the file\n");
         cprintf("  cd [DIR]            Change the current directory\n");
         cprintf("  pwd                 Show the current directory\n");
-        cprintf("  run NAME [ARGS] [&] Run /bin/NAME or an ELF by path (& = background); plain NAME works too\n");
+        cprintf("  run NAME [ARGS] [&] Run a program (& = run in background); plain NAME works too\n");
         cprintf("  ps                  List running programs\n");
         cprintf("  kill ID             Kill a program\n");
         cprintf("  fg [ID]             Bring a background program to the foreground\n");

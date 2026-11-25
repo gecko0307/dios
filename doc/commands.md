@@ -15,17 +15,27 @@
 - `history` - show recent commands
 - `echo TEXT` - print TEXT
 - `sleep SECONDS` - wait (Ctrl+C aborts)
-- `programs` - list program modules provided by the bootloader
+- `programs` - list the programs in `/bin`
 - `dmesg [N [SKIP]]` - kernel log (last N lines, SKIP lines before the end)
 - `usb` - list USB devices (hubs, keyboards, removable disks...)
 - `disk` - show USB disks and partitions
-- `mount [N [NAME]]` - mount partition N as /NAME. If no aruments given, mount all volumes found
+- `mount [N [NAME] [rw]]` - mount partition `N` as `/mnt/NAME`, read-only unless 'rw' (FAT32 only); no args: mount all volumes found (read-only)
+- `remount NAME rw|ro` - switch a mounted volume between read-write and read-only
 - `umount NAME` - unmount `/NAME`
+- `sync` - flush read-write volumes to the disk
 - `ls [PATH]` - list a directory on the mounted volume
 - `cd [DIR]` - change the current directory
 - `pwd` - show the current directory
-- `cat FILE` - print a text file
-- `run NAME [ARGS] [&]` - run a boot program or an ELF executable from the disk (& = run in background)
+- `cat PATH` - print a text file
+- `touch PATH` - create a file
+- `mkdir PATH` - create a directory
+- `rmdir PATH` - remove a directory
+- `rm PATH` - remove a file
+- `mv SRC DEST` - rename or move within a volume (DEST may be a directory)
+- `cp SRC DEST` - copy (DEST may be a directory)
+- `write PATH TEXT` - replace file's content by `TEXT`
+- `append PATH TEXT` - add a line to the file
+- `run NAME [ARGS] [&]` - run a program (`&` = run in background). Plain `NAME` works too
 - `ps` - list running programs
 - `kill ID` - stop a program
 - `fg [ID]` - bring a background program to the foreground
