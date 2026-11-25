@@ -1,5 +1,5 @@
-DIOS 0.7.0 - TBD
-----------------
+DIOS 0.7.0 - 26 Nov, 2026
+-------------------------
 - **Kernel**:
   - **ABI breaking change**: syscall numbers were changed
   - Experimental FAT32 writing support. Drives are mounted as read-only by default, to enable writing run e.g. `remount usb0p1 rw`
