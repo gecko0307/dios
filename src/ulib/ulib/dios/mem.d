@@ -78,6 +78,15 @@ int memcmp(const(void)* vl, const(void)* vr, size_t n) @nogc nothrow
 }
 
 ///
+size_t strlen(const(char)* s) @nogc nothrow
+{
+    size_t n = 0;
+    while (s[n] != 0)
+        n++;
+    return n;
+}
+
+///
 size_t ustrlen(const(char)* s) @nogc nothrow
 {
     size_t n = 0;

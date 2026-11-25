@@ -115,23 +115,37 @@ ulib is currently statically linked; DIOS doesn't support dynamic linking yet.
 
 ## Building
 
+DIOS uses its own build system written in Python - `build.py`. It does the following:
+
+- Compiles the kernel (by default `cdroot/kernel64.bin`)
+- Compiles ulib (`rootfs/lib/libulib.a`)
+- Compiles the userspace (programs in `rootfs/bin`)
+- Builds the root filesystem image (`cdroot/rootfs.tar`)
+- Generates a bootable CD image (`dios64.iso`).
+
 Prerequisites:
 
-* Recent [LDC](https://github.com/ldc-developers/ldc)
-* [NASM](http://www.nasm.us)
-* Python (for running the build script)
-* [xorriso](https://github.com/Distrotech/xorriso) to generate a bootable CD image
-* Optionally, [fstool](https://github.com/KarpelesLab/fstool) to generate a USB stick image for testing in QEMU
+- Recent [LDC](https://github.com/ldc-developers/ldc)
+- [NASM](http://www.nasm.us)
+- Python (for running the build script)
+- [xorriso](https://github.com/Distrotech/xorriso) to generate a bootable CD image
+- Optionally, [fstool](https://github.com/KarpelesLab/fstool) to generate a USB stick image for testing in QEMU.
 
-Run `python build.py` to compile the kernel (`cdroot/kernel64.bin`) and ulib (`rootfs/lib/libulib.a`), build the root filesystem image (`cdroot/rootfs.tar`), and generate a bootable CD image (`dios64.iso`).
+Run `python build.py` to build everything.
 
-Userspace services (`src/user`) and sample programs (`src/demos`) are built individually with DUB:
+Run `python build.py kernel` to build only the kernel.
+
+Run `python build.py ulib` to build only ulib.
+
+Run `python build.py user` to build only the userspace.
+
+Userspace and sample programs (`src/demos`) can be built individually with DUB:
 
 ```
 dub build
 ```
 
-*.elf binaries are automatically copied to `rootfs/bin`. To include them to the root filesystem, you should run `python build.py rootfs` to rebuild the image.
+All *.elf binaries of the demos are automatically copied to `rootfs/bin`. To include them to the root filesystem, you should run `python build.py rootfs` to rebuild the image.
 
 ## What Next?
 

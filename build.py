@@ -1,5 +1,6 @@
 import argparse
 import ast
+import json
 import re
 import subprocess
 import shutil
@@ -16,16 +17,19 @@ DEFAULT_CONFIG_PATH = ROOT / "build.toml"
 
 SRC_KERNEL = ROOT / "src" / "kernel"
 SRC_ULIB = ROOT / "src" / "ulib"
+SRC_USER = ROOT / "src" / "user"
 OBJ = ROOT / "o-elf-x86_64"
 OBJ_KERNEL = OBJ / "kernel"
 OBJ_ULIB = OBJ / "ulib"
+OBJ_USER = OBJ / "user"
 CDROOT = ROOT / "cdroot"
 USBSTICK = ROOT / "usbstick"
 KERNEL_LINKER_SCRIPT = SRC_KERNEL / "linker.ld"
 
 # Root file system image (ramfs)
 ROOTFS = ROOT / "rootfs"
-ROOTFS_MAX_NODES = 512  # kernel limit (ramfs.d: RAMFS_MAX_NODES), the root and /mnt included
+ROOTFS_MAX_NODES = 768  # kernel limit for the archive (ramfs.d: RAMFS_MAX_NODES - RAMFS_TAR_RESERVE),
+                        # the root, /mnt and /home included; the rest is room for files made in /home
 ROOTFS_NAME_MAX = 63    # kernel limit per path component (RAMFS_NAME_MAX - 1)
 ROOTFS_IGNORE = {".gitkeep", ".gitignore", ".DS_Store", "Thumbs.db"}
 
@@ -37,10 +41,11 @@ XORRISO = shutil.which("xorriso")
 
 DEFAULT_CONFIG = {
     "build": {
-        "default_target": "all",  # "all" | "kernel" | "ulib" | "rootfs"
+        "default_target": "all",  # "all" | "kernel" | "ulib" | "user" | "rootfs"
         "pack_iso": True,
         "debug": False,
         "ulib_out": "rootfs/lib/libulib.a",
+        "user_out": "rootfs/bin",
         "kernel_out": "cdroot/kernel64.bin",
         "iso_out": "dios64.iso",
     },
@@ -59,6 +64,14 @@ DEFAULT_CONFIG = {
         "d_debug": ["-O0", "-g"],
         "d_kernel": ["-I=src/kernel", "-code-model=medium"],
         "d_ulib": ["-I=src/ulib"],
+        "d_user": ["-I=src/ulib"],
+        "ld_user": [
+            "-m", "elf_x86_64",
+            "-z", "max-page-size=0x1000",
+            "-static",
+            "--gc-sections",
+            "-u", "_start",
+        ],
         "ld_kernel": [
             "-m", "elf_x86_64",
             "-z", "max-page-size=0x1000",
@@ -188,7 +201,7 @@ def load_config(config_path: Path) -> dict:
                 raise RuntimeError(f"Config error: [flags].{key} must be a list of strings")
             cfg["flags"][key] = [str(x) for x in val]
 
-    valid_targets = {"all", "kernel", "ulib", "rootfs"}
+    valid_targets = {"all", "kernel", "ulib", "user", "rootfs"}
     if cfg["build"]["default_target"] not in valid_targets:
         raise RuntimeError(
             f"Invalid default_target '{cfg['build']['default_target']}' in {config_path}. "
@@ -205,6 +218,8 @@ def build_flag_sets(cfg: dict) -> dict:
     return {
         "d_kernel": [*flags["d_base"], *mode_flags, *flags["d_kernel"]],
         "d_ulib": [*flags["d_base"], *mode_flags, *flags["d_ulib"]],
+        "d_user": [*flags["d_base"], *mode_flags, *flags["d_user"]],
+        "ld_user": flags["ld_user"],
         "ld_kernel": [
             "-T", str(KERNEL_LINKER_SCRIPT.relative_to(ROOT)),
             *flags["ld_kernel"],
@@ -284,6 +299,76 @@ def compile_ulib(ulib_out: Path, flag_sets: dict):
         str(ulib_out.relative_to(ROOT)),
         *[str(obj.relative_to(ROOT)) for obj in objects],
     ])
+
+
+def find_user_programs(only=None):
+    """The programs of src/user: every subfolder that has a src/ folder with D sources.
+
+    Returns a list of (name, folder, elf name). The elf name is "targetName" of the program's
+    dub.json when it has one, otherwise "<folder>.elf". `only` is an optional list of folder names.
+    """
+    if not SRC_USER.is_dir():
+        raise RuntimeError(f"Source directory not found: {SRC_USER}")
+    programs = []
+    for folder in sorted(p for p in SRC_USER.iterdir() if p.is_dir()):
+        if not (folder / "src").is_dir() or not any((folder / "src").rglob("*.d")):
+            continue
+        elf = f"{folder.name}.elf"
+        dub = folder / "dub.json"
+        if dub.is_file():
+            try:
+                elf = json.loads(dub.read_text(encoding="utf-8")).get("targetName", elf)
+            except ValueError as exc:
+                raise RuntimeError(f"{dub.relative_to(ROOT)}: {exc}") from exc
+        programs.append((folder.name, folder, elf))
+    if only:
+        known = {name for name, _, _ in programs}
+        missing = [name for name in only if name not in known]
+        if missing:
+            raise RuntimeError(f"Unknown program(s) in src/user: {', '.join(missing)} "
+                               f"(have: {', '.join(sorted(known)) or 'none'})")
+        programs = [p for p in programs if p[0] in only]
+    return programs
+
+
+def compile_user(user_out: Path, ulib_out: Path, flag_sets: dict, only=None):
+    """Build the programs of src/user and write the ELF files to `user_out` (rootfs/bin by default).
+
+    Each program is its folder's src/ compiled against src/ulib (and itself) and linked with the ulib archive
+    (build the 'ulib' target first). The linker script is the program's own linker.ld, or the
+    shared src/user/linker.ld.
+    """
+    require(ldc2=LDC, **{"ld.lld": LD})
+    if not ulib_out.is_file():
+        raise RuntimeError(f"{ulib_out.relative_to(ROOT)} does not exist yet: build ulib first")
+    programs = find_user_programs(only)
+    if not programs:
+        print("user: no programs found in src/user")
+        return
+    user_out.mkdir(parents=True, exist_ok=True)
+    for name, folder, elf in programs:
+        script = folder / "linker.ld"
+        if not script.is_file():
+            script = SRC_USER / "linker.ld"
+        if not script.is_file():
+            raise RuntimeError(f"user/{name}: no linker.ld (neither in {folder.relative_to(ROOT)} nor in src/user)")
+        src = folder / "src"
+        # the program's own src/ is an import path too ("import wm;" finds src/wm.d)
+        d_flags = [*flag_sets["d_user"], f"-I={src.relative_to(ROOT).as_posix()}"]
+        objects = [
+            compile_d(path, src, OBJ_USER / name, d_flags, incremental=False)
+            for path in sorted(src.rglob("*.d"))
+        ]
+        out = user_out / elf
+        run([
+            LD,
+            *flag_sets["ld_user"],
+            "-T", str(script.relative_to(ROOT)),
+            "-o", str(out.relative_to(ROOT)),
+            *[str(obj.relative_to(ROOT)) for obj in objects],
+            str(ulib_out.relative_to(ROOT)),
+        ])
+        print(f"user: {out.relative_to(ROOT)}")
 
 
 def compile_kernel(kernel_out: Path, flag_sets: dict):
@@ -369,9 +454,10 @@ def main():
     parser.add_argument(
         "target",
         nargs="?",
-        choices=["all", "kernel", "ulib", "rootfs"],
+        choices=["all", "kernel", "ulib", "user", "rootfs"],
         default=None,
-        help="What to build (overrides build.toml): 'all', 'kernel', 'ulib', or 'rootfs'.",
+        help="What to build (overrides build.toml): 'all', 'kernel', 'ulib', 'user' (src/user programs), "
+             "or 'rootfs' (only repack rootfs.tar and the ISO).",
     )
     parser.add_argument(
         "-c", "--config",
@@ -388,6 +474,12 @@ def main():
         "--release",
         action="store_true",
         help="Use release compiler flags (overrides build.debug in config).",
+    )
+    parser.add_argument(
+        "-p", "--program",
+        action="append",
+        metavar="NAME",
+        help="Build only this program of src/user (repeatable); implies target 'user' when no target is given.",
     )
     parser.add_argument(
         "--no-iso",
@@ -410,9 +502,12 @@ def main():
     
     flag_sets = build_flag_sets(cfg)
     
-    target = args.target or build_cfg["default_target"]
+    target = args.target or ("user" if args.program else build_cfg["default_target"])
+    if args.program and target not in ("all", "user"):
+        parser.error("--program only applies to the 'all' and 'user' targets")
     ulib_out = (ROOT / build_cfg["ulib_out"]).resolve()
     kernel_out = (ROOT / build_cfg["kernel_out"]).resolve()
+    user_out = (ROOT / build_cfg["user_out"]).resolve()
     iso_out = (ROOT / build_cfg["iso_out"]).resolve()
     
     if args.no_iso:
@@ -423,12 +518,16 @@ def main():
         should_pack_iso = bool(build_cfg["pack_iso"])
     
     build_ulib = target in ("all", "ulib")
+    build_user = target in ("all", "user")
     build_kern = target in ("all", "kernel")
-    pack_image = (target in ("all", "kernel", "rootfs")) and should_pack_iso
+    pack_image = (target in ("all", "kernel", "user", "rootfs")) and should_pack_iso
     
     if build_ulib:
         compile_ulib(ulib_out, flag_sets)
     
+    if build_user:
+        compile_user(user_out, ulib_out, flag_sets, args.program)
+
     if build_kern:
         compile_kernel(kernel_out, flag_sets)
     

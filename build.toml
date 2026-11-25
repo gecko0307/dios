@@ -1,8 +1,9 @@
 [build]
-default_target = "all"              # "all" | "kernel" | "ulib" | "rootfs"
+default_target = "all"              # "all" | "kernel" | "ulib" | "user" | "rootfs"
 pack_iso = true
 debug = false
 ulib_out = "rootfs/lib/libulib.a"
+user_out = "rootfs/bin"
 kernel_out = "cdroot/kernel64.bin"
 iso_out = "dios64.iso"
 
@@ -21,11 +22,19 @@ d_release = ["-release", "-O3"]
 d_debug = ["-O0", "-g", "-d-debug"]
 d_kernel = ["-I=src/kernel", "-code-model=medium"]
 d_ulib = ["-I=src/ulib"]
+d_user = ["-I=src/ulib"]
 ld_kernel = [
     "-m", "elf_x86_64",
     "-z", "max-page-size=0x1000",
     "-static",
     "--gc-sections",
     "-nostdlib",
+]
+ld_user = [
+    "-m", "elf_x86_64",
+    "-z", "max-page-size=0x1000",
+    "-static",
+    "--gc-sections",
+    "-u", "_start",
 ]
 nasm = ["-f", "elf64"]
