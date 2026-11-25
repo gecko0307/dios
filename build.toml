@@ -17,7 +17,7 @@ d_base = [
     "--fno-exceptions",
     "--nogc",
 ]
-d_release = ["-release", "-O2"]
+d_release = ["-release", "-O3"]
 d_debug = ["-O0", "-g", "-d-debug"]
 d_kernel = ["-I=src/kernel", "-code-model=medium"]
 d_ulib = ["-I=src/ulib"]
