@@ -26,13 +26,14 @@ DEALINGS IN THE SOFTWARE.
 module dios.core.sysfile;
 
 /**
- * File system calls for user programs (read-only): a small table of open files
- * and directories on the mounted volume.
+ * File system calls for user programs: a small table of open files and directories.
+ * Files can be written when they are on a FAT32 volume mounted with "rw".
  *
  * Everything here works on kernel pointers; proc.d validates the user pointers
  * and copies the path strings before calling in.
  */
 import dios.core.exfat;
+import dios.core.fat32w;
 import dios.core.fs;
 
 enum uint SYSFILE_MAX_OPEN = 8;
@@ -63,6 +64,9 @@ struct OpenFile
     ExfatEntry entry;
     ExfatFile file;
     ulong pos; // file offset, or the next directory index
+    bool writable; // opened with O_WRONLY / O_RDWR on a volume mounted for writing
+    bool append; // O_APPEND: every write goes to the end
+    FwFile wf; // directory entry and cluster cursor for writing
 }
 
 /// Every task owns an OpenFile[SYSFILE_MAX_OPEN] table; the scheduler points this at the
@@ -113,7 +117,7 @@ OpenFile* sysfileGet(ulong fd) @nogc nothrow
 }
 
 /// Open a file or directory. Returns the descriptor, or -1.
-long sysfileOpen(const(char)* path) @nogc nothrow
+long sysfileOpen(const(char)* path, uint flags) @nogc nothrow
 {
     if (openFiles is null)
         return -1;
@@ -123,9 +127,22 @@ long sysfileOpen(const(char)* path) @nogc nothrow
     if (fd == SYSFILE_MAX_OPEN)
         return -1;
 
+    uint access = flags & FS_O_ACCMODE;
+    if (access > 2 || (access == 0 && (flags & (FS_O_CREATE | FS_O_TRUNC | FS_O_APPEND))))
+        return -1;                      // create/truncate/append need a write mode
+
     OpenFile* f = &openFiles[fd];
+    f.writable = false;
+    f.append = false;
     int slot;
-    if (!fsStat(path, &f.entry, &slot))
+    if (access != 0)
+    {
+        if (fsOpenWrite(path, flags, &slot, &f.entry, &f.wf) != FW_OK)
+            return -1;
+        f.writable = true;
+        f.append = (flags & FS_O_APPEND) != 0;
+    }
+    else if (!fsStat(path, &f.entry, &slot))
         return -1;
     f.isDir = f.entry.isDir;
     f.pos = 0;
@@ -169,6 +186,39 @@ long sysfileRead(ulong fd, void* dst, ulong len) @nogc nothrow
 
 /// whence: 0 = from the start, 1 = from the current position, 2 = from the end.
 /// Returns the new position or -1. Seeking past the end is allowed (reads return 0).
+/// Write at the current position (or at the end with O_APPEND). Returns the bytes written, -1 on error.
+long sysfileWrite(ulong fd, const(void)* src, ulong len) @nogc nothrow
+{
+    OpenFile* f = sysfileGet(fd);
+    if (f is null || !f.writable || f.isDir)
+        return -1;
+    if (len == 0)
+        return 0;
+    ulong off = f.append ? f.wf.size : f.pos;
+    if (off > f.wf.size)
+        return -1;                          // seeking past the end and writing would leave a hole
+
+    long n = fsWriteFile(f.mount, &f.wf, off, src, len);
+    if (n <= 0)
+        return -1;
+    f.pos = off + cast(ulong)n;
+
+    // keep the entry that reads use in step with what was written
+    bool moved = f.entry.firstCluster != f.wf.firstCluster;
+    f.entry.firstCluster = f.wf.firstCluster;
+    f.entry.size = f.wf.size;
+    f.entry.validSize = f.wf.size;
+    if (moved)
+        exfatOpen(&f.file, &f.entry);
+    else
+    {
+        f.file.size = f.wf.size;
+        f.file.cur.size = f.wf.size;
+        f.file.cur.validSize = f.wf.size;
+    }
+    return n;
+}
+
 long sysfileSeek(ulong fd, long offset, ulong whence) @nogc nothrow
 {
     OpenFile* f = sysfileGet(fd);

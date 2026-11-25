@@ -44,6 +44,13 @@ struct ExfatVolume
     ubyte[4096] fatCache;
     ulong tmpSector;            // file system sector held in tmp, or ~0
     ubyte[4096] tmp;
+
+    // FAT32 write support (fat32w.d); unused for exFAT
+    bool writable;              // mounted read-write: dirty flag set, writes allowed
+    uint fatCount;              // number of FAT copies (all of them are written)
+    ulong fatFirst;             // first sector of FAT #0
+    uint fsInfoSector;          // 0 = none
+    uint nextFree;              // where the search for a free cluster starts
 }
 
 struct ExfatEntry

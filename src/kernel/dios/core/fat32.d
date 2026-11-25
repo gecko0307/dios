@@ -26,7 +26,7 @@ DEALINGS IN THE SOFTWARE.
 module dios.core.fat32;
 
 /**
- * Read-only FAT32. It plugs into the exFAT code (exfat.d): a FAT32 volume fills
+ * FAT32 reading (writing is in fat32w.d). It plugs into the exFAT code (exfat.d): a FAT32 volume fills
  * the same ExfatVolume fields (FAT position, cluster geometry, root cluster), so
  * cluster chains, file reads and path lookup are shared. Only mounting and
  * directory parsing (8.3 entries plus long file names) differ.
@@ -134,6 +134,12 @@ bool fat32Mount(ExfatVolume* v, BlockDev* dev, ulong startLba, ulong sectors) @n
     v.serial = exLe32(b + 67);
     v.fat32 = true;
     v.fat32Iter = &fat32Iterate;
+    v.fatFirst = reserved;
+    v.fatCount = numFats;
+    v.fsInfoSector = exLe16(b + 48);
+    if (v.fsInfoSector == 0 || v.fsInfoSector >= reserved || v.fsInfoSector == 0xFFFF)
+        v.fsInfoSector = 0;
+    v.nextFree = 2;
 
     v.label[0] = 0;
     if (b[66] == 0x29)

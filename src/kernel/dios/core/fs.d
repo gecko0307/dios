@@ -12,10 +12,15 @@ module dios.core.fs;
  * also shows the mount points. Every mount has its own generation counter, so unplugging
  * or unmounting one volume invalidates only the open files that live on it. The root
  * itself can never go away.
+ *
+ * Volumes are mounted read-only. A FAT32 volume can be mounted (or remounted) for writing;
+ * the root file system and exFAT volumes are always read-only. The write calls below
+ * (fsOpenWrite, fsCreate, fsUnlink, ...) return FW_OK or one of the FW_ERR_* codes.
  */
 import dios.core.blockdev;
 import dios.core.exfat;
 import dios.core.fat32;
+import dios.core.fat32w;
 import dios.core.ramfs;
 import dios.core.stdio;
 
@@ -32,6 +37,14 @@ enum int FS_ERR_ALREADY = -3;           // that partition is already mounted
 enum int FS_ERR_NO_SLOT = -4;
 enum int FS_ERR_BAD_NAME = -5;          // empty, too long, or contains '/'
 enum int FS_ERR_NAME_TAKEN = -6;
+enum int FS_ERR_NO_WRITE = -7;          // only FAT32 volumes can be mounted for writing
+enum int FS_ERR_IO = -8;
+
+// open flags (Linux values, as in ulib): access mode in the low bits
+enum uint FS_O_ACCMODE = 3;             // 0 = read only, 1 = write only, 2 = read/write
+enum uint FS_O_CREATE = 0x40;
+enum uint FS_O_TRUNC = 0x200;
+enum uint FS_O_APPEND = 0x400;
 
 struct Mount
 {
@@ -161,9 +174,9 @@ void fsDefaultName(uint partIndex, char* out_) @nogc nothrow
     }
 }
 
-/// Mount partition `index` (of `partitions`) as "/name" (`name` may be null or empty for
-/// the default "usb0p1"). Returns the mount slot, or one of the FS_ERR_* codes.
-int fsMountPartition(uint index, const(char)* name = null) @nogc nothrow
+/// Mount partition `index` (of `partitions`) as "/mnt/name" (`name` may be null or empty for
+/// the default "usb0p1"), read-only unless `writable` (FAT32 only). Returns the mount slot, or one of the FS_ERR_* codes.
+int fsMountPartition(uint index, const(char)* name = null, bool writable = false) @nogc nothrow
 {
     if (index >= partitionCount || !partitions[index].valid)
         return FS_ERR_BAD_PARTITION;
@@ -200,6 +213,13 @@ int fsMountPartition(uint index, const(char)* name = null) @nogc nothrow
     if (!exfatMount(v, &blockDevs[p.dev], p.startLba, p.sectors) &&
         !fat32Mount(v, &blockDevs[p.dev], p.startLba, p.sectors))
         return FS_ERR_UNREADABLE;
+    if (writable)
+    {
+        if (!v.fat32)
+            return FS_ERR_NO_WRITE;
+        if (fat32SetWritable(v) != FW_OK)
+            return FS_ERR_IO;
+    }
 
     uint k = 0;
     while (chosen[k] != 0)
@@ -247,6 +267,11 @@ void fsUnmount(int slot) @nogc nothrow
     if (slot < 0 || slot >= cast(int)FS_MAX_MOUNTS || !mounts[slot].mounted)
         return;
     fsCwdLeave(slot);           // before the name is gone
+    if (mounts[slot].vol.writable)
+    {
+        fat32Sync(&mounts[slot].vol, true);     // volume marked clean, device flushed
+        mounts[slot].vol.writable = false;
+    }
     mounts[slot].mounted = false;
     mounts[slot].generation++;
 }
@@ -260,6 +285,7 @@ uint fsUnmountDevice(uint dev) @nogc nothrow
         if (mounts[i].mounted && partitions[mounts[i].partition].dev == dev)
         {
             kprintf("Unmounted /mnt/%s\n", mounts[i].name.ptr);
+            mounts[i].vol.writable = false;     // the device is gone: nothing to sync
             fsUnmount(cast(int)i);
             n++;
         }
@@ -431,4 +457,227 @@ bool fsChdir(const(char)* path) @nogc nothrow
     }
     fsCwd[i] = 0;
     return true;
+}
+
+// ---------------------------------------------------------------------------
+// writing
+// ---------------------------------------------------------------------------
+
+const(char)* fsErrorText(int err) @nogc nothrow
+{
+    switch (err)
+    {
+        case FW_OK: return "ok";
+        case FW_ERR_IO: return "I/O error";
+        case FW_ERR_NOT_FOUND: return "not found";
+        case FW_ERR_EXISTS: return "already exists";
+        case FW_ERR_NO_SPACE: return "no space left on the volume";
+        case FW_ERR_BAD_NAME: return "invalid name (ASCII only, no \\ / : * ? \" < > |)";
+        case FW_ERR_NOT_EMPTY: return "directory not empty";
+        case FW_ERR_IS_DIR: return "is a directory";
+        case FW_ERR_NOT_DIR: return "not a directory";
+        case FW_ERR_RO: return "read-only (only FAT32 volumes mounted with 'rw' can be changed)";
+        default: return "invalid operation";
+    }
+}
+
+/// Split `path` into the mount it lives on, the first cluster of its parent directory and the
+/// last name. Fails with FW_ERR_RO unless the volume is FAT32 and mounted for writing.
+int fsPrepare(const(char)* path, int* slotOut, uint* parentFirst, char* leaf) @nogc nothrow
+{
+    char[FS_PATH_MAX] full;
+    if (!fsResolve(path, full.ptr))
+        return FW_ERR_BAD_NAME;
+
+    const(char)* rest;
+    int slot = fsMountOfPath(full.ptr, &rest);
+    if (slot < 0)
+        return FW_ERR_RO;                       // the root file system, or no such mount
+    Mount* m = &mounts[slot];
+    if (!m.vol.fat32 || !m.vol.writable)
+        return FW_ERR_RO;
+
+    uint len = 0;
+    while (rest[len] != 0)
+        len++;
+    if (len == 0)
+        return FW_ERR_INVALID;                  // the mount point itself
+
+    uint cut = len;
+    while (cut > 0 && rest[cut - 1] != '/')
+        cut--;
+    // rest[cut - 1] is the '/' before the last name; the parent is rest[0 .. cut - 1]
+    if (cut == 0 || len - cut == 0 || len - cut > 255)
+        return FW_ERR_INVALID;
+
+    char[FS_PATH_MAX] parent;
+    for (uint i = 0; i + 1 < cut; i++)
+        parent[i] = rest[i];
+    parent[cut - 1] = 0;
+
+    ExfatEntry pe;
+    if (!exfatLookup(&m.vol, parent.ptr, &pe))
+        return FW_ERR_NOT_FOUND;
+    if (!pe.isDir)
+        return FW_ERR_NOT_DIR;
+
+    for (uint i = 0; i < len - cut; i++)
+        leaf[i] = rest[cut + i];
+    leaf[len - cut] = 0;
+    *slotOut = slot;
+    *parentFirst = pe.firstCluster;
+    return FW_OK;
+}
+
+/// Create an empty file or a directory.
+int fsCreate(const(char)* path, bool isDir) @nogc nothrow
+{
+    int slot;
+    uint parent;
+    char[256] leaf;
+    int r = fsPrepare(path, &slot, &parent, leaf.ptr);
+    if (r != FW_OK)
+        return r;
+    FwLoc loc;
+    return fat32Create(&mounts[slot].vol, parent, leaf.ptr, isDir, &loc);
+}
+
+int fsUnlink(const(char)* path) @nogc nothrow
+{
+    int slot;
+    uint parent;
+    char[256] leaf;
+    int r = fsPrepare(path, &slot, &parent, leaf.ptr);
+    return r != FW_OK ? r : fat32Unlink(&mounts[slot].vol, parent, leaf.ptr);
+}
+
+int fsRmdir(const(char)* path) @nogc nothrow
+{
+    int slot;
+    uint parent;
+    char[256] leaf;
+    int r = fsPrepare(path, &slot, &parent, leaf.ptr);
+    if (r != FW_OK)
+        return r;
+    // never remove the directory the shell is standing in
+    char[FS_PATH_MAX] full;
+    if (fsResolve(path, full.ptr) && fsNameEq(full.ptr, fsCwd.ptr))
+        return FW_ERR_INVALID;
+    return fat32Rmdir(&mounts[slot].vol, parent, leaf.ptr);
+}
+
+int fsRename(const(char)* from, const(char)* to) @nogc nothrow
+{
+    char[FS_PATH_MAX] a;
+    char[FS_PATH_MAX] b;
+    if (!fsResolve(from, a.ptr) || !fsResolve(to, b.ptr))
+        return FW_ERR_BAD_NAME;
+    // a directory cannot move into itself
+    uint n = 0;
+    while (a[n] != 0 && a[n] == b[n])
+        n++;
+    if (a[n] == 0 && (b[n] == 0 || b[n] == '/'))
+        return b[n] == 0 ? FW_ERR_EXISTS : FW_ERR_INVALID;
+
+    int slotA, slotB;
+    uint parentA, parentB;
+    char[256] leafA;
+    char[256] leafB;
+    int r = fsPrepare(a.ptr, &slotA, &parentA, leafA.ptr);
+    if (r != FW_OK)
+        return r;
+    r = fsPrepare(b.ptr, &slotB, &parentB, leafB.ptr);
+    if (r != FW_OK)
+        return r;
+    if (slotA != slotB)
+        return FW_ERR_INVALID;                  // moving between volumes: copy and remove instead
+    return fat32Rename(&mounts[slotA].vol, parentA, leafA.ptr, parentB, leafB.ptr);
+}
+
+/// Open a file for writing: creates it with FS_O_CREATE, empties it with FS_O_TRUNC.
+/// `e` gets the directory entry, `wf` the state for fsWriteFile().
+int fsOpenWrite(const(char)* path, uint flags, int* slotOut, ExfatEntry* e, FwFile* wf) @nogc nothrow
+{
+    int slot;
+    uint parent;
+    char[256] leaf;
+    int r = fsPrepare(path, &slot, &parent, leaf.ptr);
+    if (r != FW_OK)
+        return r;
+    ExfatVolume* v = &mounts[slot].vol;
+
+    FwItem it;
+    r = fat32Lookup(v, parent, leaf.ptr, &it);
+    if (r == FW_ERR_NOT_FOUND)
+    {
+        if (!(flags & FS_O_CREATE))
+            return FW_ERR_NOT_FOUND;
+        r = fat32Create(v, parent, leaf.ptr, false, &it.loc);
+        if (r != FW_OK)
+            return r;
+        it.isDir = false;
+        it.firstCluster = 0;
+        it.size = 0;
+    }
+    else if (r != FW_OK)
+        return r;
+    else if (it.isDir)
+        return FW_ERR_IS_DIR;
+
+    *wf = FwFile.init;
+    wf.loc = it.loc;
+    wf.firstCluster = it.firstCluster;
+    wf.size = it.size;
+    if ((flags & FS_O_TRUNC) && wf.size != 0)
+    {
+        r = fat32Truncate(v, wf, 0);
+        if (r != FW_OK)
+            return r;
+    }
+
+    if (!fsStat(path, e))
+        return FW_ERR_IO;
+    e.firstCluster = wf.firstCluster;
+    e.size = wf.size;
+    e.validSize = wf.size;
+    *slotOut = slot;
+    return FW_OK;
+}
+
+/// Write to a file opened with fsOpenWrite(). Returns the bytes written or a negative FW_ERR_*.
+long fsWriteFile(int slot, FwFile* wf, ulong offset, const(void)* src, ulong len) @nogc nothrow
+{
+    if (slot < 0 || slot >= cast(int)FS_MAX_MOUNTS || !mounts[slot].mounted)
+        return FW_ERR_RO;
+    return fat32WriteFile(&mounts[slot].vol, wf, offset, src, len);
+}
+
+/// Ask every writable volume to flush (the volumes stay marked "in use").
+void fsSyncAll() @nogc nothrow
+{
+    for (uint i = 0; i < FS_MAX_MOUNTS; i++)
+        if (mounts[i].mounted && mounts[i].vol.writable)
+            fat32Sync(&mounts[i].vol, false);
+}
+
+/// Switch a mounted volume between read-write and read-only.
+int fsRemount(int slot, bool writable) @nogc nothrow
+{
+    if (slot < 0 || slot >= cast(int)FS_MAX_MOUNTS || !mounts[slot].mounted)
+        return FS_ERR_BAD_PARTITION;
+    ExfatVolume* v = &mounts[slot].vol;
+    if (writable)
+    {
+        if (!v.fat32)
+            return FS_ERR_NO_WRITE;
+        return fat32SetWritable(v) == FW_OK ? slot : FS_ERR_IO;
+    }
+    if (v.writable)
+    {
+        int r = fat32Sync(v, true);
+        v.writable = false;
+        if (r != FW_OK)
+            return FS_ERR_IO;
+    }
+    return slot;
 }

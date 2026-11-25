@@ -33,6 +33,7 @@ import dios.core.cpu;
 import dios.core.blockdev;
 import dios.core.diag;
 import dios.core.exfat;
+import dios.core.fat32w;
 import dios.core.fs;
 import dios.core.gfxsrv;
 import dios.core.interrupts;
@@ -51,13 +52,14 @@ import dios.core.xhci;
 enum size_t SHELL_LINE_CAPACITY = 128;
 enum size_t SHELL_HISTORY_CAPACITY = 16;
 
-immutable string[37] SHELL_COMMANDS = [
+immutable string[47] SHELL_COMMANDS = [
     "help", "about", "mem", "time", "uptime", "clock",
     "irq", "pci", "history", "echo", "poweroff", "shutdown",
     "reboot", "clear", "cpuinfo", "acpi", "irqstat",
     "sleep", "hexdump", "crash", "version", "ls", "run", "memmap",
     "programs", "disk", "mount", "cd", "pwd", "cat", "dmesg", "usb",
-    "ps", "kill", "fg", "gfx", "umount"
+    "ps", "kill", "fg", "gfx", "umount",
+    "touch", "mkdir", "rmdir", "rm", "mv", "cp", "write", "append", "sync", "remount"
 ];
 
 __gshared char[SHELL_LINE_CAPACITY] shellLine;
@@ -550,7 +552,8 @@ void shellDisk() @nogc nothrow
             cprintf("  [%u] partition %u: start %llu, %llu MiB, %s", i, cast(uint)p.number,
                     p.startLba, (p.sectors * b.sectorSize) >> 20, p.kind.ptr);
             if (ms >= 0)
-                cprintf("   <- mounted as /mnt/%s", mounts[ms].name.ptr);
+                cprintf("   <- mounted as /mnt/%s%s", mounts[ms].name.ptr,
+                        mounts[ms].vol.writable ? " (read-write)".ptr : "".ptr);
             cprintf("\n");
             shown++;
         }
@@ -558,6 +561,26 @@ void shellDisk() @nogc nothrow
             cprintf("  no partitions found\n");
     }
     cprintf("Sector cache: %llu hits, %llu misses\n", blockCacheHits, blockCacheMisses);
+}
+
+// Next blank-separated word of *p, cut off in place; null when there is none.
+char* shellNextWord(char** p) @nogc nothrow
+{
+    char* s = *p;
+    while (*s == ' ' || *s == '\t')
+        s++;
+    if (*s == 0)
+    {
+        *p = s;
+        return null;
+    }
+    char* word = s;
+    while (*s != 0 && *s != ' ' && *s != '\t')
+        s++;
+    if (*s != 0)
+        *s++ = 0;
+    *p = s;
+    return word;
 }
 
 void shellMount(const(char)* args) @nogc nothrow
@@ -572,26 +595,43 @@ void shellMount(const(char)* args) @nogc nothrow
         return;
     }
     ulong n;
-    const(char)* rest = diagParseNumber(args, &n);
+    char* rest = cast(char*)diagParseNumber(args, &n);
     if (rest is null || n >= partitionCount)
     {
-        cprintf("Usage: mount [PARTITION-NUMBER [NAME]]   (numbers in brackets in 'disk')\n");
+        cprintf("Usage: mount [N [NAME] [rw]]   (N: the number in brackets in 'disk')\n");
         return;
     }
-    while (*rest == ' ' || *rest == '\t')
-        rest++;
 
-    int slot = fsMountPartition(cast(uint)n, rest);
+    // up to two more words: a name, and/or "rw" (volumes are read-only unless told otherwise)
+    const(char)* name = null;
+    bool writable = false;
+    for (char* w = shellNextWord(&rest); w !is null; w = shellNextWord(&rest))
+    {
+        if (shellEquals(w, "rw"))
+            writable = true;
+        else if (shellEquals(w, "ro"))
+            writable = false;
+        else if (name is null)
+            name = w;
+        else
+        {
+            cprintf("Usage: mount [N [NAME] [rw]]\n");
+            return;
+        }
+    }
+
+    int slot = fsMountPartition(cast(uint)n, name, writable);
     if (slot >= 0)
     {
-        cprintf("Mounted %s volume '%s' as /mnt/%s\n", mounts[slot].vol.fat32 ? "FAT32".ptr : "exFAT".ptr,
-                mounts[slot].vol.label.ptr, mounts[slot].name.ptr);
+        cprintf("Mounted %s volume '%s' as /mnt/%s%s\n", mounts[slot].vol.fat32 ? "FAT32".ptr : "exFAT".ptr,
+                mounts[slot].vol.label.ptr, mounts[slot].name.ptr, writable ? " (read-write)".ptr : "".ptr);
         return;
     }
     switch (slot)
     {
         case FS_ERR_ALREADY:
-            cprintf("Partition %llu is already mounted as /mnt/%s\n", n, mounts[fsMountOfPartition(cast(uint)n)].name.ptr);
+            cprintf("Partition %llu is already mounted as /mnt/%s ('remount' changes read-write / read-only)\n", n,
+                    mounts[fsMountOfPartition(cast(uint)n)].name.ptr);
             break;
         case FS_ERR_NO_SLOT:
             cprintf("Too many mounts (max %u). Use 'umount NAME' first.\n", FS_MAX_MOUNTS);
@@ -600,15 +640,44 @@ void shellMount(const(char)* args) @nogc nothrow
             cprintf("Bad mount name: use 1..%u characters, no '/' or blanks.\n", FS_NAME_MAX - 1);
             break;
         case FS_ERR_NAME_TAKEN:
-            cprintf("The name %s is already in use.\n", rest);
+            cprintf("The name %s is already in use.\n", name);
             break;
         case FS_ERR_BAD_PARTITION:
             cprintf("No such partition: %llu\n", n);
+            break;
+        case FS_ERR_NO_WRITE:
+            cprintf("Only FAT32 volumes can be mounted read-write.\n");
+            break;
+        case FS_ERR_IO:
+            cprintf("I/O error while preparing the volume for writing (is the stick write protected?).\n");
             break;
         default:
             cprintf("Partition %llu is not a readable exFAT or FAT32 volume.\n", n);
             break;
     }
+}
+
+// remount NAME rw|ro
+void shellRemount(const(char)* args) @nogc nothrow
+{
+    char* rest = cast(char*)args;
+    char* name = shellNextWord(&rest);
+    char* mode = shellNextWord(&rest);
+    if (name !is null && name[0] == '/' && name[1] == 'm' && name[2] == 'n' && name[3] == 't' && name[4] == '/')
+        name += 5;
+    int slot = name is null ? -1 : fsFindMount(name);
+    if (slot < 0 || mode is null || !(shellEquals(mode, "rw") || shellEquals(mode, "ro")))
+    {
+        cprintf("Usage: remount NAME rw|ro\n");
+        return;
+    }
+    int r = fsRemount(slot, shellEquals(mode, "rw"));
+    if (r == FS_ERR_NO_WRITE)
+        cprintf("Only FAT32 volumes can be mounted read-write.\n");
+    else if (r < 0)
+        cprintf("Could not remount /mnt/%s (I/O error).\n", mounts[slot].name.ptr);
+    else
+        cprintf("/mnt/%s is now %s\n", mounts[slot].name.ptr, mounts[slot].vol.writable ? "read-write".ptr : "read-only".ptr);
 }
 
 void shellUmount(const(char)* args) @nogc nothrow
@@ -629,6 +698,205 @@ void shellUmount(const(char)* args) @nogc nothrow
     }
     cprintf("Unmounted /mnt/%s\n", mounts[slot].name.ptr);
     fsUnmount(slot);
+}
+
+void shellFsError(const(char)* what, const(char)* path, int err) @nogc nothrow
+{
+    cprintf("%s: %s: %s\n", what, path, fsErrorText(err));
+}
+
+// If `dst` is an existing directory, make it "dst/name-of-src" in `out_`; otherwise copy dst.
+void shellTargetPath(const(char)* src, const(char)* dst, char* out_) @nogc nothrow
+{
+    uint n = 0;
+    while (dst[n] != 0 && n + 1 < FS_PATH_MAX)
+    {
+        out_[n] = dst[n];
+        n++;
+    }
+    out_[n] = 0;
+
+    ExfatEntry e;
+    if (!fsStat(dst, &e) || !e.isDir)
+        return;
+    uint s = 0;
+    uint base = 0;
+    while (src[s] != 0)
+    {
+        if (src[s] == '/' && src[s + 1] != 0)
+            base = s + 1;
+        s++;
+    }
+    if (n > 0 && out_[n - 1] != '/' && n + 1 < FS_PATH_MAX)
+        out_[n++] = '/';
+    while (src[base] != 0 && src[base] != '/' && n + 1 < FS_PATH_MAX)
+        out_[n++] = src[base++];
+    out_[n] = 0;
+}
+
+void shellTouch(const(char)* path) @nogc nothrow
+{
+    if (path[0] == 0)
+    {
+        cprintf("Usage: touch FILE\n");
+        return;
+    }
+    ExfatEntry e;
+    if (fsStat(path, &e))
+        return;                     // exists (changing the time is not supported)
+    int r = fsCreate(path, false);
+    if (r != FW_OK)
+        shellFsError("touch", path, r);
+}
+
+void shellMkdir(const(char)* path) @nogc nothrow
+{
+    if (path[0] == 0)
+    {
+        cprintf("Usage: mkdir DIR\n");
+        return;
+    }
+    int r = fsCreate(path, true);
+    if (r != FW_OK)
+        shellFsError("mkdir", path, r);
+}
+
+void shellRmdir(const(char)* path) @nogc nothrow
+{
+    if (path[0] == 0)
+    {
+        cprintf("Usage: rmdir DIR\n");
+        return;
+    }
+    int r = fsRmdir(path);
+    if (r != FW_OK)
+        shellFsError("rmdir", path, r);
+}
+
+void shellRm(const(char)* path) @nogc nothrow
+{
+    if (path[0] == 0)
+    {
+        cprintf("Usage: rm FILE\n");
+        return;
+    }
+    int r = fsUnlink(path);
+    if (r != FW_OK)
+        shellFsError("rm", path, r);
+}
+
+void shellMv(const(char)* args) @nogc nothrow
+{
+    char* rest = cast(char*)args;
+    char* src = shellNextWord(&rest);
+    char* dst = shellNextWord(&rest);
+    if (src is null || dst is null)
+    {
+        cprintf("Usage: mv SOURCE DEST   (DEST may be a directory)\n");
+        return;
+    }
+    char[FS_PATH_MAX] target;
+    shellTargetPath(src, dst, target.ptr);
+    int r = fsRename(src, target.ptr);
+    if (r != FW_OK)
+        shellFsError("mv", dst, r);
+}
+
+// write FILE TEXT: replace the file's content by TEXT and a newline; append: add to the end.
+void shellWriteText(const(char)* args, bool append) @nogc nothrow
+{
+    char* rest = cast(char*)args;
+    char* file = shellNextWord(&rest);
+    if (file is null)
+    {
+        cprintf(append ? "Usage: append FILE TEXT\n" : "Usage: write FILE TEXT\n");
+        return;
+    }
+    while (*rest == ' ' || *rest == '\t')
+        rest++;
+
+    ulong len = 0;
+    while (rest[len] != 0 && len + 2 < shellIo.length)
+    {
+        shellIo[len] = cast(ubyte)rest[len];
+        len++;
+    }
+    shellIo[len++] = '\n';
+
+    int slot;
+    ExfatEntry e;
+    FwFile wf;
+    int r = fsOpenWrite(file, FS_O_CREATE | (append ? 0 : FS_O_TRUNC), &slot, &e, &wf);
+    if (r != FW_OK)
+    {
+        shellFsError(append ? "append" : "write", file, r);
+        return;
+    }
+    long w = fsWriteFile(slot, &wf, wf.size, shellIo.ptr, len);
+    if (w != cast(long)len)
+        shellFsError(append ? "append" : "write", file, w < 0 ? cast(int)w : FW_ERR_NO_SPACE);
+}
+
+void shellCp(const(char)* args) @nogc nothrow
+{
+    char* rest = cast(char*)args;
+    char* src = shellNextWord(&rest);
+    char* dst = shellNextWord(&rest);
+    if (src is null || dst is null)
+    {
+        cprintf("Usage: cp SOURCE DEST   (DEST may be a directory)\n");
+        return;
+    }
+    char[FS_PATH_MAX] target;
+    shellTargetPath(src, dst, target.ptr);
+
+    ExfatEntry se;
+    int sslot;
+    if (!fsStat(src, &se, &sslot) || se.isDir)
+    {
+        cprintf("cp: %s: not a file\n", src);
+        return;
+    }
+    char[FS_PATH_MAX] a;
+    char[FS_PATH_MAX] b;
+    if (fsResolve(src, a.ptr) && fsResolve(target.ptr, b.ptr) && fsNameEq(a.ptr, b.ptr))
+    {
+        cprintf("cp: %s and %s are the same file\n", src, target.ptr);
+        return;
+    }
+
+    int dslot;
+    ExfatEntry de;
+    FwFile wf;
+    int r = fsOpenWrite(target.ptr, FS_O_CREATE | FS_O_TRUNC, &dslot, &de, &wf);
+    if (r != FW_OK)
+    {
+        shellFsError("cp", target.ptr, r);
+        return;
+    }
+
+    ExfatFile f;
+    exfatOpen(&f, &se);
+    ulong off = 0;
+    while (off < se.size)
+    {
+        ulong want = se.size - off;
+        if (want > shellIo.length)
+            want = shellIo.length;
+        ulong got = fsRead(sslot, &f, off, shellIo.ptr, want);
+        if (got == 0)
+        {
+            cprintf("cp: read error in %s\n", src);
+            return;
+        }
+        long w = fsWriteFile(dslot, &wf, off, shellIo.ptr, got);
+        if (w != cast(long)got)
+        {
+            shellFsError("cp", target.ptr, w < 0 ? cast(int)w : FW_ERR_NO_SPACE);
+            return;
+        }
+        off += got;
+    }
 }
 
 // Run an ELF file from the mounted volume. Tries `path`, then `path.elf`.
@@ -803,10 +1071,16 @@ void shellExecute() @nogc nothrow
         cprintf("  dmesg [N [SKIP]]    Kernel log (last N lines, SKIP lines before the end)\n");
         cprintf("  usb                 List the USB devices (hubs, keyboards, disks...)\n");
         cprintf("  disk                Show USB disks and partitions\n");
-        cprintf("  mount [N [NAME]]    Mount partition N as /mnt/NAME (no args: mount all volumes found)\n");
-        cprintf("  umount NAME         Unmount /mnt/NAME\n");
+        cprintf("  mount [N [NAME] [rw]]  Mount partition N as /mnt/NAME, read-only unless 'rw' (FAT32 only);\n");
+        cprintf("                      no args: mount all volumes found (read-only)\n");
+        cprintf("  remount NAME rw|ro  Switch a mounted volume between read-write and read-only\n");
+        cprintf("  umount NAME         Unmount /mnt/NAME (flushes a read-write volume)\n");
+        cprintf("  sync                Flush read-write volumes to the disk\n");
         cprintf("  ls [PATH]           List a directory ('ls /mnt' shows the mounted disks)\n");
         cprintf("  cat FILE            Print a text file\n");
+        cprintf("  touch FILE | mkdir DIR | rmdir DIR | rm FILE   Create / remove (read-write FAT32 volumes only)\n");
+        cprintf("  mv SRC DEST | cp SRC DEST   Rename or move within a volume | copy (DEST may be a directory)\n");
+        cprintf("  write FILE TEXT     Replace FILE's content by TEXT (append FILE TEXT adds a line)\n");
         cprintf("  cd [DIR]            Change the current directory\n");
         cprintf("  pwd                 Show the current directory\n");
         cprintf("  run NAME [ARGS] [&] Run /bin/NAME or an ELF by path (& = background); plain NAME works too\n");
@@ -1008,6 +1282,29 @@ void shellExecute() @nogc nothrow
     {
         shellCat(args);
     }
+    else if (shellEquals(shellLine.ptr, "touch"))
+        shellTouch(args);
+    else if (shellEquals(shellLine.ptr, "mkdir"))
+        shellMkdir(args);
+    else if (shellEquals(shellLine.ptr, "rmdir"))
+        shellRmdir(args);
+    else if (shellEquals(shellLine.ptr, "rm"))
+        shellRm(args);
+    else if (shellEquals(shellLine.ptr, "mv"))
+        shellMv(args);
+    else if (shellEquals(shellLine.ptr, "cp"))
+        shellCp(args);
+    else if (shellEquals(shellLine.ptr, "write"))
+        shellWriteText(args, false);
+    else if (shellEquals(shellLine.ptr, "append"))
+        shellWriteText(args, true);
+    else if (shellEquals(shellLine.ptr, "sync"))
+    {
+        fsSyncAll();
+        cprintf("Synced.\n");
+    }
+    else if (shellEquals(shellLine.ptr, "remount"))
+        shellRemount(args);
     else if (shellEquals(shellLine.ptr, "pwd"))
     {
         cprintf("%s\n", fsCwd.ptr);

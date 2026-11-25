@@ -1,0 +1,1273 @@
+module dios.core.fat32w;
+
+/**
+ * FAT32 write support: create, write, truncate, delete and rename files, make and remove
+ * directories. It works on the same ExfatVolume that fat32.d / exfat.d read, and it is
+ * deliberately simple:
+ *
+ *  - Every change goes to the disk at once (write through, see blockWrite()); nothing is
+ *    kept dirty in memory, so there is no flush step except asking the device to flush.
+ *  - Both FAT copies are always written.
+ *  - Order of writes is chosen so that an interrupted operation leaks clusters or leaves a
+ *    harmless duplicate rather than a cross-linked file: a new entry is written after its
+ *    clusters are allocated, a deleted entry is marked before its clusters are freed.
+ *  - Long file names are written (ASCII only), with generated 8.3 names ("LONGFI~1.TXT").
+ *  - A volume is marked "not cleanly unmounted" (FAT[1] bit 27) while it is writable and
+ *    marked clean again by fat32Sync(v, true) at umount.
+ *  - The free cluster count in FSInfo is written as "unknown" (0xFFFFFFFF), which the
+ *    specification allows; the next-free hint is kept.
+ *
+ * Limits: no timestamps other than "now" from the RTC, files up to 4 GiB - 1, a file
+ * cannot be extended by seeking past its end, and only one open handle should write to a
+ * file at a time.
+ */
+import dios.core.blockdev;
+import dios.core.datetime;
+import dios.core.exfat;
+import dios.core.fat32;
+import dios.core.mem;
+import dios.core.stdio;
+
+enum int FW_OK = 0;
+enum int FW_ERR_IO = -1;
+enum int FW_ERR_NOT_FOUND = -2;
+enum int FW_ERR_EXISTS = -3;
+enum int FW_ERR_NO_SPACE = -4;
+enum int FW_ERR_BAD_NAME = -5;
+enum int FW_ERR_NOT_EMPTY = -6;
+enum int FW_ERR_IS_DIR = -7;
+enum int FW_ERR_NOT_DIR = -8;
+enum int FW_ERR_RO = -9;            // volume is not mounted for writing
+enum int FW_ERR_INVALID = -10;
+
+enum uint FW_MAX_SET = 22;          // 20 long name entries + the short entry + a terminator
+
+/// Where the directory entries of a file or directory live.
+struct FwLoc
+{
+    uint dirFirst;                  // first cluster of the directory that holds them
+    ulong firstPos;                 // byte position in that directory of the first entry (long name or short)
+    ulong shortPos;                 // byte position of the short (8.3) entry
+    uint entries;                   // 32-byte entries of the set, the short one included
+    ubyte[32] ent;                  // copy of the short entry
+}
+
+/// An open file that may be written.
+struct FwFile
+{
+    FwLoc loc;
+    uint firstCluster;              // 0 for an empty file
+    ulong size;
+    bool curValid;                  // cursor into the cluster chain, so appends do not walk it from the start
+    uint curIdx;
+    uint curCluster;
+}
+
+struct FwItem
+{
+    char[256] name;
+    FwLoc loc;
+    bool isDir;
+    uint firstCluster;
+    ulong size;
+    uint mtime;
+}
+
+struct FwScan
+{
+    ExfatCursor cur;
+    ulong dirBytes;
+    ulong pos;
+    char[272] lfn;
+    bool lfnActive;
+    uint lfnNext;
+    ubyte lfnSum;
+    ulong lfnStart;
+    uint lfnCount;
+}
+
+__gshared ubyte[4096] fwZero;       // stays all zero
+
+extern(C):
+
+// ---------------------------------------------------------------------------
+// raw writes
+// ---------------------------------------------------------------------------
+
+bool fwWriteSectors(ExfatVolume* v, ulong fsSector, uint count, const(void)* src) @nogc nothrow
+{
+    return blockWrite(v.dev, v.partStart + fsSector * v.devPerSector, count * v.devPerSector, src);
+}
+
+/// Write `len` bytes at byte offset `off` from the start of the volume (read-modify-write
+/// for partial sectors; the sector cache in v.tmp stays coherent).
+bool fwWriteBytes(ExfatVolume* v, ulong off, const(void)* src, ulong len) @nogc nothrow
+{
+    const(ubyte)* in_ = cast(const(ubyte)*)src;
+    ulong ssz = 1UL << v.sectorShift;
+
+    while (len != 0)
+    {
+        ulong sector = off >> v.sectorShift;
+        ulong inSector = off & (ssz - 1);
+
+        if (inSector == 0 && len >= ssz)
+        {
+            ulong n = len >> v.sectorShift;
+            if (n > 128)
+                n = 128;
+            bool ok = fwWriteSectors(v, sector, cast(uint)n, in_);
+            v.tmpSector = ~0UL;
+            if (!ok)
+                return false;
+            ulong bytes = n << v.sectorShift;
+            in_ += bytes;
+            off += bytes;
+            len -= bytes;
+        }
+        else
+        {
+            if (v.tmpSector != sector)
+            {
+                if (!exReadSectors(v, sector, 1, v.tmp.ptr))
+                    return false;
+                v.tmpSector = sector;
+            }
+            ulong n = ssz - inSector;
+            if (n > len)
+                n = len;
+            memcpy(v.tmp.ptr + inSector, in_, cast(size_t)n);
+            if (!fwWriteSectors(v, sector, 1, v.tmp.ptr))
+            {
+                v.tmpSector = ~0UL;         // the sector on disk is in an unknown state
+                return false;
+            }
+            in_ += n;
+            off += n;
+            len -= n;
+        }
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// the FAT
+// ---------------------------------------------------------------------------
+
+bool fwFatLoad(ExfatVolume* v, uint cluster, ulong* sectorOut, uint* inSectorOut) @nogc nothrow
+{
+    ulong byteOff = (v.fatOffset << v.sectorShift) + cast(ulong)cluster * 4;
+    ulong sector = byteOff >> v.sectorShift;
+    if (v.fatCacheSector != sector)
+    {
+        if (!exReadSectors(v, sector, 1, v.fatCache.ptr))
+            return false;
+        v.fatCacheSector = sector;
+    }
+    *sectorOut = sector;
+    *inSectorOut = cast(uint)(byteOff & ((1UL << v.sectorShift) - 1));
+    return true;
+}
+
+/// FAT entry of `cluster` (28 bits).
+bool fwFatGet(ExfatVolume* v, uint cluster, uint* val) @nogc nothrow
+{
+    ulong sector;
+    uint at;
+    if (!fwFatLoad(v, cluster, &sector, &at))
+        return false;
+    *val = exLe32(v.fatCache.ptr + at) & 0x0FFFFFFF;
+    return true;
+}
+
+/// Set the FAT entry of `cluster` in every FAT copy.
+bool fwFatSet(ExfatVolume* v, uint cluster, uint value) @nogc nothrow
+{
+    ulong sector;
+    uint at;
+    if (!fwFatLoad(v, cluster, &sector, &at))
+        return false;
+    ubyte* p = v.fatCache.ptr + at;
+    uint nv = (exLe32(p) & 0xF0000000) | (value & 0x0FFFFFFF);
+    p[0] = cast(ubyte)nv;
+    p[1] = cast(ubyte)(nv >> 8);
+    p[2] = cast(ubyte)(nv >> 16);
+    p[3] = cast(ubyte)(nv >> 24);
+
+    ulong rel = sector - v.fatOffset;
+    for (uint k = 0; k < v.fatCount; k++)
+    {
+        if (!fwWriteSectors(v, v.fatFirst + cast(ulong)k * v.fatLength + rel, 1, v.fatCache.ptr))
+        {
+            v.fatCacheSector = ~0UL;
+            return false;
+        }
+    }
+    return true;
+}
+
+bool fwIsEnd(uint val) @nogc nothrow
+{
+    return val >= 0x0FFFFFF8;
+}
+
+bool fwValidCluster(ExfatVolume* v, uint c) @nogc nothrow
+{
+    return c >= 2 && c < v.clusterCount + 2;
+}
+
+/// Take a free cluster and mark it as the end of a chain.
+int fwAlloc(ExfatVolume* v, uint* out_) @nogc nothrow
+{
+    uint c = v.nextFree;
+    if (!fwValidCluster(v, c))
+        c = 2;
+    for (uint n = 0; n < v.clusterCount; n++)
+    {
+        uint val;
+        if (!fwFatGet(v, c, &val))
+            return FW_ERR_IO;
+        if (val == 0)
+        {
+            if (!fwFatSet(v, c, 0x0FFFFFFF))
+                return FW_ERR_IO;
+            v.nextFree = c + 1;
+            *out_ = c;
+            return FW_OK;
+        }
+        c++;
+        if (c >= v.clusterCount + 2)
+            c = 2;
+    }
+    return FW_ERR_NO_SPACE;
+}
+
+/// Free a whole chain starting at `first`.
+void fwFreeChain(ExfatVolume* v, uint first) @nogc nothrow
+{
+    uint c = first;
+    for (uint n = 0; n < v.clusterCount && fwValidCluster(v, c); n++)
+    {
+        uint next;
+        if (!fwFatGet(v, c, &next))
+            return;
+        if (!fwFatSet(v, c, 0))
+            return;
+        if (c < v.nextFree)
+            v.nextFree = c;
+        if (next == 0 || fwIsEnd(next))
+            return;
+        c = next;
+    }
+}
+
+bool fwZeroCluster(ExfatVolume* v, uint cl) @nogc nothrow
+{
+    ulong first = v.heapOffset + (cast(ulong)(cl - 2) << v.clusterShift);
+    uint total = 1u << v.clusterShift;
+    uint chunk = 4096u >> v.sectorShift;                // sectors that fit in fwZero
+    for (uint i = 0; i < total; i += chunk)
+    {
+        uint n = total - i < chunk ? total - i : chunk;
+        if (!fwWriteSectors(v, first + i, n, fwZero.ptr))
+            return false;
+    }
+    v.tmpSector = ~0UL;
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// directories as byte streams
+// ---------------------------------------------------------------------------
+
+bool fwDirIo(ExfatVolume* v, uint dirFirst, ulong pos, void* buf, ulong len, bool write) @nogc nothrow
+{
+    ExfatCursor cur;
+    cur.valid = false;
+    cur.noChain = false;
+    cur.firstCluster = dirFirst;
+    cur.index = 0;
+    cur.cluster = dirFirst;
+    cur.size = ~0UL;
+    cur.validSize = ~0UL;
+
+    ubyte* p = cast(ubyte*)buf;
+    ulong cs = exClusterSize(v);
+    while (len != 0)
+    {
+        uint cl = exSeek(v, &cur, cast(uint)(pos / cs));
+        if (cl == 0)
+            return false;
+        ulong inCl = pos % cs;
+        ulong n = cs - inCl;
+        if (n > len)
+            n = len;
+        ulong off = exClusterOffset(v, cl) + inCl;
+        if (write ? !fwWriteBytes(v, off, p, n) : !exReadBytes(v, off, p, n))
+            return false;
+        p += n;
+        pos += n;
+        len -= n;
+    }
+    return true;
+}
+
+void fwScanInit(ExfatVolume* v, FwScan* sc, uint dirFirst) @nogc nothrow
+{
+    ulong bytes = exChainBytes(v, dirFirst);
+    sc.cur.valid = false;
+    sc.cur.noChain = false;
+    sc.cur.firstCluster = dirFirst;
+    sc.cur.index = 0;
+    sc.cur.cluster = dirFirst;
+    sc.cur.size = bytes;
+    sc.cur.validSize = bytes;
+    sc.dirBytes = bytes;
+    sc.pos = 0;
+    sc.lfnActive = false;
+}
+
+char fwLower(char c) @nogc nothrow
+{
+    return (c >= 'A' && c <= 'Z') ? cast(char)(c + 32) : c;
+}
+
+/// Next live entry of a directory (long name resolved). 1 = item filled, 0 = end, negative = error.
+int fwScanNext(ExfatVolume* v, FwScan* sc, FwItem* it) @nogc nothrow
+{
+    ubyte[32] ent;
+    for (; sc.pos + 32 <= sc.dirBytes; sc.pos += 32)
+    {
+        ulong pos = sc.pos;
+        if (exStreamRead(v, &sc.cur, pos, ent.ptr, 32) != 32)
+            return FW_ERR_IO;
+
+        ubyte first = ent[0];
+        if (first == 0)
+            return 0;
+        if (first == 0xE5)
+        {
+            sc.lfnActive = false;
+            continue;
+        }
+
+        ubyte attr = ent[11];
+        if ((attr & 0x3F) == FAT_ATTR_LFN)
+        {
+            uint seq = first & 0x3F;
+            if (first & 0x40)
+            {
+                if (seq == 0 || seq > 20)
+                {
+                    sc.lfnActive = false;
+                    continue;
+                }
+                for (uint i = 0; i < sc.lfn.length; i++)
+                    sc.lfn[i] = 0;
+                sc.lfnActive = true;
+                sc.lfnSum = ent[13];
+                sc.lfnStart = pos;
+                sc.lfnCount = seq;
+            }
+            else if (!sc.lfnActive || seq != sc.lfnNext || ent[13] != sc.lfnSum)
+            {
+                sc.lfnActive = false;
+                continue;
+            }
+            sc.lfnNext = seq - 1;
+
+            uint at = (seq - 1) * 13;
+            uint k = 0;
+            for (uint i = 0; i < 13; i++)
+            {
+                uint off = i < 5 ? 1 + i * 2 : (i < 11 ? 14 + (i - 5) * 2 : 28 + (i - 11) * 2);
+                uint ch = exLe16(ent.ptr + off);
+                if (ch == 0 || ch == 0xFFFF)
+                    break;
+                sc.lfn[at + k] = fat32Ascii(ch);
+                k++;
+            }
+            continue;
+        }
+
+        bool haveLfn = sc.lfnActive && sc.lfnNext == 0 && sc.lfnSum == fat32Checksum(ent.ptr);
+        sc.lfnActive = false;
+
+        if (attr & FAT_ATTR_VOLUME)
+            continue;
+        if (first == '.' && (ent[1] == ' ' || (ent[1] == '.' && ent[2] == ' ')))
+            continue;
+
+        uint n = 0;
+        if (haveLfn)
+        {
+            while (n < 255 && sc.lfn[n] != 0)
+            {
+                it.name[n] = sc.lfn[n];
+                n++;
+            }
+        }
+        if (n == 0)
+        {
+            bool lowBase = (ent[12] & 0x08) != 0;
+            bool lowExt = (ent[12] & 0x10) != 0;
+            uint baseLen = 8;
+            while (baseLen > 0 && ent[baseLen - 1] == ' ')
+                baseLen--;
+            uint extLen = 3;
+            while (extLen > 0 && ent[8 + extLen - 1] == ' ')
+                extLen--;
+            for (uint i = 0; i < baseLen; i++)
+            {
+                uint c = (i == 0 && first == 0x05) ? 0xE5 : ent[i];
+                char ch = fat32Ascii(c);
+                it.name[n++] = (lowBase && ch >= 'A' && ch <= 'Z') ? cast(char)(ch + 32) : ch;
+            }
+            if (extLen != 0)
+            {
+                it.name[n++] = '.';
+                for (uint i = 0; i < extLen; i++)
+                {
+                    char ch = fat32Ascii(ent[8 + i]);
+                    it.name[n++] = (lowExt && ch >= 'A' && ch <= 'Z') ? cast(char)(ch + 32) : ch;
+                }
+            }
+        }
+        it.name[n] = 0;
+        if (n == 0)
+            continue;
+
+        it.loc.firstPos = haveLfn ? sc.lfnStart : pos;
+        it.loc.shortPos = pos;
+        it.loc.entries = haveLfn ? sc.lfnCount + 1 : 1;
+        for (uint i = 0; i < 32; i++)
+            it.loc.ent[i] = ent[i];
+        it.isDir = (attr & FAT_ATTR_DIR) != 0;
+        it.firstCluster = (exLe16(ent.ptr + 20) << 16) | exLe16(ent.ptr + 26);
+        it.mtime = (exLe16(ent.ptr + 24) << 16) | exLe16(ent.ptr + 22);
+        it.size = it.isDir ? 0 : exLe32(ent.ptr + 28);
+        sc.pos += 32;
+        return 1;
+    }
+    return 0;
+}
+
+uint fwStrLen(const(char)* s) @nogc nothrow
+{
+    uint n = 0;
+    while (s[n] != 0)
+        n++;
+    return n;
+}
+
+/// Find `name` (case-insensitive) in the directory that starts at cluster `dirFirst`.
+int fat32Lookup(ExfatVolume* v, uint dirFirst, const(char)* name, FwItem* it) @nogc nothrow
+{
+    uint len = fwStrLen(name);
+    FwScan sc;
+    fwScanInit(v, &sc, dirFirst);
+    for (;;)
+    {
+        int r = fwScanNext(v, &sc, it);
+        if (r < 0)
+            return r;
+        if (r == 0)
+            return FW_ERR_NOT_FOUND;
+        uint i = 0;
+        while (i < len && it.name[i] != 0 && fwLower(it.name[i]) == fwLower(name[i]))
+            i++;
+        if (i == len && it.name[i] == 0)
+        {
+            it.loc.dirFirst = dirFirst;
+            return FW_OK;
+        }
+    }
+}
+
+bool fwDirEmpty(ExfatVolume* v, uint dirFirst) @nogc nothrow
+{
+    FwScan sc;
+    FwItem it;
+    fwScanInit(v, &sc, dirFirst);
+    return fwScanNext(v, &sc, &it) == 0;
+}
+
+// An 8.3 name that some live entry already has?
+bool fwShortTaken(ExfatVolume* v, uint dirFirst, const(ubyte)* s11) @nogc nothrow
+{
+    FwScan sc;
+    fwScanInit(v, &sc, dirFirst);
+    ubyte[32] ent;
+    for (ulong pos = 0; pos + 32 <= sc.dirBytes; pos += 32)
+    {
+        if (exStreamRead(v, &sc.cur, pos, ent.ptr, 32) != 32)
+            return true;                    // cannot tell: assume taken
+        if (ent[0] == 0)
+            return false;
+        if (ent[0] == 0xE5 || (ent[11] & 0x3F) == FAT_ATTR_LFN || (ent[11] & FAT_ATTR_VOLUME))
+            continue;
+        uint i = 0;
+        while (i < 11 && ent[i] == s11[i])
+            i++;
+        if (i == 11)
+            return true;
+    }
+    return false;
+}
+
+// ---------------------------------------------------------------------------
+// names
+// ---------------------------------------------------------------------------
+
+bool fwValidLongName(const(char)* name, uint len) @nogc nothrow
+{
+    if (len == 0 || len > 255)
+        return false;
+    for (uint i = 0; i < len; i++)
+    {
+        ubyte c = cast(ubyte)name[i];
+        if (c < 32 || c >= 127)
+            return false;                   // ASCII only
+        if (c == '\\' || c == '/' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|')
+            return false;
+    }
+    if (name[len - 1] == '.' || name[len - 1] == ' ' || name[0] == ' ')
+        return false;
+    return true;
+}
+
+bool fwIsShortChar(char c) @nogc nothrow
+{
+    if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))
+        return true;
+    const(char)* ok = "$%'-_@~!(){}^#&";
+    for (uint i = 0; ok[i] != 0; i++)
+        if (ok[i] == c)
+            return true;
+    return false;
+}
+
+char fwUpper(char c) @nogc nothrow
+{
+    return (c >= 'a' && c <= 'z') ? cast(char)(c - 32) : c;
+}
+
+/// Choose the 8.3 name for `name`. `needLfn` says whether long name entries are needed too.
+int fwBuildShort(ExfatVolume* v, uint dirFirst, const(char)* name, uint len,
+                 ubyte* s11, ubyte* nt, bool* needLfn) @nogc nothrow
+{
+    int dot = -1;
+    for (uint i = len; i > 0; i--)
+    {
+        if (name[i - 1] == '.')
+        {
+            dot = cast(int)(i - 1);
+            break;
+        }
+    }
+    uint baseStart = 0;
+    while (baseStart < len && name[baseStart] == '.')
+        baseStart++;
+    uint baseEnd = len;
+    uint extStart = len;
+    if (dot > cast(int)baseStart)
+    {
+        baseEnd = cast(uint)dot;
+        extStart = cast(uint)dot + 1;
+    }
+    uint extEnd = len;
+
+    // 1. The name fits 8.3 as it is (apart from letter case)?
+    bool lossless = name[0] != '.' && baseEnd >= 1 && baseEnd <= 8 && extEnd - extStart <= 3;
+    bool upB = false, loB = false, upE = false, loE = false;
+    for (uint i = 0; lossless && i < baseEnd; i++)
+    {
+        if (!fwIsShortChar(name[i]))
+            lossless = false;
+        else if (name[i] >= 'A' && name[i] <= 'Z')
+            upB = true;
+        else if (name[i] >= 'a' && name[i] <= 'z')
+            loB = true;
+    }
+    for (uint i = extStart; lossless && i < extEnd; i++)
+    {
+        if (!fwIsShortChar(name[i]))
+            lossless = false;
+        else if (name[i] >= 'A' && name[i] <= 'Z')
+            upE = true;
+        else if (name[i] >= 'a' && name[i] <= 'z')
+            loE = true;
+    }
+    if (lossless)
+    {
+        for (uint i = 0; i < 11; i++)
+            s11[i] = ' ';
+        for (uint i = 0; i < baseEnd; i++)
+            s11[i] = cast(ubyte)fwUpper(name[i]);
+        for (uint i = extStart; i < extEnd; i++)
+            s11[8 + i - extStart] = cast(ubyte)fwUpper(name[i]);
+        if (s11[0] == 0xE5)
+            s11[0] = 0x05;
+        bool mixed = (upB && loB) || (upE && loE);
+        *needLfn = mixed;
+        *nt = cast(ubyte)(mixed ? 0 : ((loB ? 0x08 : 0) | (loE ? 0x10 : 0)));
+        if (!fwShortTaken(v, dirFirst, s11))
+            return FW_OK;
+        // taken (by an entry with a different long name): fall through to a numeric tail
+    }
+
+    // 2. Lossy: "BASENA~1.EXT"
+    char[8] base;
+    uint baseCount = 0;
+    for (uint i = baseStart; i < baseEnd && baseCount < 8; i++)
+    {
+        char c = name[i];
+        if (c == ' ' || c == '.')
+            continue;
+        base[baseCount++] = fwIsShortChar(c) ? fwUpper(c) : '_';
+    }
+    if (baseCount == 0)
+        base[baseCount++] = '_';
+
+    char[3] ext;
+    uint extCount = 0;
+    for (uint i = extStart; i < extEnd && extCount < 3; i++)
+    {
+        char c = name[i];
+        if (c == ' ' || c == '.')
+            continue;
+        ext[extCount++] = fwIsShortChar(c) ? fwUpper(c) : '_';
+    }
+
+    for (uint n = 1; n < 100000; n++)
+    {
+        char[6] digits;
+        uint nd = 0;
+        uint t = n;
+        while (t != 0)
+        {
+            digits[nd++] = cast(char)('0' + t % 10);
+            t /= 10;
+        }
+        uint keep = 7 - nd;
+        if (keep > baseCount)
+            keep = baseCount;
+
+        for (uint i = 0; i < 11; i++)
+            s11[i] = ' ';
+        for (uint i = 0; i < keep; i++)
+            s11[i] = cast(ubyte)base[i];
+        s11[keep] = '~';
+        for (uint i = 0; i < nd; i++)
+            s11[keep + 1 + i] = cast(ubyte)digits[nd - 1 - i];
+        for (uint i = 0; i < extCount; i++)
+            s11[8 + i] = cast(ubyte)ext[i];
+
+        if (!fwShortTaken(v, dirFirst, s11))
+        {
+            *needLfn = true;
+            *nt = 0;
+            return FW_OK;
+        }
+    }
+    return FW_ERR_EXISTS;
+}
+
+uint fwDosNow() @nogc nothrow
+{
+    DateTime dt;
+    datetimeNow(&dt);
+    uint year = dt.year < 1980 ? 1980 : dt.year;
+    uint date = ((year - 1980) << 9) | (cast(uint)dt.month << 5) | dt.day;
+    uint time = (cast(uint)dt.hour << 11) | (cast(uint)dt.minute << 5) | (dt.second / 2);
+    return (date << 16) | time;
+}
+
+void fwPut16(ubyte* p, uint v) @nogc nothrow
+{
+    p[0] = cast(ubyte)v;
+    p[1] = cast(ubyte)(v >> 8);
+}
+
+void fwPut32(ubyte* p, uint v) @nogc nothrow
+{
+    p[0] = cast(ubyte)v;
+    p[1] = cast(ubyte)(v >> 8);
+    p[2] = cast(ubyte)(v >> 16);
+    p[3] = cast(ubyte)(v >> 24);
+}
+
+/// Fill a fresh short entry.
+void fwFreshEntry(ubyte* e, ubyte attr, uint cluster, uint size, uint dosTime) @nogc nothrow
+{
+    for (uint i = 0; i < 32; i++)
+        e[i] = 0;
+    e[11] = attr;
+    fwPut16(e + 14, dosTime & 0xFFFF);          // created
+    fwPut16(e + 16, dosTime >> 16);
+    fwPut16(e + 18, dosTime >> 16);             // accessed
+    fwPut16(e + 20, cluster >> 16);
+    fwPut16(e + 22, dosTime & 0xFFFF);          // modified
+    fwPut16(e + 24, dosTime >> 16);
+    fwPut16(e + 26, cluster & 0xFFFF);
+    fwPut32(e + 28, size);
+}
+
+/// Entries of one name: long name entries (if needed) followed by the short entry. If `tmpl`
+/// is given, the short entry starts as a copy of it (rename); otherwise it is `fresh`.
+uint fwBuildSet(const(char)* name, uint len, const(ubyte)* s11, ubyte nt, bool needLfn,
+                const(ubyte)* tmpl, const(ubyte)* fresh, ubyte* out_) @nogc nothrow
+{
+    uint lfnCount = needLfn ? (len + 12) / 13 : 0;
+    ubyte sum = fat32Checksum(s11);
+
+    for (uint i = 0; i < lfnCount; i++)
+    {
+        uint seq = lfnCount - i;
+        ubyte* e = out_ + i * 32;
+        for (uint k = 0; k < 32; k++)
+            e[k] = 0;
+        e[0] = cast(ubyte)(seq | (i == 0 ? 0x40 : 0));
+        e[11] = FAT_ATTR_LFN;
+        e[13] = sum;
+        for (uint k = 0; k < 13; k++)
+        {
+            uint idx = (seq - 1) * 13 + k;
+            uint ch = idx < len ? cast(ubyte)name[idx] : (idx == len ? 0x0000 : 0xFFFF);
+            uint off = k < 5 ? 1 + k * 2 : (k < 11 ? 14 + (k - 5) * 2 : 28 + (k - 11) * 2);
+            fwPut16(e + off, ch);
+        }
+    }
+
+    ubyte* se = out_ + lfnCount * 32;
+    const(ubyte)* src = tmpl !is null ? tmpl : fresh;
+    for (uint i = 0; i < 32; i++)
+        se[i] = src[i];
+    for (uint i = 0; i < 11; i++)
+        se[i] = s11[i];
+    se[12] = nt;
+    return lfnCount + 1;
+}
+
+// ---------------------------------------------------------------------------
+// directory slots
+// ---------------------------------------------------------------------------
+
+/// Make the directory chain at least `bytes` long (new clusters are zeroed).
+int fwGrowDir(ExfatVolume* v, uint dirFirst, ulong bytes) @nogc nothrow
+{
+    ulong cs = exClusterSize(v);
+    uint last = dirFirst;
+    ulong have = 0;
+    uint c = dirFirst;
+    while (fwValidCluster(v, c) && have < v.clusterCount * cs)
+    {
+        have += cs;
+        last = c;
+        c = exFatNext(v, c);
+        if (c == 0)
+            break;
+    }
+    while (have < bytes)
+    {
+        uint nc;
+        int r = fwAlloc(v, &nc);
+        if (r != FW_OK)
+            return r;
+        if (!fwZeroCluster(v, nc) || !fwFatSet(v, last, nc))
+        {
+            fwFreeChain(v, nc);
+            return FW_ERR_IO;
+        }
+        last = nc;
+        have += cs;
+    }
+    return FW_OK;
+}
+
+/// Find room for `count` consecutive entries (growing the directory if it is full).
+/// `terminate` is set when the block starts at the end-of-directory marker: the entry after
+/// the block must then be written as zero so old garbage behind the marker stays invisible.
+int fwAllocSlots(ExfatVolume* v, uint dirFirst, uint count, ulong* posOut, bool* terminate) @nogc nothrow
+{
+    FwScan sc;
+    fwScanInit(v, &sc, dirFirst);
+    ubyte[32] ent;
+    uint run = 0;
+    ulong runStart = 0;
+    *terminate = false;
+
+    for (ulong pos = 0; pos + 32 <= sc.dirBytes; pos += 32)
+    {
+        if (exStreamRead(v, &sc.cur, pos, ent.ptr, 32) != 32)
+            return FW_ERR_IO;
+        if (ent[0] == 0)
+        {
+            if (run == 0)
+                runStart = pos;
+            *posOut = runStart;
+            *terminate = true;
+            return fwGrowDir(v, dirFirst, runStart + cast(ulong)(count + 1) * 32);
+        }
+        if (ent[0] == 0xE5)
+        {
+            if (run == 0)
+                runStart = pos;
+            run++;
+            if (run >= count)
+            {
+                *posOut = runStart;
+                return FW_OK;
+            }
+        }
+        else
+            run = 0;
+    }
+
+    // The chain is full: the free run (if any) continues into new clusters.
+    if (run == 0)
+        runStart = sc.dirBytes;
+    *posOut = runStart;
+    return fwGrowDir(v, dirFirst, runStart + cast(ulong)count * 32);
+}
+
+int fwWriteSet(ExfatVolume* v, uint dirFirst, const(char)* name, uint len, const(ubyte)* s11, ubyte nt,
+               bool needLfn, const(ubyte)* tmpl, const(ubyte)* fresh, FwLoc* loc) @nogc nothrow
+{
+    ubyte[FW_MAX_SET * 32] set;
+    uint n = fwBuildSet(name, len, s11, nt, needLfn, tmpl, fresh, set.ptr);
+
+    ulong pos;
+    bool terminate;
+    int r = fwAllocSlots(v, dirFirst, n, &pos, &terminate);
+    if (r != FW_OK)
+        return r;
+
+    uint bytes = n * 32;
+    if (terminate)
+    {
+        for (uint i = 0; i < 32; i++)
+            set[bytes + i] = 0;
+        bytes += 32;
+    }
+    if (!fwDirIo(v, dirFirst, pos, set.ptr, bytes, true))
+        return FW_ERR_IO;
+
+    loc.dirFirst = dirFirst;
+    loc.firstPos = pos;
+    loc.shortPos = pos + cast(ulong)(n - 1) * 32;
+    loc.entries = n;
+    for (uint i = 0; i < 32; i++)
+        loc.ent[i] = set[(n - 1) * 32 + i];
+    return FW_OK;
+}
+
+/// Mark the entries of a set as deleted.
+bool fwDeleteSet(ExfatVolume* v, const(FwLoc)* loc) @nogc nothrow
+{
+    ubyte[FW_MAX_SET * 32] set;
+    uint bytes = loc.entries * 32;
+    if (loc.entries == 0 || loc.entries > 21)
+        return false;
+    if (!fwDirIo(v, loc.dirFirst, loc.firstPos, set.ptr, bytes, false))
+        return false;
+    for (uint i = 0; i < loc.entries; i++)
+        set[i * 32] = 0xE5;
+    return fwDirIo(v, loc.dirFirst, loc.firstPos, set.ptr, bytes, true);
+}
+
+// ---------------------------------------------------------------------------
+// operations
+// ---------------------------------------------------------------------------
+
+/// Create an empty file or directory `name` in directory `dirFirst`.
+int fat32Create(ExfatVolume* v, uint dirFirst, const(char)* name, bool isDir, FwLoc* loc) @nogc nothrow
+{
+    if (!v.writable)
+        return FW_ERR_RO;
+    uint len = fwStrLen(name);
+    if (!fwValidLongName(name, len))
+        return FW_ERR_BAD_NAME;
+
+    FwItem existing;
+    int r = fat32Lookup(v, dirFirst, name, &existing);
+    if (r == FW_OK)
+        return FW_ERR_EXISTS;
+    if (r != FW_ERR_NOT_FOUND)
+        return r;
+
+    ubyte[11] s11;
+    ubyte nt;
+    bool needLfn;
+    r = fwBuildShort(v, dirFirst, name, len, s11.ptr, &nt, &needLfn);
+    if (r != FW_OK)
+        return r;
+
+    uint now = fwDosNow();
+    uint cluster = 0;
+    if (isDir)
+    {
+        r = fwAlloc(v, &cluster);
+        if (r != FW_OK)
+            return r;
+        ubyte[64] dots;
+        if (!fwZeroCluster(v, cluster))
+        {
+            fwFreeChain(v, cluster);
+            return FW_ERR_IO;
+        }
+        fwFreshEntry(dots.ptr, FAT_ATTR_DIR, cluster, 0, now);
+        for (uint i = 0; i < 11; i++)
+            dots[i] = ' ';
+        dots[0] = '.';
+        fwFreshEntry(dots.ptr + 32, FAT_ATTR_DIR, dirFirst == v.rootCluster ? 0 : dirFirst, 0, now);
+        for (uint i = 0; i < 11; i++)
+            dots[32 + i] = ' ';
+        dots[32] = '.';
+        dots[33] = '.';
+        if (!fwWriteBytes(v, exClusterOffset(v, cluster), dots.ptr, 64))
+        {
+            fwFreeChain(v, cluster);
+            return FW_ERR_IO;
+        }
+    }
+
+    ubyte[32] fresh;
+    fwFreshEntry(fresh.ptr, isDir ? FAT_ATTR_DIR : 0x20, cluster, 0, now);
+    r = fwWriteSet(v, dirFirst, name, len, s11.ptr, nt, needLfn, null, fresh.ptr, loc);
+    if (r != FW_OK && cluster != 0)
+        fwFreeChain(v, cluster);
+    return r;
+}
+
+/// Write the size, first cluster and time of `wf` into its directory entry.
+int fat32UpdateEntry(ExfatVolume* v, FwFile* wf) @nogc nothrow
+{
+    ubyte[32] e;
+    if (!fwDirIo(v, wf.loc.dirFirst, wf.loc.shortPos, e.ptr, 32, false))
+        return FW_ERR_IO;
+    uint now = fwDosNow();
+    e[11] |= 0x20;                                  // archive: changed since the last backup
+    fwPut16(e.ptr + 18, now >> 16);
+    fwPut16(e.ptr + 20, wf.firstCluster >> 16);
+    fwPut16(e.ptr + 22, now & 0xFFFF);
+    fwPut16(e.ptr + 24, now >> 16);
+    fwPut16(e.ptr + 26, wf.firstCluster & 0xFFFF);
+    fwPut32(e.ptr + 28, cast(uint)wf.size);
+    if (!fwDirIo(v, wf.loc.dirFirst, wf.loc.shortPos, e.ptr, 32, true))
+        return FW_ERR_IO;
+    for (uint i = 0; i < 32; i++)
+        wf.loc.ent[i] = e[i];
+    return FW_OK;
+}
+
+/// Cluster number of the `idx`-th cluster of the file, appending clusters when `extend`.
+int fwFileCluster(ExfatVolume* v, FwFile* wf, uint idx, bool extend, uint* out_) @nogc nothrow
+{
+    if (!wf.curValid || idx < wf.curIdx)
+    {
+        wf.curValid = true;
+        wf.curIdx = 0;
+        wf.curCluster = wf.firstCluster;
+    }
+    while (wf.curIdx < idx)
+    {
+        uint next;
+        if (!fwFatGet(v, wf.curCluster, &next))
+            return FW_ERR_IO;
+        if (fwIsEnd(next))
+        {
+            if (!extend)
+                return FW_ERR_INVALID;
+            uint nc;
+            int r = fwAlloc(v, &nc);
+            if (r != FW_OK)
+                return r;
+            if (!fwFatSet(v, wf.curCluster, nc))
+                return FW_ERR_IO;
+            next = nc;
+        }
+        else if (!fwValidCluster(v, next))
+            return FW_ERR_IO;                       // free (0) or bad cluster in the middle of a chain
+        wf.curCluster = next;
+        wf.curIdx++;
+    }
+    *out_ = wf.curCluster;
+    return FW_OK;
+}
+
+/// Write at `offset` (at most the current size: no holes). Returns the bytes written, or a
+/// negative error when nothing could be written. The directory entry is updated.
+long fat32WriteFile(ExfatVolume* v, FwFile* wf, ulong offset, const(void)* src, ulong len) @nogc nothrow
+{
+    if (!v.writable)
+        return FW_ERR_RO;
+    if (offset > wf.size)
+        return FW_ERR_INVALID;
+    if (offset >= 0xFFFFFFFFUL)
+        return FW_ERR_NO_SPACE;
+    if (len > 0xFFFFFFFFUL - offset)
+        len = 0xFFFFFFFFUL - offset;                // FAT32 files are smaller than 4 GiB
+    if (len == 0)
+        return 0;
+
+    bool allocated = false;
+    if (wf.firstCluster == 0)
+    {
+        uint c;
+        int r = fwAlloc(v, &c);
+        if (r != FW_OK)
+            return r;
+        wf.firstCluster = c;
+        wf.curValid = false;
+        allocated = true;
+    }
+
+    const(ubyte)* in_ = cast(const(ubyte)*)src;
+    ulong cs = exClusterSize(v);
+    ulong total = 0;
+    int err = FW_OK;
+
+    while (len != 0)
+    {
+        uint cl;
+        err = fwFileCluster(v, wf, cast(uint)(offset / cs), true, &cl);
+        if (err != FW_OK)
+            break;
+        ulong inCl = offset % cs;
+        ulong n = cs - inCl;
+        if (n > len)
+            n = len;
+        if (!fwWriteBytes(v, exClusterOffset(v, cl) + inCl, in_, n))
+        {
+            err = FW_ERR_IO;
+            break;
+        }
+        in_ += n;
+        offset += n;
+        len -= n;
+        total += n;
+        if (offset > wf.size)
+            wf.size = offset;
+    }
+
+    if (total == 0)
+    {
+        if (allocated)                              // nothing was written: do not keep the empty cluster
+        {
+            fwFreeChain(v, wf.firstCluster);
+            wf.firstCluster = 0;
+            wf.curValid = false;
+        }
+        return err != FW_OK ? err : FW_ERR_IO;
+    }
+    int ur = fat32UpdateEntry(v, wf);
+    if (ur != FW_OK)
+        return ur;                                  // data is on disk but the entry is not: report it
+    return cast(long)total;
+}
+
+/// Make the file shorter (also to 0). Longer sizes are not supported.
+int fat32Truncate(ExfatVolume* v, FwFile* wf, ulong newSize) @nogc nothrow
+{
+    if (!v.writable)
+        return FW_ERR_RO;
+    if (newSize > wf.size)
+        return FW_ERR_INVALID;
+    if (newSize == wf.size)
+        return FW_OK;
+
+    ulong cs = exClusterSize(v);
+    uint oldFirst = wf.firstCluster;
+    uint tail = 0;                                  // first cluster to free
+
+    if (newSize == 0)
+    {
+        tail = oldFirst;
+        wf.firstCluster = 0;
+    }
+    else
+    {
+        uint keep = cast(uint)((newSize + cs - 1) / cs);
+        wf.curValid = false;
+        uint last;
+        int r = fwFileCluster(v, wf, keep - 1, false, &last);
+        if (r != FW_OK)
+            return r;
+        uint next;
+        if (!fwFatGet(v, last, &next))
+            return FW_ERR_IO;
+        if (!fwIsEnd(next) && fwValidCluster(v, next))
+            tail = next;
+        // keep `last` as the end of the chain only after the entry shows the new size
+        wf.size = newSize;
+        wf.curValid = false;
+        int ur = fat32UpdateEntry(v, wf);
+        if (ur != FW_OK)
+            return ur;
+        if (tail != 0)
+        {
+            if (!fwFatSet(v, last, 0x0FFFFFFF))
+                return FW_ERR_IO;
+            fwFreeChain(v, tail);
+        }
+        return FW_OK;
+    }
+
+    wf.size = 0;
+    wf.curValid = false;
+    int ur = fat32UpdateEntry(v, wf);               // the entry first, then the clusters
+    if (ur != FW_OK)
+        return ur;
+    if (tail != 0)
+        fwFreeChain(v, tail);
+    return FW_OK;
+}
+
+/// Delete a file.
+int fat32Unlink(ExfatVolume* v, uint dirFirst, const(char)* name) @nogc nothrow
+{
+    if (!v.writable)
+        return FW_ERR_RO;
+    FwItem it;
+    int r = fat32Lookup(v, dirFirst, name, &it);
+    if (r != FW_OK)
+        return r;
+    if (it.isDir)
+        return FW_ERR_IS_DIR;
+    if (!fwDeleteSet(v, &it.loc))
+        return FW_ERR_IO;
+    if (it.firstCluster >= 2)
+        fwFreeChain(v, it.firstCluster);
+    return FW_OK;
+}
+
+/// Remove an empty directory.
+int fat32Rmdir(ExfatVolume* v, uint dirFirst, const(char)* name) @nogc nothrow
+{
+    if (!v.writable)
+        return FW_ERR_RO;
+    FwItem it;
+    int r = fat32Lookup(v, dirFirst, name, &it);
+    if (r != FW_OK)
+        return r;
+    if (!it.isDir)
+        return FW_ERR_NOT_DIR;
+    if (it.firstCluster < 2)
+        return FW_ERR_INVALID;
+    if (!fwDirEmpty(v, it.firstCluster))
+        return FW_ERR_NOT_EMPTY;
+    if (!fwDeleteSet(v, &it.loc))
+        return FW_ERR_IO;
+    fwFreeChain(v, it.firstCluster);
+    return FW_OK;
+}
+
+/// Rename or move a file or directory (within one volume). The new name must not exist.
+int fat32Rename(ExfatVolume* v, uint oldDir, const(char)* oldName, uint newDir, const(char)* newName) @nogc nothrow
+{
+    if (!v.writable)
+        return FW_ERR_RO;
+    FwItem it;
+    int r = fat32Lookup(v, oldDir, oldName, &it);
+    if (r != FW_OK)
+        return r;
+
+    uint len = fwStrLen(newName);
+    if (!fwValidLongName(newName, len))
+        return FW_ERR_BAD_NAME;
+    FwItem other;
+    r = fat32Lookup(v, newDir, newName, &other);
+    if (r == FW_OK)
+        return FW_ERR_EXISTS;
+    if (r != FW_ERR_NOT_FOUND)
+        return r;
+
+    ubyte[11] s11;
+    ubyte nt;
+    bool needLfn;
+    r = fwBuildShort(v, newDir, newName, len, s11.ptr, &nt, &needLfn);
+    if (r != FW_OK)
+        return r;
+
+    FwLoc newLoc;
+    r = fwWriteSet(v, newDir, newName, len, s11.ptr, nt, needLfn, it.loc.ent.ptr, null, &newLoc);
+    if (r != FW_OK)
+        return r;
+    if (!fwDeleteSet(v, &it.loc))
+        return FW_ERR_IO;                           // both names exist now; nothing is lost
+
+    if (it.isDir && oldDir != newDir)
+    {
+        // ".." of the moved directory points to the new parent (0 for the root)
+        ubyte[32] dd;
+        uint parent = newDir == v.rootCluster ? 0 : newDir;
+        if (!fwDirIo(v, it.firstCluster, 32, dd.ptr, 32, false))
+            return FW_ERR_IO;
+        fwPut16(dd.ptr + 20, parent >> 16);
+        fwPut16(dd.ptr + 26, parent & 0xFFFF);
+        if (!fwDirIo(v, it.firstCluster, 32, dd.ptr, 32, true))
+            return FW_ERR_IO;
+    }
+    return FW_OK;
+}
+
+// ---------------------------------------------------------------------------
+// mount state
+// ---------------------------------------------------------------------------
+
+// Bit 27 of FAT[1] is 1 after a clean unmount.
+enum uint FW_CLEAN_BIT = 0x08000000;
+
+/// Allow writing: the volume is marked "in use" until fat32Sync(v, true).
+int fat32SetWritable(ExfatVolume* v) @nogc nothrow
+{
+    if (!v.fat32)
+        return FW_ERR_INVALID;
+    uint val;
+    if (!fwFatGet(v, 1, &val))
+        return FW_ERR_IO;
+    if ((val & FW_CLEAN_BIT) != 0 && !fwFatSet(v, 1, val & ~FW_CLEAN_BIT))
+        return FW_ERR_IO;
+    v.writable = true;
+    return FW_OK;
+}
+
+/// Update FSInfo and ask the device to flush. With `final` the volume is marked clean too
+/// (umount, or going back to read-only).
+int fat32Sync(ExfatVolume* v, bool final_) @nogc nothrow
+{
+    if (!v.fat32 || !v.writable)
+        return FW_OK;
+    int result = FW_OK;
+
+    if (v.fsInfoSector != 0)
+    {
+        // v.tmp doubles as the scratch sector here and stays coherent with the disk
+        if (exReadSectors(v, v.fsInfoSector, 1, v.tmp.ptr))
+        {
+            v.tmpSector = v.fsInfoSector;
+            ubyte* p = v.tmp.ptr;
+            if (exLe32(p) == 0x41615252 && exLe32(p + 484) == 0x61417272 && exLe32(p + 508) == 0xAA550000)
+            {
+                fwPut32(p + 488, 0xFFFFFFFF);       // free cluster count: unknown
+                fwPut32(p + 492, v.nextFree);
+                if (!fwWriteSectors(v, v.fsInfoSector, 1, p))
+                {
+                    v.tmpSector = ~0UL;
+                    result = FW_ERR_IO;
+                }
+            }
+        }
+    }
+
+    if (final_)
+    {
+        uint val;
+        if (!fwFatGet(v, 1, &val) || ((val & FW_CLEAN_BIT) == 0 && !fwFatSet(v, 1, val | FW_CLEAN_BIT)))
+            result = FW_ERR_IO;
+    }
+    if (!blockFlush(v.dev))
+        result = FW_ERR_IO;
+    return result;
+}

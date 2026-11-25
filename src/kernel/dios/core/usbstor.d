@@ -308,6 +308,79 @@ extern(C) bool usbDiskRead(void* ctx, ulong lba, uint count, void* dst) @nogc no
     return true;
 }
 
+/// WRITE(10) through the bounce buffer. No retry after "write protected" (sense key 7).
+extern(C) bool usbDiskWrite(void* ctx, ulong lba, uint count, const(void)* src) @nogc nothrow
+{
+    UsbDisk* u = cast(UsbDisk*)ctx;
+    const(ubyte)* in_ = cast(const(ubyte)*)src;
+
+    uint maxSectors = (XHCI_MSC_BOUNCE_PAGES * 4096) / u.sectorSize;
+    if (maxSectors > 65535)
+        maxSectors = 65535;
+
+    while (count != 0)
+    {
+        uint chunk = count < maxSectors ? count : maxSectors;
+        uint bytes = chunk * u.sectorSize;
+
+        bool ok = false;
+        bool protect = false;
+        for (uint attempt = 0; attempt < 3 && !ok && !protect; attempt++)
+        {
+            if (!mscAlive(u))
+                return false;
+            memcpy(u.dev.msc.bounce, in_, bytes);       // the bounce buffer is refilled on every attempt
+
+            ubyte[10] cdb;
+            cdb[0] = 0x2A;
+            uint l = cast(uint)lba;
+            cdb[2] = cast(ubyte)(l >> 24);
+            cdb[3] = cast(ubyte)(l >> 16);
+            cdb[4] = cast(ubyte)(l >> 8);
+            cdb[5] = cast(ubyte)l;
+            cdb[7] = cast(ubyte)(chunk >> 8);
+            cdb[8] = cast(ubyte)chunk;
+
+            uint got;
+            int r = mscCommand(u, cdb.ptr, 10, false, bytes, &got);
+            if (r == 0 && got == bytes)
+                ok = true;
+            else if (r == 1)
+            {
+                mscRequestSense(u);
+                protect = u.senseKey == 7;              // DATA PROTECT: retrying cannot help
+            }
+        }
+        if (!ok)
+        {
+            kprintf("USB disk: %s at sector %llu (sense %x/%x/%x)\n",
+                    protect ? "write protected".ptr : "write error".ptr, lba,
+                    cast(uint)u.senseKey, cast(uint)u.asc, cast(uint)u.ascq);
+            return false;
+        }
+
+        in_ += bytes;
+        lba += chunk;
+        count -= chunk;
+    }
+    return true;
+}
+
+/// SYNCHRONIZE CACHE(10): the whole medium. Sticks that do not know the command are fine too.
+extern(C) bool usbDiskFlush(void* ctx) @nogc nothrow
+{
+    UsbDisk* u = cast(UsbDisk*)ctx;
+    if (!mscAlive(u))
+        return false;
+    ubyte[10] cdb;
+    cdb[0] = 0x35;
+    uint got;
+    int r = mscCommand(u, cdb.ptr, 10, false, 0, &got);
+    if (r == 1)
+        mscRequestSense(u);
+    return r != 2;
+}
+
 /// Forget the disks whose device was unplugged (and unmount the volume if it was on one).
 void usbStorageRemoveGone() @nogc nothrow
 {
@@ -379,7 +452,7 @@ void usbStorageProbe() @nogc nothrow
         name[3] = cast(char)('0' + free);
         name[4] = 0;
 
-        BlockDev* b = blockRegister(name.ptr, model.ptr, u.sectors, u.sectorSize, &usbDiskRead, u);
+        BlockDev* b = blockRegister(name.ptr, model.ptr, u.sectors, u.sectorSize, &usbDiskRead, &usbDiskWrite, &usbDiskFlush, u);
         if (b is null)
             continue;
         u.used = true;

@@ -29,6 +29,8 @@ enum uint BLK_CACHE_LINE_BYTES = 4096;      // one line = one aligned group of s
 enum uint BLK_CACHE_BYPASS_BYTES = 16384;   // bigger reads go straight to the device
 
 alias BlockReadFn = extern(C) bool function(void* ctx, ulong lba, uint count, void* dst) @nogc nothrow;
+alias BlockWriteFn = extern(C) bool function(void* ctx, ulong lba, uint count, const(void)* src) @nogc nothrow;
+alias BlockFlushFn = extern(C) bool function(void* ctx) @nogc nothrow;
 
 struct BlockDev
 {
@@ -38,6 +40,8 @@ struct BlockDev
     ulong sectors;
     uint sectorSize;
     BlockReadFn read;
+    BlockWriteFn write;     // null: read-only device
+    BlockFlushFn flush;     // null: nothing to flush
     void* ctx;
 }
 
@@ -92,7 +96,7 @@ ulong blkLe64(const(ubyte)* p) @nogc nothrow
 
 /// Add a disk. Returns null if the table is full. `name` and `model` are copied.
 BlockDev* blockRegister(const(char)* name, const(char)* model, ulong sectors, uint sectorSize,
-                        BlockReadFn read, void* ctx) @nogc nothrow
+                        BlockReadFn read, BlockWriteFn write, BlockFlushFn flush, void* ctx) @nogc nothrow
 {
     // Reuse the entry of a disk that was unplugged.
     uint slot = 0;
@@ -125,6 +129,8 @@ BlockDev* blockRegister(const(char)* name, const(char)* model, ulong sectors, ui
     b.sectors = sectors;
     b.sectorSize = sectorSize;
     b.read = read;
+    b.write = write;
+    b.flush = flush;
     b.ctx = ctx;
     return b;
 }
@@ -182,6 +188,45 @@ bool blockRead(BlockDev* b, ulong lba, uint count, void* dst) @nogc nothrow
         count -= n;
     }
     return true;
+}
+
+/// Write `count` sectors starting at `lba`. The write goes straight to the device (write
+/// through); the cache lines it touches are dropped so the next read sees the new data.
+bool blockWrite(BlockDev* b, ulong lba, uint count, const(void)* src) @nogc nothrow
+{
+    if (b is null || !b.present || count == 0 || b.write is null)
+        return false;
+    if (lba >= b.sectors || b.sectors - lba < count)
+        return false;
+
+    bool ok = b.write(b.ctx, lba, count, src);      // a failed write may still have changed some sectors
+    blockCacheInvalidateRange(blockDevIndex(b), lba, count, b.sectorSize);
+    return ok;
+}
+
+/// Ask the device to put its own write cache on the medium (best effort).
+bool blockFlush(BlockDev* b) @nogc nothrow
+{
+    if (b is null || !b.present)
+        return false;
+    if (b.flush is null)
+        return true;
+    return b.flush(b.ctx);
+}
+
+void blockCacheInvalidateRange(uint dev, ulong lba, uint count, uint sectorSize) @nogc nothrow
+{
+    if (sectorSize == 0 || sectorSize > BLK_CACHE_LINE_BYTES || BLK_CACHE_LINE_BYTES % sectorSize != 0)
+        return;
+    uint perGroup = BLK_CACHE_LINE_BYTES / sectorSize;
+    ulong firstGroup = lba / perGroup;
+    ulong lastGroup = (lba + count - 1) / perGroup;
+    for (uint i = 0; i < BLK_CACHE_LINES; i++)
+    {
+        CacheLine* l = &blockCache[i];
+        if (l.valid && l.dev == dev && l.group >= firstGroup && l.group <= lastGroup)
+            l.valid = false;
+    }
 }
 
 /// Forget everything cached for block device `dev` (an index into blockDevs).

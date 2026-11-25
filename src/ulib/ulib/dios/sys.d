@@ -50,6 +50,12 @@ enum ulong SYS_YIELD = 14;
 enum ulong SYS_GETPID = 15;
 enum ulong SYS_DATETIME = 16;
 enum ulong SYS_RANDOM = 17;
+enum ulong SYS_FWRITE = 18;
+enum ulong SYS_UNLINK = 19;
+enum ulong SYS_MKDIR = 20;
+enum ulong SYS_RMDIR = 21;
+enum ulong SYS_RENAME = 22;
+enum ulong SYS_SYNC = 23;
 
 // Extended kernel function numbers
 enum ulong SYS_EXT1 = 1000;
@@ -61,6 +67,22 @@ enum ulong SYS_EXT4 = 4000;
 enum int O_RDONLY = 0;
 enum int O_WRONLY = 1;
 enum int O_RDWR   = 2;
+// Combine with O_WRONLY or O_RDWR. Writing works on FAT32 volumes mounted with "rw" (shell: mount N NAME rw).
+enum int O_CREATE = 0x40;   // create the file if it does not exist
+enum int O_TRUNC  = 0x200;  // make it empty
+enum int O_APPEND = 0x400;  // every write goes to the end
+
+// Error codes returned (negated) by the file system calls that change things
+enum int UERR_IO = -1;
+enum int UERR_NOT_FOUND = -2;
+enum int UERR_EXISTS = -3;
+enum int UERR_NO_SPACE = -4;
+enum int UERR_BAD_NAME = -5;
+enum int UERR_NOT_EMPTY = -6;
+enum int UERR_IS_DIR = -7;
+enum int UERR_NOT_DIR = -8;
+enum int UERR_READ_ONLY = -9;
+enum int UERR_INVALID = -10;
 
 // useek() origins
 enum int SEEK_SET = 0;
@@ -156,12 +178,13 @@ void uclear() @nogc nothrow
     sys_call(SYS_CLEAR, 0, 0, 0);
 }
 
-// Files (read-only). Paths are relative to the shell's current directory or absolute.
+// Files. Reading works everywhere; writing only on FAT32 volumes mounted with "rw". Paths are relative to the shell's current directory or absolute.
 // At most 8 files can be open at once; they are closed when the program ends.
 
 /**
- * Returns the file descriptor of a file or directory, or -1 if it doesn't exist.
- * flag parameters is currently not used and should be zero (O_RDONLY).
+ * Returns the file descriptor of a file or directory, or -1 if it doesn't exist (or cannot be
+ * opened that way). flag is O_RDONLY (0), or O_WRONLY / O_RDWR optionally with O_CREATE,
+ * O_TRUNC and O_APPEND. Directories can only be opened with O_RDONLY.
  */
 int uopen(const(char)* path, int flag) @nogc nothrow
 {
@@ -225,4 +248,43 @@ void udatetime(DateTime* dt) @nogc nothrow
 void urandom(void* buffer, size_t size) @nogc nothrow
 {
     sys_call(SYS_RANDOM, cast(ulong)buffer, size, 0);
+}
+
+/// Writes bytes to a file opened with O_WRONLY or O_RDWR, at the current offset (the end with
+/// O_APPEND). Returns the number of bytes written (fewer if the volume is full), or -1 on error.
+/// The data is on the disk when the call returns.
+long ufwrite(int fd, const(void)* buf, size_t n) @nogc nothrow
+{
+    return sys_call(SYS_FWRITE, cast(ulong)fd, cast(ulong)buf, n);
+}
+
+/// Deletes a file. Returns 0 or a negative UERR_* code.
+int uunlink(const(char)* path) @nogc nothrow
+{
+    return cast(int)sys_call(SYS_UNLINK, cast(ulong)path, 0, 0);
+}
+
+/// Creates a directory. Returns 0 or a negative UERR_* code.
+int umkdir(const(char)* path) @nogc nothrow
+{
+    return cast(int)sys_call(SYS_MKDIR, cast(ulong)path, 0, 0);
+}
+
+/// Removes an empty directory. Returns 0 or a negative UERR_* code.
+int urmdir(const(char)* path) @nogc nothrow
+{
+    return cast(int)sys_call(SYS_RMDIR, cast(ulong)path, 0, 0);
+}
+
+/// Renames or moves a file or directory within one volume; the new name must not exist.
+/// Returns 0 or a negative UERR_* code.
+int urename(const(char)* from, const(char)* to) @nogc nothrow
+{
+    return cast(int)sys_call(SYS_RENAME, cast(ulong)from, cast(ulong)to, 0);
+}
+
+/// Asks the disks to put everything they hold on the medium.
+void usync() @nogc nothrow
+{
+    sys_call(SYS_SYNC, 0, 0, 0);
 }

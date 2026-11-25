@@ -129,6 +129,12 @@ enum ulong SYS_YIELD = 14;
 enum ulong SYS_GETPID = 15;
 enum ulong SYS_DATETIME = 16;
 enum ulong SYS_RANDOM = 17;
+enum ulong SYS_FWRITE = 18;  // write to a file descriptor
+enum ulong SYS_UNLINK = 19;
+enum ulong SYS_MKDIR = 20;
+enum ulong SYS_RMDIR = 21;
+enum ulong SYS_RENAME = 22;
+enum ulong SYS_SYNC = 23;
 
 // Extended syscall functions, handled by corresponding syscallExtHook*
 enum ulong SYS_EXT1 = 1000; // [1000..1999 - SYS_EXT1]
@@ -1086,12 +1092,43 @@ bool procCopyPath(ulong addr, char* dst, uint cap) @nogc nothrow
     return false;
 }
 
-long sysOpen(ulong path) @nogc nothrow
+long sysOpen(ulong path, ulong flags) @nogc nothrow
 {
     char[FS_PATH_MAX] p;
     if (!procCopyPath(path, p.ptr, p.length))
         return -1;
-    return sysfileOpen(p.ptr);
+    return sysfileOpen(p.ptr, cast(uint)flags);
+}
+
+long sysFWrite(ulong fd, ulong buf, ulong len) @nogc nothrow
+{
+    if (len > 1024 * 1024)
+        len = 1024 * 1024;
+    if (!procUserOk(buf, len, false))
+        return -1;
+    return sysfileWrite(fd, cast(const(void)*)buf, len);
+}
+
+// unlink, mkdir, rmdir: 0 on success, a negative FW_ERR_* code otherwise (-1 for a bad pointer)
+long sysPathOp(ulong path, ulong op) @nogc nothrow
+{
+    char[FS_PATH_MAX] p;
+    if (!procCopyPath(path, p.ptr, p.length))
+        return -1;
+    if (op == SYS_UNLINK)
+        return fsUnlink(p.ptr);
+    if (op == SYS_MKDIR)
+        return fsCreate(p.ptr, true);
+    return fsRmdir(p.ptr);
+}
+
+long sysRename(ulong from, ulong to) @nogc nothrow
+{
+    char[FS_PATH_MAX] a;
+    char[FS_PATH_MAX] b;
+    if (!procCopyPath(from, a.ptr, a.length) || !procCopyPath(to, b.ptr, b.length))
+        return -1;
+    return fsRename(a.ptr, b.ptr);
 }
 
 long sysRead(ulong fd, ulong buf, ulong len) @nogc nothrow
@@ -1197,7 +1234,18 @@ long syscallDispatch(ulong nr, ulong a0, ulong a1, ulong a2) @nogc nothrow
             gfxPresent();
             return 0;
         case SYS_OPEN:
-            return sysOpen(a0);
+            return sysOpen(a0, a1);
+        case SYS_FWRITE:
+            return sysFWrite(a0, a1, a2);
+        case SYS_UNLINK:
+        case SYS_MKDIR:
+        case SYS_RMDIR:
+            return sysPathOp(a0, nr);
+        case SYS_RENAME:
+            return sysRename(a0, a1);
+        case SYS_SYNC:
+            fsSyncAll();
+            return 0;
         case SYS_READ:
             return sysRead(a0, a1, a2);
         case SYS_CLOSE:
