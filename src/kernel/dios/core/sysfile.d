@@ -35,6 +35,7 @@ module dios.core.sysfile;
 import dios.core.exfat;
 import dios.core.fat32w;
 import dios.core.fs;
+import dios.core.ramfs;
 
 enum uint SYSFILE_MAX_OPEN = 8;
 enum long SYSFILE_EOF_ERR = -1;
@@ -103,7 +104,7 @@ bool sysfileLive(const(OpenFile)* f) @nogc nothrow
     if (!f.used)
         return false;
     if (f.mount == FS_ROOT)
-        return true;
+        return ramfsNodeLive(f.entry.firstCluster, f.generation);   // files in /home can be removed
     if (f.mount < 0 || f.mount >= cast(int)FS_MAX_MOUNTS)
         return false;
     return mounts[f.mount].mounted && mounts[f.mount].generation == f.generation;
@@ -149,7 +150,7 @@ long sysfileOpen(const(char)* path, uint flags) @nogc nothrow
     if (!f.isDir && !exfatOpen(&f.file, &f.entry))
         return -1;
     f.mount = slot;
-    f.generation = (slot == FS_ROOT) ? 0 : mounts[slot].generation;
+    f.generation = (slot == FS_ROOT) ? ramfsGeneration(f.entry.firstCluster) : mounts[slot].generation;
     f.used = true;
     return fd;
 }

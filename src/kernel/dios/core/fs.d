@@ -476,13 +476,15 @@ const(char)* fsErrorText(int err) @nogc nothrow
         case FW_ERR_NOT_EMPTY: return "directory not empty";
         case FW_ERR_IS_DIR: return "is a directory";
         case FW_ERR_NOT_DIR: return "not a directory";
-        case FW_ERR_RO: return "read-only (only FAT32 volumes mounted with 'rw' can be changed)";
+        case FW_ERR_RO: return "read-only (only /home and FAT32 volumes mounted with 'rw' can be changed)";
         default: return "invalid operation";
     }
 }
 
-/// Split `path` into the mount it lives on, the first cluster of its parent directory and the
-/// last name. Fails with FW_ERR_RO unless the volume is FAT32 and mounted for writing.
+/// Split `path` into the mount it lives on, its parent directory and the last name. Fails with
+/// FW_ERR_RO unless the volume is FAT32 and mounted for writing, or the path is below /home of
+/// the root file system. For FAT32 `parentFirst` is the parent's first cluster; for /home the
+/// slot is FS_ROOT and `parentFirst` is the parent's ramfs node.
 int fsPrepare(const(char)* path, int* slotOut, uint* parentFirst, char* leaf) @nogc nothrow
 {
     char[FS_PATH_MAX] full;
@@ -492,7 +494,35 @@ int fsPrepare(const(char)* path, int* slotOut, uint* parentFirst, char* leaf) @n
     const(char)* rest;
     int slot = fsMountOfPath(full.ptr, &rest);
     if (slot < 0)
-        return FW_ERR_RO;                       // the root file system, or no such mount
+    {
+        // the root file system: only /home can be changed
+        if (!ramfsWritablePath(full.ptr))
+            return FW_ERR_RO;
+        uint n = 0;
+        while (full[n] != 0)
+            n++;
+        uint c = n;
+        while (c > 0 && full[c - 1] != '/')
+            c--;
+        // full[c - 1] is the '/' before the last name; ramfsWritablePath() guarantees c >= 6
+        if (n - c == 0 || n - c > 255)
+            return FW_ERR_INVALID;
+        char[FS_PATH_MAX] dir;
+        for (uint i = 0; i + 1 < c; i++)
+            dir[i] = full[i];
+        dir[c - 1] = 0;
+        int pn = ramfsFind(dir.ptr);
+        if (pn < 0)
+            return FW_ERR_NOT_FOUND;
+        if (!ramfsNodeIsDir(cast(uint)pn))
+            return FW_ERR_NOT_DIR;
+        for (uint i = 0; i < n - c; i++)
+            leaf[i] = full[c + i];
+        leaf[n - c] = 0;
+        *slotOut = FS_ROOT;
+        *parentFirst = cast(uint)pn;
+        return FW_OK;
+    }
     Mount* m = &mounts[slot];
     if (!m.vol.fat32 || !m.vol.writable)
         return FW_ERR_RO;
@@ -538,6 +568,11 @@ int fsCreate(const(char)* path, bool isDir) @nogc nothrow
     int r = fsPrepare(path, &slot, &parent, leaf.ptr);
     if (r != FW_OK)
         return r;
+    if (slot == FS_ROOT)
+    {
+        int node = ramfsCreate(parent, leaf.ptr, isDir);
+        return node < 0 ? node : FW_OK;
+    }
     FwLoc loc;
     return fat32Create(&mounts[slot].vol, parent, leaf.ptr, isDir, &loc);
 }
@@ -548,7 +583,18 @@ int fsUnlink(const(char)* path) @nogc nothrow
     uint parent;
     char[256] leaf;
     int r = fsPrepare(path, &slot, &parent, leaf.ptr);
-    return r != FW_OK ? r : fat32Unlink(&mounts[slot].vol, parent, leaf.ptr);
+    if (r != FW_OK)
+        return r;
+    if (slot == FS_ROOT)
+    {
+        int node = ramfsChild(parent, leaf.ptr);
+        if (node < 0)
+            return FW_ERR_NOT_FOUND;
+        if (ramfsNodeIsDir(cast(uint)node))
+            return FW_ERR_IS_DIR;
+        return ramfsRemove(cast(uint)node);
+    }
+    return fat32Unlink(&mounts[slot].vol, parent, leaf.ptr);
 }
 
 int fsRmdir(const(char)* path) @nogc nothrow
@@ -563,6 +609,15 @@ int fsRmdir(const(char)* path) @nogc nothrow
     char[FS_PATH_MAX] full;
     if (fsResolve(path, full.ptr) && fsNameEq(full.ptr, fsCwd.ptr))
         return FW_ERR_INVALID;
+    if (slot == FS_ROOT)
+    {
+        int node = ramfsChild(parent, leaf.ptr);
+        if (node < 0)
+            return FW_ERR_NOT_FOUND;
+        if (!ramfsNodeIsDir(cast(uint)node))
+            return FW_ERR_NOT_DIR;
+        return ramfsRemove(cast(uint)node);
+    }
     return fat32Rmdir(&mounts[slot].vol, parent, leaf.ptr);
 }
 
@@ -591,6 +646,13 @@ int fsRename(const(char)* from, const(char)* to) @nogc nothrow
         return r;
     if (slotA != slotB)
         return FW_ERR_INVALID;                  // moving between volumes: copy and remove instead
+    if (slotA == FS_ROOT)
+    {
+        int node = ramfsChild(parentA, leafA.ptr);
+        if (node < 0)
+            return FW_ERR_NOT_FOUND;
+        return ramfsRename(cast(uint)node, parentB, leafB.ptr);
+    }
     return fat32Rename(&mounts[slotA].vol, parentA, leafA.ptr, parentB, leafB.ptr);
 }
 
@@ -604,6 +666,28 @@ int fsOpenWrite(const(char)* path, uint flags, int* slotOut, ExfatEntry* e, FwFi
     int r = fsPrepare(path, &slot, &parent, leaf.ptr);
     if (r != FW_OK)
         return r;
+    if (slot == FS_ROOT)
+    {
+        int node = ramfsChild(parent, leaf.ptr);
+        if (node < 0)
+        {
+            if (!(flags & FS_O_CREATE))
+                return FW_ERR_NOT_FOUND;
+            node = ramfsCreate(parent, leaf.ptr, false);
+            if (node < 0)
+                return node;
+        }
+        else if (ramfsNodeIsDir(cast(uint)node))
+            return FW_ERR_IS_DIR;
+        if ((flags & FS_O_TRUNC) && ramfsTruncate(cast(uint)node, 0) != FW_OK)
+            return FW_ERR_IO;
+        ramfsFillEntry(cast(uint)node, e);
+        *wf = FwFile.init;
+        wf.firstCluster = cast(uint)node;       // the ramfs node, as in `e`
+        wf.size = e.size;
+        *slotOut = FS_ROOT;
+        return FW_OK;
+    }
     ExfatVolume* v = &mounts[slot].vol;
 
     FwItem it;
@@ -647,6 +731,13 @@ int fsOpenWrite(const(char)* path, uint flags, int* slotOut, ExfatEntry* e, FwFi
 /// Write to a file opened with fsOpenWrite(). Returns the bytes written or a negative FW_ERR_*.
 long fsWriteFile(int slot, FwFile* wf, ulong offset, const(void)* src, ulong len) @nogc nothrow
 {
+    if (slot == FS_ROOT)
+    {
+        long n = ramfsWrite(wf.firstCluster, offset, src, len);
+        if (n >= 0)
+            wf.size = ramfsNodeSize(wf.firstCluster);
+        return n;
+    }
     if (slot < 0 || slot >= cast(int)FS_MAX_MOUNTS || !mounts[slot].mounted)
         return FW_ERR_RO;
     return fat32WriteFile(&mounts[slot].vol, wf, offset, src, len);

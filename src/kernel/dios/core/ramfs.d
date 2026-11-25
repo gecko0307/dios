@@ -1,29 +1,46 @@
 module dios.core.ramfs;
 
 /**
- * The root file system: a read-only tree that lives in RAM ("initramfs").
+ * The root file system: a tree that lives in RAM ("initramfs"). It is read-only except for
+ * the directory /home, where files and directories can be created, changed, renamed and removed
+ * (nothing survives a reboot).
  *
  * The bootloader loads one module, "rootfs.tar" (an ustar archive made by build.py), and
  * this file indexes it into a table of nodes. The data is not copied: a file node points
- * into the archive. Everything the system needs to start (/bin, /etc, ...) comes from
+ * into the archive (a file in /home that is written to gets its own copy first). Everything the system needs to start (/bin, /etc, ...) comes from
  * here, so nothing depends on a disk being present or on other boot modules.
  *
- * Disks are mounted below /mnt (see fs.d). /mnt always exists, even when the archive
- * does not contain it, and when no archive was loaded the root holds only /mnt.
+ * Disks are mounted below /mnt (see fs.d). /mnt and /home always exist, even when the archive
+ * does not contain them, and when no archive was loaded the root holds only those two.
+ *
+ * File data written at run time lives in whole pages taken from the page allocator (paging.d),
+ * contiguous per file; a file that grows is moved to a bigger run. The total is capped (see
+ * RAMFS_MAX_PAGES) and the allocator always keeps RAMFS_RESERVE_PAGES free for programs.
  *
  * Paths given to the functions below are absolute and normalised ("/bin/gfxd.elf"),
  * as produced by fsResolve(). Names are case sensitive.
  */
 import dios.bootloader.limine;
+import dios.core.datetime;
 import dios.core.exfat;
+import dios.core.fat32w;
 import dios.core.mem;
+import dios.core.paging;
 import dios.core.stdio;
 
-enum uint RAMFS_MAX_NODES = 512;
+enum uint RAMFS_MAX_NODES = 1024;
+enum uint RAMFS_TAR_RESERVE = 256;          // nodes the archive cannot use: room for files made at run time
 enum uint RAMFS_NAME_MAX = 64;
+enum ulong RAMFS_MAX_PAGES = 16384;         // 64 MiB of file data written at run time
+enum ulong RAMFS_RESERVE_PAGES = 4096;      // 16 MiB always left to the rest of the system
 
 struct RamNode
 {
+    bool used;                  // false: free slot (a removed file or directory)
+    bool owned;                 // the data is a run of pages of our own (else: inside the archive)
+    uint gen;                   // bumped when the node is created or removed: tells open files it is gone
+    ulong phys;                 // owned data: first page
+    ulong capPages;             // owned data: pages in the run
     char[RAMFS_NAME_MAX] name;
     int parent;                 // node index, -1 for the root
     bool isDir;
@@ -37,6 +54,8 @@ __gshared uint ramNodeCount;
 __gshared uint ramMntNode;      // the directory disks are mounted in
 __gshared bool ramLoaded;
 __gshared bool ramFullWarned;
+__gshared uint ramHomeNode;     // /home
+__gshared ulong ramUsedPages;   // pages held by files written at run time
 
 extern(C):
 
@@ -96,25 +115,42 @@ uint ramDosTime(ulong t) @nogc nothrow
     return cast(uint)(((y - 1980) << 25) | (m << 21) | (d << 16) | (hour << 11) | (min << 5) | (sec / 2));
 }
 
-int ramNewNode(int parent, const(char)* name, uint len, bool isDir) @nogc nothrow
+/// A new node. `runtime` is false while the archive is being indexed, which may not use up the
+/// last RAMFS_TAR_RESERVE nodes. Freed slots are reused.
+int ramNewNode(int parent, const(char)* name, uint len, bool isDir, bool runtime = true) @nogc nothrow
 {
-    if (ramNodeCount >= RAMFS_MAX_NODES)
+    uint idx = 0;
+    for (uint i = 1; i < ramNodeCount; i++)
     {
-        if (!ramFullWarned)
-            kprintf("rootfs: too many files (max %u), the rest is ignored\n", RAMFS_MAX_NODES);
-        ramFullWarned = true;
-        return -1;
+        if (!ramNodes[i].used)
+        {
+            idx = i;
+            break;
+        }
     }
-    uint idx = ramNodeCount++;
+    if (idx == 0)
+    {
+        uint limit = runtime ? RAMFS_MAX_NODES : RAMFS_MAX_NODES - RAMFS_TAR_RESERVE;
+        if (ramNodeCount >= limit)
+        {
+            if (!runtime && !ramFullWarned)
+                kprintf("rootfs: too many files (max %u), the rest is ignored\n", limit);
+            if (!runtime)
+                ramFullWarned = true;
+            return -1;
+        }
+        idx = ramNodeCount++;
+    }
     RamNode* n = &ramNodes[idx];
+    uint gen = n.gen + 1;
+    *n = RamNode.init;
+    n.gen = gen;
+    n.used = true;
     for (uint i = 0; i < len; i++)
         n.name[i] = name[i];
     n.name[len] = 0;
     n.parent = parent;
     n.isDir = isDir;
-    n.data = null;
-    n.size = 0;
-    n.mtime = 0;
     return cast(int)idx;
 }
 
@@ -123,7 +159,7 @@ int ramFindChild(int parent, const(char)* name, uint len) @nogc nothrow
     for (uint i = 1; i < ramNodeCount; i++)
     {
         RamNode* n = &ramNodes[i];
-        if (n.parent != parent)
+        if (!n.used || n.parent != parent)
             continue;
         uint k = 0;
         while (k < len && n.name[k] == name[k])
@@ -170,7 +206,7 @@ bool ramAddPath(const(char)* path, bool isDir, const(ubyte)* data, ulong size, u
         {
             if (child >= 0)
                 return false;                       // duplicate
-            child = ramNewNode(parent, start, len, false);
+            child = ramNewNode(parent, start, len, false, false);
             if (child < 0)
                 return false;
             ramNodes[child].data = data;
@@ -181,7 +217,7 @@ bool ramAddPath(const(char)* path, bool isDir, const(ubyte)* data, ulong size, u
 
         if (child < 0)
         {
-            child = ramNewNode(parent, start, len, true);
+            child = ramNewNode(parent, start, len, true, false);
             if (child < 0)
                 return false;
         }
@@ -269,7 +305,9 @@ void ramfsInit() @nogc nothrow
     ramNodeCount = 0;
     ramLoaded = false;
     ramFullWarned = false;
+    ramUsedPages = 0;
     ramNewNode(-1, "", 0, true);                    // node 0: "/"
+    ramNodes[0].used = true;
 
     if (moduleRequest.response !is null)
     {
@@ -291,6 +329,11 @@ void ramfsInit() @nogc nothrow
     if (mnt < 0)
         mnt = ramNewNode(0, "mnt", 3, true);
     ramMntNode = mnt < 0 ? 0 : cast(uint)mnt;
+
+    int home = ramFindChild(0, "home", 4);
+    if (home < 0)
+        home = ramNewNode(0, "home", 4, true);
+    ramHomeNode = home < 0 ? 0 : cast(uint)home;
 }
 
 /// Node of the absolute, normalised `path`, or -1.
@@ -343,7 +386,7 @@ void ramfsIterate(uint dir, ExfatDirFn fn, void* ctx, bool* stopped) @nogc nothr
     *stopped = false;
     for (uint i = 1; i < ramNodeCount; i++)
     {
-        if (ramNodes[i].parent != cast(int)dir)
+        if (!ramNodes[i].used || ramNodes[i].parent != cast(int)dir)
             continue;
         ExfatEntry e;
         ramfsFillEntry(i, &e);
@@ -357,7 +400,7 @@ void ramfsIterate(uint dir, ExfatDirFn fn, void* ctx, bool* stopped) @nogc nothr
 
 ulong ramfsRead(uint node, ulong offset, void* dst, ulong len) @nogc nothrow
 {
-    if (node >= ramNodeCount || ramNodes[node].isDir)
+    if (node >= ramNodeCount || !ramNodes[node].used || ramNodes[node].isDir)
         return 0;
     RamNode* n = &ramNodes[node];
     if (offset >= n.size)
@@ -366,4 +409,255 @@ ulong ramfsRead(uint node, ulong offset, void* dst, ulong len) @nogc nothrow
         len = n.size - offset;
     memcpy(dst, n.data + offset, cast(size_t)len);
     return len;
+}
+
+// ---------------------------------------------------------------------------
+// writing (below /home only; fs.d checks the path)
+// ---------------------------------------------------------------------------
+
+/// `path` (absolute, normalised) is inside /home, not /home itself.
+bool ramfsWritablePath(const(char)* path) @nogc nothrow
+{
+    const(char)* h = "/home/";
+    for (uint i = 0; i < 6; i++)
+        if (path[i] != h[i])
+            return false;
+    return path[6] != 0;
+}
+
+/// Open files remember (node, gen): the node may be removed and its slot reused.
+uint ramfsGeneration(uint node) @nogc nothrow
+{
+    return node < ramNodeCount ? ramNodes[node].gen : 0;
+}
+
+bool ramfsNodeLive(uint node, uint gen) @nogc nothrow
+{
+    return node < ramNodeCount && ramNodes[node].used && ramNodes[node].gen == gen;
+}
+
+ulong ramfsPagesUsed() @nogc nothrow
+{
+    return ramUsedPages;
+}
+
+bool ramNameOk(const(char)* name, uint len) @nogc nothrow
+{
+    if (len == 0 || len >= RAMFS_NAME_MAX)
+        return false;
+    if (len == 1 && name[0] == '.')
+        return false;
+    if (len == 2 && name[0] == '.' && name[1] == '.')
+        return false;
+    for (uint i = 0; i < len; i++)
+        if (cast(ubyte)name[i] < 32 || name[i] == '/' || name[i] == 127)
+            return false;
+    return true;
+}
+
+uint ramDosNow() @nogc nothrow
+{
+    return fwDosNow();
+}
+
+/// Create a file or directory `name` in directory `parent`. Returns the node, or a negative FW_ERR_*.
+int ramfsCreate(uint parent, const(char)* name, bool isDir) @nogc nothrow
+{
+    if (parent >= ramNodeCount || !ramNodes[parent].used || !ramNodes[parent].isDir)
+        return FW_ERR_NOT_DIR;
+    uint len = 0;
+    while (name[len] != 0)
+        len++;
+    if (!ramNameOk(name, len))
+        return FW_ERR_BAD_NAME;
+    if (ramFindChild(cast(int)parent, name, len) >= 0)
+        return FW_ERR_EXISTS;
+    int node = ramNewNode(cast(int)parent, name, len, isDir);
+    if (node < 0)
+        return FW_ERR_NO_SPACE;
+    ramNodes[node].mtime = ramDosNow();
+    return node;
+}
+
+/// Node of the child `name` of `parent`, or -1.
+int ramfsChild(uint parent, const(char)* name) @nogc nothrow
+{
+    uint len = 0;
+    while (name[len] != 0)
+        len++;
+    return ramFindChild(cast(int)parent, name, len);
+}
+
+void ramFreeData(RamNode* n) @nogc nothrow
+{
+    if (n.owned)
+    {
+        pmmFreePages(n.phys, n.capPages);
+        ramUsedPages -= n.capPages;
+    }
+    n.owned = false;
+    n.phys = 0;
+    n.capPages = 0;
+    n.data = null;
+}
+
+/// Remove a file, or an empty directory.
+int ramfsRemove(uint node) @nogc nothrow
+{
+    if (node == 0 || node >= ramNodeCount || !ramNodes[node].used || node == ramHomeNode || node == ramMntNode)
+        return FW_ERR_INVALID;
+    RamNode* n = &ramNodes[node];
+    if (n.isDir)
+    {
+        for (uint i = 1; i < ramNodeCount; i++)
+            if (ramNodes[i].used && ramNodes[i].parent == cast(int)node)
+                return FW_ERR_NOT_EMPTY;
+    }
+    ramFreeData(n);
+    n.size = 0;
+    n.gen++;
+    n.used = false;
+    return FW_OK;
+}
+
+/// Move/rename `node` to `newName` in directory `newParent`. The caller has checked that a
+/// directory does not move into itself.
+int ramfsRename(uint node, uint newParent, const(char)* newName) @nogc nothrow
+{
+    if (node == 0 || node >= ramNodeCount || !ramNodes[node].used || node == ramHomeNode || node == ramMntNode)
+        return FW_ERR_INVALID;
+    if (newParent >= ramNodeCount || !ramNodes[newParent].used || !ramNodes[newParent].isDir)
+        return FW_ERR_NOT_DIR;
+    uint len = 0;
+    while (newName[len] != 0)
+        len++;
+    if (!ramNameOk(newName, len))
+        return FW_ERR_BAD_NAME;
+    if (ramFindChild(cast(int)newParent, newName, len) >= 0)
+        return FW_ERR_EXISTS;
+    RamNode* n = &ramNodes[node];
+    for (uint i = 0; i < len; i++)
+        n.name[i] = newName[i];
+    n.name[len] = 0;
+    n.parent = cast(int)newParent;
+    return FW_OK;
+}
+
+/// Make room for `newSize` bytes in a node's own pages (copying the archive data on first use).
+bool ramEnsure(RamNode* n, ulong newSize) @nogc nothrow
+{
+    ulong need = (newSize + 4095) / 4096;
+    if (need == 0)
+        need = 1;
+    if (n.owned && n.capPages >= need)
+        return true;
+
+    ulong cap = need;
+    if (n.owned)
+    {
+        ulong grown = n.capPages * 2;
+        if (grown > n.capPages + 512)
+            grown = n.capPages + 512;               // large files: 2 MiB steps, not doubling
+        if (grown > cap)
+            cap = grown;
+    }
+    ulong held = n.owned ? n.capPages : 0;
+    if (ramUsedPages - held + cap > RAMFS_MAX_PAGES)
+    {
+        cap = need;                                 // no slack, only what is needed
+        if (ramUsedPages - held + cap > RAMFS_MAX_PAGES)
+            return false;
+    }
+    if (pmmFreeCount() < cap + RAMFS_RESERVE_PAGES)
+    {
+        cap = need;
+        if (pmmFreeCount() < cap + RAMFS_RESERVE_PAGES)
+            return false;
+    }
+
+    ulong phys = pmmAllocContiguousZeroed(cap, 1, 0);
+    if (phys == 0 && cap > need)
+    {
+        cap = need;
+        phys = pmmAllocContiguousZeroed(cap, 1, 0);
+    }
+    if (phys == 0)
+        return false;
+
+    ubyte* fresh = cast(ubyte*)pmmPhysToVirt(phys);
+    if (n.size != 0 && n.data !is null)
+        memcpy(fresh, n.data, cast(size_t)n.size);
+    ramFreeData(n);
+    n.owned = true;
+    n.phys = phys;
+    n.capPages = cap;
+    n.data = fresh;
+    ramUsedPages += cap;
+    return true;
+}
+
+/// Write at `offset` (at most the current size: no holes). Returns the bytes written or a
+/// negative FW_ERR_*. Fewer bytes than asked mean the memory ran out.
+long ramfsWrite(uint node, ulong offset, const(void)* src, ulong len) @nogc nothrow
+{
+    if (node == 0 || node >= ramNodeCount || !ramNodes[node].used)
+        return FW_ERR_NOT_FOUND;
+    RamNode* n = &ramNodes[node];
+    if (n.isDir)
+        return FW_ERR_IS_DIR;
+    if (offset > n.size)
+        return FW_ERR_INVALID;
+    if (len == 0)
+        return 0;
+    if (len > 0xFFFFFFFFUL - offset)
+        len = 0xFFFFFFFFUL - offset;                // same 4 GiB limit as FAT32
+
+    ulong end = offset + len;
+    if (!n.owned || end > n.capPages * 4096)
+    {
+        if (!ramEnsure(n, end))
+        {
+            // out of memory: write what fits in the pages we already have
+            ulong room = n.owned ? n.capPages * 4096 : 0;
+            if (offset >= room)
+                return FW_ERR_NO_SPACE;
+            len = room - offset;
+            end = offset + len;
+        }
+    }
+    memcpy(cast(ubyte*)n.data + offset, src, cast(size_t)len);
+    if (end > n.size)
+        n.size = end;
+    n.mtime = ramDosNow();
+    return cast(long)len;
+}
+
+/// Shorten a file (growing is not supported). Size 0 gives the memory back.
+int ramfsTruncate(uint node, ulong size) @nogc nothrow
+{
+    if (node == 0 || node >= ramNodeCount || !ramNodes[node].used)
+        return FW_ERR_NOT_FOUND;
+    RamNode* n = &ramNodes[node];
+    if (n.isDir)
+        return FW_ERR_IS_DIR;
+    if (size > n.size)
+        return FW_ERR_INVALID;
+    if (size == 0)
+    {
+        ramFreeData(n);
+        n.data = null;
+    }
+    n.size = size;
+    n.mtime = ramDosNow();
+    return FW_OK;
+}
+
+bool ramfsNodeIsDir(uint node) @nogc nothrow
+{
+    return node < ramNodeCount && ramNodes[node].used && ramNodes[node].isDir;
+}
+
+ulong ramfsNodeSize(uint node) @nogc nothrow
+{
+    return node < ramNodeCount ? ramNodes[node].size : 0;
 }

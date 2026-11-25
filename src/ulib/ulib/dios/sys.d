@@ -31,37 +31,41 @@ import ulib.dios.io;
  * DIOS kernel API
  */
 
-// Kernel function numbers
-enum ulong SYS_EXIT = 0;
-enum ulong SYS_WRITE = 1;
-enum ulong SYS_GETKEY = 2;
-enum ulong SYS_SLEEP = 3;
-enum ulong SYS_TICKS = 4;
-enum ulong SYS_CLEAR = 5;
-enum ulong SYS_OPEN = 6;
-enum ulong SYS_READ = 7;
-enum ulong SYS_CLOSE = 8;
-enum ulong SYS_SEEK = 9;
-enum ulong SYS_STAT = 10;
-enum ulong SYS_READDIR = 11;
-enum ulong SYS_GETCWD = 12;
-enum ulong SYS_BRK = 13;
-enum ulong SYS_YIELD = 14;
-enum ulong SYS_GETPID = 15;
-enum ulong SYS_DATETIME = 16;
-enum ulong SYS_RANDOM = 17;
-enum ulong SYS_FWRITE = 18;
-enum ulong SYS_UNLINK = 19;
-enum ulong SYS_MKDIR = 20;
-enum ulong SYS_RMDIR = 21;
-enum ulong SYS_RENAME = 22;
-enum ulong SYS_SYNC = 23;
+// System call group 1 (0..99): process and memory management
+enum ulong SYS_GROUP1   = 0;
+enum ulong SYS_EXIT     = SYS_GROUP1 + 0;
+enum ulong SYS_WRITE    = SYS_GROUP1 + 1;
+enum ulong SYS_GETKEY   = SYS_GROUP1 + 2;
+enum ulong SYS_SLEEP    = SYS_GROUP1 + 3;
+enum ulong SYS_TICKS    = SYS_GROUP1 + 4;
+enum ulong SYS_CLEAR    = SYS_GROUP1 + 5;
+enum ulong SYS_BRK      = SYS_GROUP1 + 6;
+enum ulong SYS_YIELD    = SYS_GROUP1 + 7;
+enum ulong SYS_GETPID   = SYS_GROUP1 + 8;
+enum ulong SYS_DATETIME = SYS_GROUP1 + 9;
+enum ulong SYS_RANDOM   = SYS_GROUP1 + 10;
 
-// Extended kernel function numbers
-enum ulong SYS_EXT1 = 1000;
-enum ulong SYS_EXT2 = 2000;
-enum ulong SYS_EXT3 = 3000;
-enum ulong SYS_EXT4 = 4000;
+// System call group 2 (100..199): filesystem
+enum ulong SYS_GROUP2   = 100;
+enum ulong SYS_OPEN     = SYS_GROUP2 + 0;
+enum ulong SYS_READ     = SYS_GROUP2 + 1;
+enum ulong SYS_FWRITE   = SYS_GROUP2 + 2;
+enum ulong SYS_CLOSE    = SYS_GROUP2 + 3;
+enum ulong SYS_SEEK     = SYS_GROUP2 + 4;
+enum ulong SYS_STAT     = SYS_GROUP2 + 5;
+enum ulong SYS_READDIR  = SYS_GROUP2 + 6;
+enum ulong SYS_GETCWD   = SYS_GROUP2 + 7;
+enum ulong SYS_UNLINK   = SYS_GROUP2 + 8;
+enum ulong SYS_MKDIR    = SYS_GROUP2 + 9;
+enum ulong SYS_RMDIR    = SYS_GROUP2 + 10;
+enum ulong SYS_RENAME   = SYS_GROUP2 + 11;
+enum ulong SYS_SYNC     = SYS_GROUP2 + 12;
+
+// Extended system calls
+enum ulong SYS_EXT1     = 1000; // Graphics server
+enum ulong SYS_EXT2     = 2000; // Reserved
+enum ulong SYS_EXT3     = 3000; // Reserved
+enum ulong SYS_EXT4     = 4000; // Reserved
 
 // uopen() flags
 enum int O_RDONLY = 0;
