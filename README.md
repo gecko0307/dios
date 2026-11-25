@@ -115,7 +115,7 @@ ulib is currently statically linked; DIOS doesn't support dynamic linking yet.
 
 ## Building
 
-DIOS uses its own build system written in Python - `build.py`. It does the following:
+DIOS uses its own build system written in Python that compiles the entire system. It does the following:
 
 - Compiles the kernel (by default `cdroot/kernel64.bin`)
 - Compiles ulib (`rootfs/lib/libulib.a`)
