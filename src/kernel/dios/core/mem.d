@@ -71,3 +71,12 @@ version(X86_64)
 
     void* fastMemcpyNT(void* dest, const(void)* src, size_t size) @nogc nothrow;
 }
+
+///
+size_t strlen(const(char)* s) @nogc nothrow
+{
+    size_t n = 0;
+    while (s[n] != 0)
+        n++;
+    return n;
+}

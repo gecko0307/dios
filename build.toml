@@ -1,0 +1,31 @@
+[build]
+default_target = "all"              # "all" | "kernel" | "ulib" | "rootfs"
+pack_iso = true
+debug = false
+ulib_out = "rootfs/lib/libulib.a"
+kernel_out = "cdroot/kernel64.bin"
+iso_out = "dios64.iso"
+
+[flags]
+d_base = [
+    "-c",
+    "-mtriple=x86_64-none-elf",
+    "-nodefaultlib",
+    "--boundscheck=off",
+    "--disable-red-zone",
+    "--use-ctors=0",
+    "--fno-exceptions",
+    "--nogc",
+]
+d_release = ["-release", "-O2"]
+d_debug = ["-O0", "-g", "-d-debug"]
+d_kernel = ["-I=src/kernel", "-code-model=medium"]
+d_ulib = ["-I=src/ulib"]
+ld_kernel = [
+    "-m", "elf_x86_64",
+    "-z", "max-page-size=0x1000",
+    "-static",
+    "--gc-sections",
+    "-nostdlib",
+]
+nasm = ["-f", "elf64"]
