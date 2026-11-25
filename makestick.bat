@@ -1,1 +1,1 @@
-fstool create -t exfat .\usbstick -o usbstick.img
+fstool create -t fat32 .\usbstick -o usbstick.img
