@@ -30,7 +30,6 @@
         "--use-ctors=0",
         "--fno-exceptions",
         "--nogc",
-        "-O0",
         "-link-internally",
         "-defaultlib="
     ],
