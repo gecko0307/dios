@@ -1077,9 +1077,13 @@ void shellExecute() @nogc nothrow
         cprintf("  umount NAME         Unmount /mnt/NAME (flushes a read-write volume)\n");
         cprintf("  sync                Flush read-write volumes to the disk\n");
         cprintf("  ls [PATH]           List a directory ('ls /mnt' shows the mounted disks)\n");
-        cprintf("  cat FILE            Print a text file\n");
-        cprintf("  touch FILE | mkdir DIR | rmdir DIR | rm FILE   Create / remove (read-write FAT32 volumes only)\n");
-        cprintf("  mv SRC DEST | cp SRC DEST   Rename or move within a volume | copy (DEST may be a directory)\n");
+        cprintf("  cat PATH            Print a text file\n");
+        cprintf("  touch PATH          Create a file\n");
+        cprintf("  mkdir PATH          Create a directory\n");
+        cprintf("  rmdir PATH          Remove a directory\n");
+        cprintf("  rm PATH             Remove a file\n");
+        cprintf("  mv SRC DEST         Rename or move within a volume (DEST may be a directory)\n");
+        cprintf("  cp SRC DEST         Copy (DEST may be a directory)\n");
         cprintf("  write FILE TEXT     Replace FILE's content by TEXT (append FILE TEXT adds a line)\n");
         cprintf("  cd [DIR]            Change the current directory\n");
         cprintf("  pwd                 Show the current directory\n");

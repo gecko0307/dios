@@ -3,6 +3,7 @@ DIOS 0.7.0 - TBD
 - **Kernel**:
   - Experimental FAT32 writing support. Drives are mounted as read-only by default, to enable writing run e.g. `remount usb0p1 rw`
   - File writing syscalls: `SYS_FWRITE`, `SYS_UNLINK`, `SYS_MKDIR`, `SYS_RMDIR`, `SYS_RENAME`, `SYS_SYNC`
+  - New shell commands: `touch`, `mkdir`, `rmdir`, `rm`, `mv`, `cp`, `write`
   - Recovering from USB transaction errors
 - **ulib**:
   - File writing functions: `ufwrite`, `uunlink`, `umkdir`, `urmdir`, `urename`, `usync`

@@ -38,6 +38,8 @@ You can use DIOS as a basis for creating your own operating system! PRs implemen
 - Userspace graphics server (GFXD), windowed applications
 - Simple image viewer.
 
+Note: all storage devices are mounted as read-only by default. FAT32 partitions can be remounted as read/write; exFAT is currently read-only.
+
 ## Kernel Shell Commands
 
 After successful initialization, the kernel immediately starts an interactive shell session. Available commands are listed [here](doc/commands.md).
