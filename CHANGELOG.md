@@ -7,7 +7,8 @@ DIOS 0.7.0 - TBD
   - Recovering from USB transaction errors
 - **ulib**:
   - File writing functions: `ufwrite`, `uunlink`, `umkdir`, `urmdir`, `urename`, `usync`
-  - TGA loader (`ulib.gfx.tga`).
+  - TGA loader (`ulib.gfx.tga`)
+  - Improved `uprintf`: leading zeros, `%k`, `%X`.
 
 DIOS 0.6.0 - 25 Nov, 2026
 -------------------------
