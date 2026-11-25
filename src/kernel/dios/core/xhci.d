@@ -56,6 +56,7 @@ enum uint XHCI_MAX_SLOTS = 32;      // we only enable this many device slots (hu
 enum uint XHCI_RING_TRBS = 256;     // one 4 KiB page per ring
 enum uint XHCI_RPT_BUFS = 16;       // report buffers kept queued on the mouse endpoint
 enum uint XHCI_RPT_STRIDE = 64;
+enum uint XHCI_MAX_EP_ERRORS = 5;   // consecutive transfer errors an interrupt endpoint may recover from
 // Scratch page layout: [0,1024) control data, [1024,2048) mouse reports, [2048,3072) keyboard reports
 enum uint XHCI_KBD_BUF_OFF = 2048;
 
@@ -90,7 +91,7 @@ enum : uint
     TRB_IDT = 1 << 6,       // immediate data (setup stage)
     TRB_DIR_IN = 1 << 16,
 
-    CC_SUCCESS = 1, CC_SHORT_PACKET = 13, CC_STALL = 6
+    CC_SUCCESS = 1, CC_SHORT_PACKET = 13, CC_STALL = 6, CC_BABBLE = 3, CC_TRANSACTION_ERROR = 4
 }
 
 enum : uint
@@ -170,6 +171,8 @@ struct XhciKbd
     ubyte intDci;
     uint reportLen;
     uint rptHead;               // reports completed so far (selects the buffer)
+    bool recover;               // endpoint halted by a transfer error, to be reset by xhciRecoverInputs()
+    ubyte errs;                 // consecutive transfer errors
     XhciRing intRing;
     UsbKbdState state;          // previous report, for press detection
 }
@@ -253,6 +256,8 @@ struct XhciUsbDevice
     HidMouseLayout layout;
     uint rptHead;               // number of reports completed so far (selects the buffer)
     uint rptsDumped;
+    bool mouseRecover;          // endpoint halted by a transfer error, to be reset by xhciRecoverInputs()
+    ubyte mouseErrs;            // consecutive transfer errors
 }
 
 struct XhciController
@@ -609,14 +614,31 @@ void xhciProcessReport(XhciUsbDevice* d, ubyte* rpt, uint got) @nogc nothrow
     }
 }
 
+// Completion codes that leave the endpoint halted but the device usable.
+bool xhciRecoverableCode(uint code) @nogc nothrow
+{
+    return code == CC_TRANSACTION_ERROR || code == CC_BABBLE || code == CC_STALL;
+}
+
 void xhciHandleMouseEvent(XhciUsbDevice* d, uint code, uint residual) @nogc nothrow
 {
+    if (d.mouseRecover)
+        return;                     // halted: nothing more is expected until the endpoint is reset
     if (code != CC_SUCCESS && code != CC_SHORT_PACKET)
     {
+        // A transaction error, babble or stall halts the endpoint. Glitches like these are
+        // common on real hardware, so try to reset it (xhciRecoverInputs, from the main loop).
+        if (xhciRecoverableCode(code) && d.mouseErrs < XHCI_MAX_EP_ERRORS)
+        {
+            d.mouseErrs++;
+            d.mouseRecover = true;
+            return;
+        }
         kprintf("USB mouse: transfer error %u, stopping\n", code);
         d.mouseActive = false;
         return;
     }
+    d.mouseErrs = 0;
 
     uint buf = d.rptHead % XHCI_RPT_BUFS;
     ulong bufOff = 1024 + cast(ulong)buf * XHCI_RPT_STRIDE;
@@ -640,13 +662,22 @@ void xhciHandleMouseEvent(XhciUsbDevice* d, uint code, uint residual) @nogc noth
 void xhciHandleKeyboardEvent(XhciUsbDevice* d, uint code, uint residual) @nogc nothrow
 {
     XhciKbd* k = &d.kbd;
+    if (k.recover)
+        return;
     if (code != CC_SUCCESS && code != CC_SHORT_PACKET)
     {
+        usbKbdStop(&k.state);       // also ends any auto-repeat
+        if (xhciRecoverableCode(code) && k.errs < XHCI_MAX_EP_ERRORS)
+        {
+            k.errs++;
+            k.recover = true;
+            return;
+        }
         kprintf("USB keyboard: transfer error %u, stopping\n", code);
         k.active = false;
-        usbKbdStop(&k.state);       // also ends any auto-repeat
         return;
     }
+    k.errs = 0;
 
     uint buf = k.rptHead % XHCI_RPT_BUFS;
     ulong bufOff = XHCI_KBD_BUF_OFF + cast(ulong)buf * XHCI_RPT_STRIDE;
@@ -758,6 +789,7 @@ public void usbPoll() @nogc nothrow
     {
         xhci = &xhciControllers[i];
         xhciPollEvents();
+        xhciRecoverInputs();
     }
     usbKbdRepeatTick();     // USB keyboards do not auto-repeat by themselves
 }
@@ -1062,6 +1094,8 @@ bool xhciSetupMouse(XhciUsbDevice* d) @nogc nothrow
     // Keep several report buffers queued: with only one, the mouse could
     // deliver at most one report per main-loop iteration.
     d.mouseActive = true;
+    d.mouseRecover = false;
+    d.mouseErrs = 0;
     d.rptHead = 0;
     for (uint i = 0; i < XHCI_RPT_BUFS; i++)
         xhciRingPush(&d.intRing, d.dmaPhys + 1024 + cast(ulong)i * XHCI_RPT_STRIDE,
@@ -1108,6 +1142,8 @@ bool xhciSetupKeyboard(XhciUsbDevice* d) @nogc nothrow
 
     usbKbdStop(&k.state);
     k.active = true;
+    k.recover = false;
+    k.errs = 0;
     k.rptHead = 0;
     for (uint i = 0; i < XHCI_RPT_BUFS; i++)
         xhciRingPush(&k.intRing, d.dmaPhys + XHCI_KBD_BUF_OFF + cast(ulong)i * XHCI_RPT_STRIDE,
@@ -1205,6 +1241,74 @@ void xhciRecoverEp(XhciUsbDevice* d, XhciRing* ring, uint dci, bool halted) @nog
     xhciCommand(deq | ring.cycle, (TRB_CMD_SET_TR_DEQ << 10) | ctl, null);
 }
 
+// Reset a halted interrupt endpoint and point its ring past everything queued so far
+// (the unfinished buffers are dropped; the caller queues fresh ones).
+bool xhciResetIntEp(XhciUsbDevice* d, XhciRing* ring, uint dci) @nogc nothrow
+{
+    uint ctl = (dci << 16) | (cast(uint)d.slotId << 24);
+    if (!xhciCommand(0, (TRB_CMD_RESET_EP << 10) | ctl, null))
+        return false;
+    ulong deq = ring.phys + cast(ulong)ring.enq * XhciTrb.sizeof;
+    return xhciCommand(deq | ring.cycle, (TRB_CMD_SET_TR_DEQ << 10) | ctl, null);
+}
+
+// Restart the mouse and keyboard endpoints that a transfer error halted. This runs from
+// usbPoll(), never from the event handler: it issues commands, which wait for events.
+void xhciRecoverInputs() @nogc nothrow
+{
+    for (uint s = 1; s <= XHCI_MAX_SLOTS; s++)
+    {
+        XhciUsbDevice* d = &xhci.devs[s];
+        if (!d.present)
+            continue;
+
+        if (d.mouseRecover)
+        {
+            d.mouseRecover = false;
+            if (d.mouseActive)
+            {
+                if (xhciResetIntEp(d, &d.intRing, d.intDci))
+                {
+                    d.rptHead = 0;
+                    for (uint i = 0; i < XHCI_RPT_BUFS; i++)
+                        xhciRingPush(&d.intRing, d.dmaPhys + 1024 + cast(ulong)i * XHCI_RPT_STRIDE,
+                                     d.reportLen, (TRB_NORMAL << 10) | TRB_IOC | TRB_ISP);
+                    xhciRingDoorbell(d.slotId, d.intDci);
+                    kprintf("USB mouse: recovered from a transfer error\n");
+                }
+                else
+                {
+                    kprintf("USB mouse: could not recover from a transfer error, stopping\n");
+                    d.mouseActive = false;
+                }
+            }
+        }
+
+        XhciKbd* k = &d.kbd;
+        if (k.recover)
+        {
+            k.recover = false;
+            if (k.active)
+            {
+                if (xhciResetIntEp(d, &k.intRing, k.intDci))
+                {
+                    k.rptHead = 0;
+                    for (uint i = 0; i < XHCI_RPT_BUFS; i++)
+                        xhciRingPush(&k.intRing, d.dmaPhys + XHCI_KBD_BUF_OFF + cast(ulong)i * XHCI_RPT_STRIDE,
+                                     k.reportLen, (TRB_NORMAL << 10) | TRB_IOC | TRB_ISP);
+                    xhciRingDoorbell(d.slotId, k.intDci);
+                    kprintf("USB keyboard: recovered from a transfer error\n");
+                }
+                else
+                {
+                    kprintf("USB keyboard: could not recover from a transfer error, stopping\n");
+                    k.active = false;
+                }
+            }
+        }
+    }
+}
+
 /// One synchronous bulk transfer of `len` bytes (<= 64 KiB, not crossing a 64 KiB
 /// boundary) at `bufPhys`. Returns BULK_OK / BULK_STALL / BULK_ERROR / BULK_TIMEOUT;
 /// on any failure the endpoint ring has already been recovered. `actual` gets the
@@ -1281,7 +1385,9 @@ void xhciRemoveSlot(uint slot) @nogc nothrow
 
     // From here on the event handler and the drivers ignore the device.
     d.mouseActive = false;
+    d.mouseRecover = false;
     d.kbd.active = false;
+    d.kbd.recover = false;
     d.msc.active = false;
     d.present = false;
     usbKbdStop(&d.kbd.state);               // a key held down while the keyboard went away must not repeat

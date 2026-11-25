@@ -56,18 +56,30 @@ module dios.core.proc;
  * procPoll() and reports the exit through taskExitHook.
  *
  * System calls (rax = number; rdi, rsi, rdx = arguments; result in rax):
- *   0 exit(code)
- *   1 write(buf, len)
- *   2 getkey(block)
- *   3 sleep(ms)
- *   4 ticks()
- *   5 clear()
- *   6..12 files
+ *   0  exit(code)
+ *   1  write(buf, len)
+ *   2  getkey(block)
+ *   3  sleep(ms)
+ *   4  ticks()
+ *   5  clear()
+ *   6  open()
+ *   7  read()
+ *   8  close()
+ *   9  seek()
+ *   10 stat()
+ *   11 readdir()
+ *   12 getcwd()
  *   13 brk(requested)
  *   14 yield()
  *   15 getpid()
  *   16 datetime()
  *   17 random()
+ *   18 fwrite()
+ *   19 unlink()
+ *   20 mkdir()
+ *   21 rmdir()
+ *   22 rename()
+ *   23 sync()
  *   1000..1999 reserved for an extension that registers syscallExtHook1 (currently the graphics server)
  *   2000..2999 reserved for an extension that registers syscallExtHook2
  *   3000..3999 reserved for an extension that registers syscallExtHook3
@@ -129,7 +141,7 @@ enum ulong SYS_YIELD = 14;
 enum ulong SYS_GETPID = 15;
 enum ulong SYS_DATETIME = 16;
 enum ulong SYS_RANDOM = 17;
-enum ulong SYS_FWRITE = 18;  // write to a file descriptor
+enum ulong SYS_FWRITE = 18;
 enum ulong SYS_UNLINK = 19;
 enum ulong SYS_MKDIR = 20;
 enum ulong SYS_RMDIR = 21;

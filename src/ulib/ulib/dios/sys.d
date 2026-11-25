@@ -250,9 +250,11 @@ void urandom(void* buffer, size_t size) @nogc nothrow
     sys_call(SYS_RANDOM, cast(ulong)buffer, size, 0);
 }
 
-/// Writes bytes to a file opened with O_WRONLY or O_RDWR, at the current offset (the end with
-/// O_APPEND). Returns the number of bytes written (fewer if the volume is full), or -1 on error.
-/// The data is on the disk when the call returns.
+/**
+ * Writes bytes to a file opened with O_WRONLY or O_RDWR, at the current offset (the end with
+ * O_APPEND). Returns the number of bytes written (fewer if the volume is full), or -1 on error.
+ * The data is on the disk when the call returns.
+ */
 long ufwrite(int fd, const(void)* buf, size_t n) @nogc nothrow
 {
     return sys_call(SYS_FWRITE, cast(ulong)fd, cast(ulong)buf, n);
@@ -276,8 +278,10 @@ int urmdir(const(char)* path) @nogc nothrow
     return cast(int)sys_call(SYS_RMDIR, cast(ulong)path, 0, 0);
 }
 
-/// Renames or moves a file or directory within one volume; the new name must not exist.
-/// Returns 0 or a negative UERR_* code.
+/**
+ * Renames or moves a file or directory within one volume; the new name must not exist.
+ * Returns 0 or a negative UERR_* code.
+ */
 int urename(const(char)* from, const(char)* to) @nogc nothrow
 {
     return cast(int)sys_call(SYS_RENAME, cast(ulong)from, cast(ulong)to, 0);
