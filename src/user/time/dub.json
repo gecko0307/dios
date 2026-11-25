@@ -1,0 +1,51 @@
+{
+    "name": "timer",
+    "description": "Program that prints current time",
+    "homepage": "",
+    "license": "Unlicense",
+    "authors": [
+        "Timur Gafarov"
+    ],
+    
+    "importPaths": [
+        "src", "../../ulib"
+    ],
+    
+    "sourcePaths": [
+        "src", "../../ulib"
+    ],
+    
+    "buildRequirements": [
+        "allowWarnings"
+    ],
+    
+    "targetType": "executable",
+    "targetName": "time.elf",
+    
+    "dflags-ldc": [
+        "-mtriple=x86_64-none-elf",
+        "-nodefaultlib",
+        "--boundscheck=off",
+        "--disable-red-zone",
+        "--use-ctors=0",
+        "--fno-exceptions",
+        "--nogc",
+        "-link-internally",
+        "-defaultlib="
+    ],
+
+    "lflags": [
+        "-m", "elf_x86_64",
+        "-T", "linker.ld",
+        "-z", "max-page-size=0x1000",
+        "-static",
+        "--gc-sections",
+        "-u", "_start",
+        "../../../rootfs/lib/libulib.a"
+    ],
+    
+    "postBuildCommands-windows": [
+        "move /Y time.elf.exe time.elf",
+        "copy /Y time.elf ..\\..\\..\\rootfs\\bin\\time.elf"
+    ]
+}

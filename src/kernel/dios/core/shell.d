@@ -52,8 +52,8 @@ import dios.core.xhci;
 enum size_t SHELL_LINE_CAPACITY = 128;
 enum size_t SHELL_HISTORY_CAPACITY = 16;
 
-immutable string[47] SHELL_COMMANDS = [
-    "help", "about", "mem", "time", "uptime", "clock",
+immutable string[46] SHELL_COMMANDS = [
+    "help", "about", "mem", "uptime", "clock",
     "irq", "pci", "history", "echo", "poweroff", "shutdown",
     "reboot", "clear", "cpuinfo", "acpi", "irqstat",
     "sleep", "hexdump", "crash", "version", "ls", "run", "memmap",
@@ -1138,14 +1138,6 @@ void shellExecute() @nogc nothrow
         }
         if (memMapTruncated)
             cprintf("  (map truncated at %u entries)\n", cast(uint)MEMMAP_MAX_ENTRIES);
-    }
-    else if (shellEquals(shellLine.ptr, "time"))
-    {
-        DateTime t;
-        datetimeNow(&t);
-        cprintf("UTC %02d.%02d.%d %02d:%02d:%02d\n",
-            t.day, t.month, t.year,
-            t.hour, t.minute, t.second);
     }
     else if (shellEquals(shellLine.ptr, "uptime"))
     {
