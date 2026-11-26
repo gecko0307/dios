@@ -1,3 +1,9 @@
+DIOS 0.9.0 - TBD
+----------------
+- **Bootloader**:
+  - Two different boot options: graphics mode and kernel shell
+  - Add a bootloader wallpaper.
+
 DIOS 0.8.0 - 26 Nov, 2026
 -------------------------
 - **Kernel**:
