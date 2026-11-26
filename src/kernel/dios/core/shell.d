@@ -52,12 +52,12 @@ import dios.core.xhci;
 enum size_t SHELL_LINE_CAPACITY = 128;
 enum size_t SHELL_HISTORY_CAPACITY = 16;
 
-immutable string[43] SHELL_COMMANDS = [
+immutable string[42] SHELL_COMMANDS = [
     "help", "about", "mem", "clock",
     "irq", "pci", "history", "echo", "poweroff", "shutdown",
     "reboot", "clear", "cpuinfo", "acpi", "irqstat",
     "sleep", "hexdump", "crash", "version", "run", "memmap",
-    "programs", "disk", "mount", "pwd", "cat", "dmesg", "usb",
+    "programs", "disk", "mount", "cat", "dmesg", "usb",
     "ps", "kill", "fg", "gfx", "umount",
     "touch", "mkdir", "rmdir", "rm", "mv", "cp", "write", "append", "sync", "remount"
 ];
@@ -1056,7 +1056,6 @@ void shellExecute() @nogc nothrow
         cprintf("  cp SRC DEST         Copy (DEST may be a directory)\n");
         cprintf("  write PATH TEXT     Replace file's content by TEXT\n");
         cprintf("  append PATH TEXT    Add a line to the file\n");
-        cprintf("  pwd                 Show the current directory\n");
         cprintf("  run NAME [ARGS] [&] Run a program (& = run in background); plain NAME works too\n");
         cprintf("  ps                  List running programs\n");
         cprintf("  kill ID             Kill a program\n");
@@ -1256,10 +1255,6 @@ void shellExecute() @nogc nothrow
     }
     else if (shellEquals(shellLine.ptr, "remount"))
         shellRemount(args);
-    else if (shellEquals(shellLine.ptr, "pwd"))
-    {
-        cprintf("%s\n", fsCwd.ptr);
-    }
     else if (shellEquals(shellLine.ptr, "run"))
     {
         // First word of the arguments is the program name, the rest is passed on.

@@ -3,6 +3,7 @@
 These programs are available in `/bin` directory and are recognized as commands by the kernel shell and the graphical terminal.
 
 - `cd [DIR]` - changes the current directory.
+- `pwd` - shows the current directory.
 - `ls [PATH]` - lists a directory.
 - `file PATH [OFFSET]` - prints a text file, optionally starting at a byte offset.
 - `time [-u]` - prints current date and time. `-u` prints time since the system boot.

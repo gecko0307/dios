@@ -1,6 +1,6 @@
 {
     "name": "file",
-    "description": "Application that prints a text file",
+    "description": "Application that prints text files to the standard output",
     "homepage": "",
     "license": "Unlicense",
     "authors": [

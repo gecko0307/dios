@@ -1,6 +1,6 @@
 {
     "name": "timer",
-    "description": "Timer service for running in background",
+    "description": "Timer program",
     "homepage": "",
     "license": "Unlicense",
     "authors": [
