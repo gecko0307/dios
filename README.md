@@ -8,7 +8,6 @@ Although many features of DIOS are inspired by Unix, this is only to keep a degr
 
 You can use DIOS as a basis for creating your own operating system! PRs implementing new features are welcome. The code is a bit messy but readable.
 
-[![Screenshot1](media/screenshot1.png)](media/screenshot1.png)
 [![Screenshot2](media/screenshot2.jpg)](media/screenshot2.jpg)
 [![Screenshot3](media/screenshot3.png)](media/screenshot3.png)
 
@@ -43,7 +42,9 @@ Note: all storage devices are mounted as read-only by default. FAT32 partitions 
 
 ## Kernel Shell Commands
 
-After successful initialization, the kernel immediately starts an interactive shell session. Available commands are listed [here](doc/commands.md).
+After successful initialization, the kernel immediately starts a graphics mode and runs its own shell at the background. You can always revert to the shell with `Ctrl+F1` and back to graphics with `Ctrl+F2`. Available commands are listed [here](doc/commands.md).
+
+In graphics mode, you should see a user terminal window.
 
 ## Applications
 
@@ -148,15 +149,3 @@ dub build
 ```
 
 All *.elf binaries of the demos are automatically copied to `rootfs/bin`. To include them to the root filesystem, you should run `python build.py rootfs` to rebuild the image.
-
-## What Next?
-
-If you see the blue kernel shell with a blinking cursor, congratulations: DIOS is up and running! With a few more steps you can open an image viewer window as shown on the screenshot above:
-
-1. Enter `cd /home`
-2. Enter `image lake.tga &`
-3. Enter `gfx start` and enjoy the graphics mode!
-
-You can always switch back to the shell with Ctrl+F1 and to the graphics mode with Ctrl+F2.
-
-Enter `shutdown` (or `poweroff`) to turn the computer off.
