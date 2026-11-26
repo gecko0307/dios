@@ -31,7 +31,7 @@ int main(string[] args)
 {
     DateTime dt;
     udatetime(&dt);
-    uprintf("UTC %02d.%02d.%d %02d:%02d:%02d\n",
+    uprintf("%02d.%02d.%d %02d:%02d:%02d\n",
         dt.day, dt.month, dt.year,
         dt.hour, dt.minute, dt.second);
     return 0;
