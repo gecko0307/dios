@@ -49,9 +49,24 @@ struct Window
     uint id;                // kernel surface id, 0 = not open
     Canvas canvas;          // draw here
     bool serverRunning;     // is a graphics server running? (kept up to date by windowPoll)
+    uint flags;             // GFX_WIN_* requested from the window manager (see windowSetHints)
+    int posX, posY;         // ... and the position that goes with GFX_WIN_POSITION
 }
 
 extern(C):
+
+// Sends the window's flags and position to the server. Silently does nothing without one.
+private void windowSendHints(Window* win) @nogc nothrow
+{
+    if (win.id == 0)
+        return;
+    GfxEvent e;
+    e.type = GFX_EV_WM_HINTS;
+    e.a = cast(int)win.flags;
+    e.b = win.posX;
+    e.c = win.posY;
+    ugfxSend(win.id, &e);
+}
 
 /**
  * Opens a window of width x height pixels (black). False if it could not be created
@@ -75,9 +90,54 @@ bool windowCreate(Window* win, uint width, uint height) @nogc nothrow
     win.canvas.width = cast(int)d.width;
     win.canvas.height = cast(int)d.height;
     win.canvas.stride = cast(int)(d.stride / 4);
+    win.flags = 0;
+    win.posX = 0;
+    win.posY = 0;
 
     GfxInfo info;
     win.serverRunning = ugfxInfo(&info) == 0 && (info.flags & GFX_INFO_SERVER) != 0;
+    return true;
+}
+
+/**
+ * Asks the window manager to treat the window in a special way: `flags` is a combination of
+ * GFX_WIN_* (0 = an ordinary window again). With GFX_WIN_POSITION the window is put at x, y
+ * on the screen (its top left drawable pixel); without it x and y are ignored and the window
+ * stays where it is.
+ *
+ * It is a request that takes effect when the server handles it. It is repeated by windowPoll()
+ * whenever a server starts, so keep polling events (as every window program does).
+ */
+void windowSetHints(Window* win, uint flags, int x, int y) @nogc nothrow
+{
+    win.flags = flags & GFX_WIN_ALL;
+    win.posX = x;
+    win.posY = y;
+    windowSendHints(win);
+}
+
+/// Moves a window that has the GFX_WIN_POSITION hint (or gives it one) to x, y on the screen.
+void windowSetPosition(Window* win, int x, int y) @nogc nothrow
+{
+    windowSetHints(win, win.flags | GFX_WIN_POSITION, x, y);
+}
+
+/**
+ * Opens a window for a desktop shell (a background, a taskbar, a widget): no frame, cannot be
+ * moved by the user, always below all other windows, at x, y on the screen. The size of the
+ * screen is in ugfxInfo(). Example, a 32 pixel taskbar along the bottom edge:
+ *
+ *     GfxInfo info;
+ *     ugfxInfo(&info);
+ *     windowCreateDesktop(&bar, info.width, 32, 0, info.height - 32);
+ *
+ * Returns false if the window could not be created, like windowCreate().
+ */
+bool windowCreateDesktop(Window* win, uint width, uint height, int x, int y) @nogc nothrow
+{
+    if (!windowCreate(win, width, height))
+        return false;
+    windowSetHints(win, GFX_WIN_DESKTOP, x, y);
     return true;
 }
 
@@ -109,7 +169,12 @@ bool windowPoll(Window* win, GfxEvent* ev, long timeoutMs) @nogc nothrow
     if (ugfxPoll(ev, timeoutMs) != 1)
         return false;
     if (ev.type == GFX_EV_SERVER)
+    {
         win.serverRunning = ev.a != 0;
+        // A server that starts knows nothing about us yet (hints sent before it were dropped)
+        if (ev.a != 0 && win.flags != 0)
+            windowSendHints(win);
+    }
     return true;
 }
 

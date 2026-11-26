@@ -31,6 +31,7 @@ module main;
  *
  * Everything it does is a reaction to events from ugfxPoll():
  *   GFX_EV_SURFACE_NEW / _DAMAGE / _GONE   programs and their drawable areas   -> wm.d
+ *   GFX_EV_WM_HINTS                         a program asks for special treatment of its window -> wm.d
  *   GFX_EV_VISIBLE                          the screen was given / taken away
  *   GFX_EV_KEY / GFX_EV_MOUSE               input, only while we have the screen -> wm.d
  * and then, when something changed, a new picture is composed (render.d) and presented.
@@ -68,6 +69,15 @@ void handleEvent(const(GfxEvent)* ev)
             wmRemove(ev.surface);
             break;
 
+        case GFX_EV_WM_HINTS:
+            // From a client: ev.a = GFX_WIN_* flags, ev.b, ev.c = position (with GFX_WIN_POSITION)
+        {
+            int idx = wmFind(ev.surface);
+            if (idx >= 0)
+                wmSetHints(idx, cast(uint)ev.a, ev.b, ev.c);
+            break;
+        }
+
         case GFX_EV_VISIBLE:
             renderVisible = ev.a != 0;
             sceneDirty = true;          // when we get the screen back it must be repainted fully
@@ -95,12 +105,12 @@ int main(string[] args)
     GfxInfo info;
     if (ugfxInfo(&info) != 0)
     {
-        uputs("gfxd: no graphics available\n");
+        uprintf("gfxd: no graphics available\n");
         return 1;
     }
     if (!renderInit(info.width, info.height))
     {
-        uputs("gfxd: out of memory for the back buffer\n");
+        uprintf("gfxd: out of memory for the back buffer\n");
         return 1;
     }
     wmInit(cast(int)info.width, cast(int)info.height);
@@ -109,10 +119,15 @@ int main(string[] args)
     // as GFX_EV_SURFACE_NEW, the first event is for them.
     if (ugfxServerBegin() != 0)
     {
-        uputs("gfxd: a graphics server is already running\n");
+        uprintf("gfxd: a graphics server is already running\n");
         return 1;
     }
-    uputs("gfxd: started. Ctrl+F1 shell, Ctrl+F2 server, Ctrl+F3 kill it, Ctrl+Q quit\n");
+    uprintf("gfxd: started. Ctrl+F1 shell, Ctrl+F2 server, Ctrl+F3 kill it, Ctrl+Q quit\n");
+
+    // TODO: make configurable
+    int desktopId = uspawn("/bin/desktop.elf", "", STDOUT_INHERIT);
+    if (desktopId == -1)
+        uprintf("gfxd: failed to run /bin/desktop.elf. Desktop manager is not installed\n");
 
     ulong lastFrame = 0;
     while (running)

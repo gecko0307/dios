@@ -172,7 +172,8 @@ private void renderScenePart(int rx, int ry, int rw, int rh)
     {
         int idx = wmOrder[i];
         WmWindow* w = &wmWindows[idx];
-        renderDecoration(&c, w, idx == wmFocus, rx, ry);
+        if (wmDecorated(w))
+            renderDecoration(&c, w, idx == wmFocus, rx, ry);
         c.blit(&w.canvas, w.x - rx, w.y - ry);
     }
 }

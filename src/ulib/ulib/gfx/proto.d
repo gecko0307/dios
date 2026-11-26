@@ -78,6 +78,20 @@ enum uint GFX_EV_CLOSE          = 34;   // the user asked to close the window
 // From here on: free for you. Clients may only send these (to the server); the server may send anything.
 enum uint GFX_EV_USER           = 0x1000;
 
+// client -> server: requests to the window manager of gfxd (the kernel passes them on untouched).
+// 0x1000 .. 0x10FF is reserved for these; use GFX_EV_USER + 0x100 or above for your own events.
+enum uint GFX_EV_WM_HINTS       = GFX_EV_USER + 0;  // surface; a = GFX_WIN_* flags, b, c = x, y (only with GFX_WIN_POSITION)
+
+// GfxEvent.a of GFX_EV_WM_HINTS: how the window manager treats the window. The flags are independent.
+enum uint GFX_WIN_BORDERLESS = 1;       // no frame, no title bar, no close button: the window is just its drawable area
+enum uint GFX_WIN_FIXED      = 2;       // the user cannot move it (it still can be given a position with GFX_WIN_POSITION)
+enum uint GFX_WIN_BOTTOM     = 4;       // always below all other windows; clicking it does not raise it above them
+enum uint GFX_WIN_POSITION   = 8;       // b, c are the screen position of the top left corner of the drawable area
+enum uint GFX_WIN_ALL        = 15;
+
+// Desktop shell windows (a desktop background, taskbar, widgets) are BORDERLESS | FIXED | BOTTOM | POSITION.
+enum uint GFX_WIN_DESKTOP    = GFX_WIN_BORDERLESS | GFX_WIN_FIXED | GFX_WIN_BOTTOM | GFX_WIN_POSITION;
+
 // GfxEvent.c of GFX_EV_KEY
 enum uint GFX_MOD_SHIFT = 1;
 enum uint GFX_MOD_CTRL  = 2;
