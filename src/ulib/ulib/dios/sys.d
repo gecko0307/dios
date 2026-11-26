@@ -44,11 +44,7 @@ enum ulong SYS_YIELD    = SYS_GROUP1 + 7;
 enum ulong SYS_GETPID   = SYS_GROUP1 + 8;
 enum ulong SYS_DATETIME = SYS_GROUP1 + 9;
 enum ulong SYS_RANDOM   = SYS_GROUP1 + 10;
-enum ulong SYS_SPAWN      = SYS_GROUP1 + 11;
-enum ulong SYS_TTY_CREATE = SYS_GROUP1 + 12;
-enum ulong SYS_TTY_READ   = SYS_GROUP1 + 13;
-enum ulong SYS_TTY_STAT   = SYS_GROUP1 + 14;
-enum ulong SYS_TTY_CLOSE  = SYS_GROUP1 + 15;
+enum ulong SYS_SPAWN    = SYS_GROUP1 + 11;
 
 // System call group 2 (100..199): filesystem
 enum ulong SYS_GROUP2   = 100;
@@ -65,6 +61,21 @@ enum ulong SYS_MKDIR    = SYS_GROUP2 + 9;
 enum ulong SYS_RMDIR    = SYS_GROUP2 + 10;
 enum ulong SYS_RENAME   = SYS_GROUP2 + 11;
 enum ulong SYS_SYNC     = SYS_GROUP2 + 12;
+
+// System call group 3 (200-299): standard text I/O
+enum ulong SYS_GROUP3     = 200;
+enum ulong SYS_TTY_CREATE = SYS_GROUP3 + 0;
+enum ulong SYS_TTY_READ   = SYS_GROUP3 + 1;
+enum ulong SYS_TTY_STAT   = SYS_GROUP3 + 2;
+enum ulong SYS_TTY_CLOSE  = SYS_GROUP3 + 3;
+
+// System call group 4 (300-399): reserved
+// System call group 5 (400-499): reserved
+// System call group 6 (500-599): reserved
+// System call group 7 (600-699): reserved
+// System call group 8 (700-799): reserved
+// System call group 9 (800-899): reserved
+// System call group 10 (900-999): reserved
 
 // Extended system calls
 enum ulong SYS_EXT1     = 1000; // Graphics server

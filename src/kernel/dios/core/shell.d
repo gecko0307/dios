@@ -1457,6 +1457,28 @@ void shellComplete() @nogc nothrow
     }
 }
 
+/**
+ * Boot with the kernel argument "gfx": start the graphics server (/bin/gfxd.elf) and a
+ * terminal window (/bin/term.elf), exactly as `run gfxd &` and `run term &` would.
+ * Missing programs are reported on the console and skipped.
+ */
+void shellAutostartGfx() @nogc nothrow
+{
+    char[FS_PATH_MAX] file;
+    if (!shellResolveProgram("gfxd".ptr, file.ptr))
+    {
+        cprintf("gfx: /bin/gfxd.elf not found, graphics server not started\n");
+        return;
+    }
+    shellRunFile(file.ptr, "".ptr, true);
+    if (!shellResolveProgram("gterm".ptr, file.ptr))
+    {
+        cprintf("gfx: /bin/gterm.elf not found, no terminal started\n");
+        return;
+    }
+    shellRunFile(file.ptr, "".ptr, true);
+}
+
 void shellInit() @nogc nothrow
 {
     shellClearLine();

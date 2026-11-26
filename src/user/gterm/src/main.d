@@ -50,19 +50,19 @@ import ulib.gfx;
 
 enum uint COLS = 80;
 enum uint ROWS = 25;
-enum int CELL_W = 8;                // distance between two characters
+enum int CELL_W = 8; // distance between two characters
 enum int CELL_H = 12;
-enum int GLYPH_W = 10;              // size of a glyph in the font picture (wider than CELL_W: they overlap)
+enum int GLYPH_W = 10; // size of a glyph in the font picture (wider than CELL_W: they overlap)
 enum int GLYPH_H = 12;
-enum int ATLAS_COLS = 16;           // glyph c is at column c % 16, row c / 16
+enum int ATLAS_COLS = 16; // glyph c is at column c % 16, row c / 16
 enum uint WIN_W = COLS * CELL_W + (GLYPH_W - CELL_W);
 enum uint WIN_H = ROWS * CELL_H;
 
 enum uint COLOR_BG     = 0x00101820;
 enum uint COLOR_FG     = 0x00C8D0D8;
-enum uint COLOR_CURSOR = 0x0060E060;
+enum uint COLOR_CURSOR = 0x00C8D0D8;
 
-enum uint LINE_MAX = 200;           // longest command line (the kernel allows 255 bytes of arguments)
+enum uint LINE_MAX = 200; // longest command line (the kernel allows 255 bytes of arguments)
 enum uint NAME_MAX = 64;
 enum uint PATH_MAX = 128;
 
@@ -82,7 +82,7 @@ __gshared char[LINE_MAX] line;
 __gshared uint lineLen;
 
 __gshared bool running = true;
-__gshared bool busy;                // a program is running: no command line until it has ended
+__gshared bool busy; // a program is running: no command line until it has ended
 __gshared bool dirty = true;
 __gshared ulong blinkPhase;
 
@@ -175,7 +175,7 @@ void drawGlyph(char c, int px, int py) @nogc nothrow
     {
         for (int x = 0; x < GLYPH_W; x++)
         {
-            // the font picture is white letters on magenta (the see-through colour)
+            // The font picture is white letters on magenta (the see-through colour)
             if ((font.getPixel(gx + x, gy + y) & 0x00FFFFFF) == 0x00FFFFFF)
                 win.canvas.setPixel(px + x, py + y, COLOR_FG);
         }
@@ -283,7 +283,7 @@ void runLine() @nogc nothrow
     termNewline();
     line[lineLen] = 0;
 
-    // first word: the program, the rest: its arguments
+    // First word: the program, the rest: its arguments
     char[NAME_MAX] name;
     uint i = 0;
     while (i < lineLen && isSpace(line[i]))
@@ -298,7 +298,7 @@ void runLine() @nogc nothrow
     name[n] = 0;
     while (i < lineLen && isSpace(line[i]))
         i++;
-    const(char)* args = line.ptr + i;      // ends at line[lineLen] == 0
+    const(char)* args = line.ptr + i; // ends at line[lineLen] == 0
 
     if (n == 0)
     {
@@ -337,7 +337,7 @@ void runLine() @nogc nothrow
             prompt();
         }
         else
-            busy = true;               // service() brings the prompt back when it has ended
+            busy = true; // service() brings the prompt back when it has ended
     }
 }
 
@@ -376,7 +376,7 @@ void handleEvent(const(GfxEvent)* ev) @nogc nothrow
 /// Once a frame: bring in the output; when the program has ended and everything it wrote is shown, new prompt.
 void service() @nogc nothrow
 {
-    bool gone = uttyWriters(tty) == 0;     // asked first: a program that has ended cannot write any more
+    bool gone = uttyWriters(tty) == 0; // asked first: a program that has ended cannot write any more
     bool drained = pump();
     if (busy && gone && drained)
     {
@@ -443,7 +443,7 @@ int main(string[] args)
     }
 
     termClear();
-    termPutString("GTerm: DIOS Graphical Terminal. Enter 'help' to list the built-in commands.\n");
+    termPutString("DIOS Graphical Terminal. Enter 'help' to list the built-in commands.\n");
     prompt();
 
     while (running)
@@ -463,7 +463,7 @@ int main(string[] args)
         }
     }
 
-    uttyClose(tty);                         // programs still running lose their output
+    uttyClose(tty); // programs still running lose their output
     windowClose(&win);
     if (fontImage.data.length > 0)
         ufree(fontImage.data.ptr);

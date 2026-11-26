@@ -184,6 +184,29 @@ ulong nowMs() @nogc nothrow
     return clockNowNs() / 1_000_000;
 }
 
+/// Is `word` one of the space separated words of the kernel arguments?
+bool bootArgHas(const(char)* args, const(char)* word) @nogc nothrow
+{
+    while (*args != 0)
+    {
+        while (*args == ' ' || *args == '\t')
+            args++;
+        const(char)* start = args;
+        while (*args != 0 && *args != ' ' && *args != '\t')
+            args++;
+        const(char)* w = word;
+        const(char)* a = start;
+        while (a < args && *w != 0 && *a == *w)
+        {
+            a++;
+            w++;
+        }
+        if (a == args && *w == 0 && args != start)
+            return true;
+    }
+    return false;
+}
+
 /// Starts graphics; initializes memory manager and boot peripherals; runs the shell
 void run() @nogc nothrow
 {
@@ -261,6 +284,10 @@ void run() @nogc nothrow
     procInit();
     gfxsrvInit(); // graphics server support: system calls 16..26, Ctrl+F1/F2/F3
     shellInit();
+
+    // Kernel argument "gfx": come up with the graphics server and a terminal window
+    if (bootArgHas(bootInfo.arguments, "gfx".ptr))
+        shellAutostartGfx();
 
     enum ulong BLINK_MS = 100;
     ulong nextBlink = nowMs() + BLINK_MS;

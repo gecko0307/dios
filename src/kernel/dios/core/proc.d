@@ -55,39 +55,13 @@ module dios.core.proc;
  * or by being killed. It becomes a zombie; task 0 reaps it (frees the address space) in
  * procPoll() and reports the exit through taskExitHook.
  *
- * System calls (rax = number; rdi, rsi, rdx = arguments; result in rax):
- *   0  exit(code)
- *   1  write(buf, len)
- *   2  getkey(block)
- *   3  sleep(ms)
- *   4  ticks()
- *   5  clear()
- *   6  open()
- *   7  read()
- *   8  close()
- *   9  seek()
- *   10 stat()
- *   11 readdir()
- *   12 getcwd()
- *   13 brk(requested)
- *   14 yield()
- *   15 getpid()
- *   16 datetime()
- *   17 random()
- *   18 fwrite()
- *   19 unlink()
- *   20 mkdir()
- *   21 rmdir()
- *   22 rename()
- *   23 sync()
- *   (the numbers above are historic; the SYS_* constants below are authoritative)
- *
  * Standard output: write() and clear() go to the stdout target of the calling task
  * (Task.stdoutId): the kernel console (0, the default, what the shell shows) or a channel
  * (tty.d) read by a user program such as a terminal. A task inherits nothing implicitly:
  * programs started by the shell write to the console; programs started with spawn() get the
  * target the spawner chose (see sysSpawn).
  *
+ * Extended system calls:
  *   1000..1999 reserved for an extension that registers syscallExtHook1 (currently the graphics server)
  *   2000..2999 reserved for an extension that registers syscallExtHook2
  *   3000..3999 reserved for an extension that registers syscallExtHook3
@@ -146,15 +120,11 @@ enum ulong SYS_YIELD    = SYS_GROUP1 + 7;
 enum ulong SYS_GETPID   = SYS_GROUP1 + 8;
 enum ulong SYS_DATETIME = SYS_GROUP1 + 9;
 enum ulong SYS_RANDOM   = SYS_GROUP1 + 10;
-enum ulong SYS_SPAWN      = SYS_GROUP1 + 11;   // spawn(path, args, stdoutId) -> task id or -1
-enum ulong SYS_TTY_CREATE = SYS_GROUP1 + 12;   // tty_create() -> channel id or -1
-enum ulong SYS_TTY_READ   = SYS_GROUP1 + 13;   // tty_read(id, buf, len) -> bytes (0: none), -1 error
-enum ulong SYS_TTY_STAT   = SYS_GROUP1 + 14;   // tty_stat(id) -> number of live writers, -1 error
-enum ulong SYS_TTY_CLOSE  = SYS_GROUP1 + 15;   // tty_close(id) -> 0 or -1
+enum ulong SYS_SPAWN    = SYS_GROUP1 + 11;
 
-enum uint SPAWN_INHERIT = 0xFFFFFFFF;          // spawn(): use the caller's own stdout
+enum uint SPAWN_INHERIT = 0xFFFFFFFF; // spawn(): use the caller's own stdout
 
-// System call group 2 (100..199): filesystem
+// System call group 2 (100..199): filesystem I/O
 enum ulong SYS_GROUP2   = 100;
 enum ulong SYS_OPEN     = SYS_GROUP2 + 0;
 enum ulong SYS_READ     = SYS_GROUP2 + 1;
@@ -170,11 +140,26 @@ enum ulong SYS_RMDIR    = SYS_GROUP2 + 10;
 enum ulong SYS_RENAME   = SYS_GROUP2 + 11;
 enum ulong SYS_SYNC     = SYS_GROUP2 + 12;
 
+// System call group 3 (200-299): standard text I/O
+enum ulong SYS_GROUP3     = 200;
+enum ulong SYS_TTY_CREATE = SYS_GROUP3 + 0;   // tty_create() -> channel id or -1
+enum ulong SYS_TTY_READ   = SYS_GROUP3 + 1;   // tty_read(id, buf, len) -> bytes (0: none), -1 error
+enum ulong SYS_TTY_STAT   = SYS_GROUP3 + 2;   // tty_stat(id) -> number of live writers, -1 error
+enum ulong SYS_TTY_CLOSE  = SYS_GROUP3 + 3;   // tty_close(id) -> 0 or -1
+
+// System call group 4 (300-399): reserved
+// System call group 5 (400-499): reserved
+// System call group 6 (500-599): reserved
+// System call group 7 (600-699): reserved
+// System call group 8 (700-799): reserved
+// System call group 9 (800-899): reserved
+// System call group 10 (900-999): reserved
+
 // Extended system calls, handled by corresponding syscallExtHook*
-enum ulong SYS_EXT1     = 1000; // [1000..1999 - SYS_EXT1]
-enum ulong SYS_EXT2     = 2000; // [2000..2999 - SYS_EXT2]
-enum ulong SYS_EXT3     = 3000; // [3000..3999 - SYS_EXT3]
-enum ulong SYS_EXT4     = 4000; // [4000..4999 - SYS_EXT4]
+enum ulong SYS_EXT1     = 1000; // [1000..1999 - SYS_EXT1] - graphics server
+enum ulong SYS_EXT2     = 2000; // [2000..2999 - SYS_EXT2] - reserved
+enum ulong SYS_EXT3     = 3000; // [3000..3999 - SYS_EXT3] - reserved
+enum ulong SYS_EXT4     = 4000; // [4000..4999 - SYS_EXT4] - reserved
 
 enum uint MSR_EFER   = 0xC0000080;
 enum uint MSR_STAR   = 0xC0000081;
