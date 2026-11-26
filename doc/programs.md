@@ -2,6 +2,7 @@
 
 These programs are available in `/bin` directory and are recognized as commands by the kernel shell and the graphical terminal.
 
+- `echo TEXT` - prints TEXT
 - `about` - prints information about the operating system
 - `cd [DIR]` - changes the current directory.
 - `pwd` - prints the current directory.

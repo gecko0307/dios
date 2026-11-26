@@ -10,7 +10,6 @@
 - `pci` - enumerate PCI functions
 - `hexdump [-p] ADDR [LEN]` - dump memory (-p: physical address)
 - `history` - show recent commands
-- `echo TEXT` - print TEXT
 - `sleep SECONDS` - wait (Ctrl+C aborts)
 - `programs` - list the programs in `/bin`
 - `dmesg [N [SKIP]]` - kernel log (last N lines, SKIP lines before the end)

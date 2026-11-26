@@ -53,7 +53,7 @@ enum size_t SHELL_LINE_CAPACITY = 128;
 enum size_t SHELL_HISTORY_CAPACITY = 16;
 
 immutable string[40] SHELL_COMMANDS = [
-    "help", "mem", "clock", "irq", "pci", "history", "echo", "poweroff", "shutdown",
+    "help", "mem", "clock", "irq", "pci", "history", "poweroff", "shutdown",
     "reboot", "clear", "cpuinfo", "acpi", "irqstat",
     "sleep", "hexdump", "crash", "run", "memmap",
     "programs", "disk", "mount", "cat", "dmesg", "usb",
@@ -1034,7 +1034,6 @@ void shellExecute() @nogc nothrow
         cprintf("  acpi                ACPI tables, MADT, FADT summary\n");
         cprintf("  hexdump [-p] ADDR [LEN]  Dump memory (-p: physical address)\n");
         cprintf("  history             Show recent commands\n");
-        cprintf("  echo TEXT           Print TEXT\n");
         cprintf("  sleep SECONDS       Wait (Ctrl+C aborts)\n");
         cprintf("  programs            List the programs in /bin\n");
         cprintf("  dmesg [N [SKIP]]    Kernel log (last N lines, SKIP lines before the end)\n");
