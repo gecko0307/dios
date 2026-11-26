@@ -5,7 +5,7 @@ DIOS 0.8.0 - TBD
   - New syscalls `SYS_SPAWN`, `SYS_CHDIR`, `SYS_STR`
   - Unique working directory per process
   - `uptime` command removed, use `time -u` instead
-  - Support automatically starting the graphics mode after boot
+  - Automatically start the graphics mode after boot if `gfx` kernel argument specified
 - **ulib**:
   - New functions `uspawn`, `uchdir`, `chCreate`, `chRead`, `chWriters`, `chClose`
 - **Userspace**
