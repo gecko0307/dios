@@ -42,9 +42,13 @@ Note: all storage devices are mounted as read-only by default. FAT32 partitions 
 
 ## Kernel Shell Commands
 
-After successful initialization, the kernel immediately starts a graphics mode and runs its own shell at the background. You can always revert to the shell with `Ctrl+F1` and back to graphics with `Ctrl+F2`. Available commands are listed [here](doc/commands.md).
+After successful initialization, the kernel immediately starts a graphics mode and runs its own shell at the background. You can always revert to the shell with `Ctrl+F1` and back to graphics with `Ctrl+F2`. Available shell commands are listed [here](doc/commands.md).
 
-In graphics mode, you should see a user terminal window.
+In the graphics mode, you should see a user terminal window. Terminal's possibilities are very limited at the moment, but you already can run built-in programs. For example:
+
+- `time` - prints current date and time
+- `file /home/hello.txt` - prints a text file
+- `image /home/lake.tga` - displays a TGA image.
 
 ## Applications
 
