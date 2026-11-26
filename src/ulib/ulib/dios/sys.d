@@ -45,6 +45,7 @@ enum ulong SYS_GETPID   = SYS_GROUP1 + 8;
 enum ulong SYS_DATETIME = SYS_GROUP1 + 9;
 enum ulong SYS_RANDOM   = SYS_GROUP1 + 10;
 enum ulong SYS_SPAWN    = SYS_GROUP1 + 11;
+enum ulong SYS_STR      = SYS_GROUP1 + 12;
 
 // System calls group 2 (100..199): filesystem
 enum ulong SYS_GROUP2   = 100;
@@ -96,6 +97,10 @@ enum ulong SYS_EXT1     = 1000; // Graphics server
 enum ulong SYS_EXT2     = 2000; // Reserved
 enum ulong SYS_EXT3     = 3000; // Reserved
 enum ulong SYS_EXT4     = 4000; // Reserved
+
+// Recognized by SYS_STR
+enum uint SYS_STR_VERSION = 0;
+enum uint SYS_STR_ABOUT   = 1;
 
 // Standard output targets for uspawn()
 enum uint STDOUT_CONSOLE = 0;           // the kernel console (what the kernel shell shows)
@@ -301,6 +306,18 @@ void urandom(void* buffer, size_t size) @nogc nothrow
 int uspawn(const(char)* path, const(char)* args, uint stdoutTarget) @nogc nothrow
 {
     return cast(int)sys_call(SYS_SPAWN, cast(ulong)path, cast(ulong)args, cast(ulong)stdoutTarget);
+}
+
+/**
+ * Retrieves a system info string to a given buffer.
+ * Returns the number of characters written, or -1 on error.
+ * `strid` is the system info string identifier:
+ * - `SYS_STR_VERSION` - the operating system version
+ * - `SYS_STR_ABOUT` - extended information about the operating system
+ */
+long usysstr(char* buf, size_t size, uint strid) @nogc nothrow
+{
+    return cast(int)sys_call(SYS_STR, cast(ulong)buf, size, strid);
 }
 
 /**

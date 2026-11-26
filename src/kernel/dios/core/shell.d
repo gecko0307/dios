@@ -52,11 +52,10 @@ import dios.core.xhci;
 enum size_t SHELL_LINE_CAPACITY = 128;
 enum size_t SHELL_HISTORY_CAPACITY = 16;
 
-immutable string[42] SHELL_COMMANDS = [
-    "help", "about", "mem", "clock",
-    "irq", "pci", "history", "echo", "poweroff", "shutdown",
+immutable string[40] SHELL_COMMANDS = [
+    "help", "mem", "clock", "irq", "pci", "history", "echo", "poweroff", "shutdown",
     "reboot", "clear", "cpuinfo", "acpi", "irqstat",
-    "sleep", "hexdump", "crash", "version", "run", "memmap",
+    "sleep", "hexdump", "crash", "run", "memmap",
     "programs", "disk", "mount", "cat", "dmesg", "usb",
     "ps", "kill", "fg", "gfx", "umount",
     "touch", "mkdir", "rmdir", "rm", "mv", "cp", "write", "append", "sync", "remount"
@@ -1025,7 +1024,6 @@ void shellExecute() @nogc nothrow
     {
         cprintf("DIOS kernel shell\n");
         cprintf("  help                Show this command list\n");
-        cprintf("  about               Kernel version information\n");
         cprintf("  mem                 Physical memory statistics\n");
         cprintf("  memmap              Show the physical memory map\n");
         cprintf("  clock               Clock source and timer status\n");
@@ -1068,10 +1066,6 @@ void shellExecute() @nogc nothrow
         cprintf("Keys: arrows/Home/End/Del edit, Up/Down history, Tab completes,\n");
         cprintf("      Ctrl+A/E start/end, Ctrl+U clear line, Ctrl+L redraw, Ctrl+C cancel\n");
         cprintf("      Ctrl+F1 shows the shell, Ctrl+F2 shows the graphics server, Ctrl+F3 stops the graphics server\n");
-    }
-    else if (shellEquals(shellLine.ptr, "about"))
-    {
-        cprintf(diosVersionInfo);
     }
     else if (shellEquals(shellLine.ptr, "mem"))
     {
@@ -1131,10 +1125,6 @@ void shellExecute() @nogc nothrow
     else if (shellEquals(shellLine.ptr, "echo"))
     {
         cprintf("%s\n", cast(char*)args);
-    }
-    else if (shellEquals(shellLine.ptr, "version"))
-    {
-        cprintf(diosVersion);
     }
     else if (shellEquals(shellLine.ptr, "clear"))
     {

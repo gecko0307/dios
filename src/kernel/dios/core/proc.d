@@ -68,6 +68,7 @@ module dios.core.proc;
  *   4000..4999 reserved for an extension that registers syscallExtHook4
  */
 import dios.bootloader.limine;
+import dios.core._version;
 import dios.core.clock;
 import dios.core.console;
 import dios.core.cpu;
@@ -103,9 +104,9 @@ enum uint PROC_MAX_PROGRAMS = 16;
 enum uint PROC_NAME_MAX = 32;
 
 enum ulong USER_HEAP_BASE  = USER_IMAGE_MAX;
-enum ulong USER_SHM_BASE   = 0x70000000;                                    // shared memory window
+enum ulong USER_SHM_BASE   = 0x70000000; // shared memory window
 enum ulong USER_SHM_LIMIT  = USER_STACK_TOP - USER_STACK_PAGES * 4096;
-enum ulong USER_HEAP_LIMIT = USER_SHM_BASE;                                 // the heap stops where it starts
+enum ulong USER_HEAP_LIMIT = USER_SHM_BASE; // the heap stops where it starts
 
 // System calls group 1 (0..99): process control, memory control, system info
 enum ulong SYS_GROUP1   = 0;
@@ -121,8 +122,13 @@ enum ulong SYS_GETPID   = SYS_GROUP1 + 8;
 enum ulong SYS_DATETIME = SYS_GROUP1 + 9;
 enum ulong SYS_RANDOM   = SYS_GROUP1 + 10;
 enum ulong SYS_SPAWN    = SYS_GROUP1 + 11;
+enum ulong SYS_STR      = SYS_GROUP1 + 12;
 
-enum uint SPAWN_INHERIT = 0xFFFFFFFF; // spawn(): use the caller's own stdout
+enum uint SPAWN_INHERIT = 0xFFFFFFFF; // SYS_SPAWN: use the caller's own stdout
+
+// Recognized by SYS_STR
+enum uint SYS_STR_VERSION = 0;
+enum uint SYS_STR_ABOUT   = 1;
 
 // System calls group 2 (100..199): filesystem control
 enum ulong SYS_GROUP2   = 100;
@@ -142,19 +148,32 @@ enum ulong SYS_SYNC     = SYS_GROUP2 + 12;
 enum ulong SYS_CHDIR    = SYS_GROUP2 + 13;
 
 // System calls group 3 (200-299): channel control
-enum ulong SYS_GROUP3     = 200;
+enum ulong SYS_GROUP3    = 200;
 enum ulong SYS_CH_CREATE = SYS_GROUP3 + 0;
 enum ulong SYS_CH_READ   = SYS_GROUP3 + 1;
 enum ulong SYS_CH_STAT   = SYS_GROUP3 + 2;
 enum ulong SYS_CH_CLOSE  = SYS_GROUP3 + 3;
 
 // System calls group 4 (300-399): reserved
+enum ulong SYS_GROUP4   = 300;
+
 // System calls group 5 (400-499): reserved
+enum ulong SYS_GROUP5   = 400;
+
 // System calls group 6 (500-599): reserved
+enum ulong SYS_GROUP6   = 500;
+
 // System calls group 7 (600-699): reserved
+enum ulong SYS_GROUP7   = 600;
+
 // System calls group 8 (700-799): reserved
+enum ulong SYS_GROUP8   = 700;
+
 // System calls group 9 (800-899): reserved
+enum ulong SYS_GROUP9   = 800;
+
 // System calls group 10 (900-999): reserved
+enum ulong SYS_GROUP10  = 900;
 
 // Extended system calls, handled by corresponding syscallExtHook*
 enum ulong SYS_EXT1     = 1000; // [1000..1999 - SYS_EXT1] - graphics server
@@ -1411,6 +1430,47 @@ long sysRandom(void* buffer, size_t size) @nogc nothrow
     return cast(long)size;
 }
 
+long sysString(void* buffer, size_t size, uint strnum) @nogc nothrow
+{
+    if (size == 0)
+        return 0;
+    
+    if (buffer is null)
+        return -1;
+    
+    char* dst = cast(char*)buffer;
+    char* src = null;
+    size_t srcLen = 0;
+    switch(strnum)
+    {
+        case SYS_STR_VERSION:
+            src = cast(char*)diosVersion.ptr;
+            srcLen = diosVersion.length - 1; // Without the trailing newline
+            break;
+        case SYS_STR_ABOUT:
+            src = cast(char*)diosVersionInfo.ptr;
+            srcLen = diosVersionInfo.length - 1; // Without the trailing newline
+            break;
+        default:
+            break;
+    }
+    
+    if (src is null)
+        return -1;
+    if (srcLen == 0)
+        return 0;
+    
+    if (srcLen > size)
+        srcLen = size;
+    
+    for (size_t i = 0; i < srcLen; i++)
+    {
+        dst[i] = src[i];
+    }
+    
+    return srcLen;
+}
+
 // Called from the SYSCALL entry stub (cpu.s) on the task's kernel stack, interrupts off.
 long syscallDispatch(ulong nr, ulong a0, ulong a1, ulong a2) @nogc nothrow
 {
@@ -1478,6 +1538,8 @@ long syscallDispatch(ulong nr, ulong a0, ulong a1, ulong a2) @nogc nothrow
             return sysDateTime(a0);
         case SYS_RANDOM:
             return sysRandom(cast(void*)a0, a1);
+        case SYS_STR:
+            return sysString(cast(void*)a0, a1, cast(uint)a2);
         default:
             if (nr >= SYS_EXT1 && nr < SYS_EXT1 + 1000 && syscallExtHook1 !is null)
                 return syscallExtHook1(nr - SYS_EXT1, a0, a1, a2);
