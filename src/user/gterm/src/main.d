@@ -28,9 +28,9 @@ module main;
 /**
  * GTerm - a terminal window.
  *
- * How it works: GTerm asks the kernel for an output channel (uttyCreate) and starts programs
+ * How it works: GTerm asks the kernel for an output channel (chCreate) and starts programs
  * with uspawn(), telling the kernel to send their uwrite()/uprintf() output to that channel
- * instead of the kernel console. It reads the channel (uttyRead) and draws the characters
+ * instead of the kernel console. It reads the channel (chRead) and draws the characters
  * into an 80x25 grid.
  *
  * Bytes GTerm understands: printable ASCII, '\n', '\r', 8 (backspace), 9 (tab), 12 (clear).
@@ -207,7 +207,7 @@ bool pump() @nogc nothrow
     ubyte[256] buf;
     for (uint i = 0; i < MAX_READS_PER_FRAME; i++)
     {
-        long n = uttyRead(tty, buf.ptr, buf.length);
+        long n = chRead(tty, buf.ptr, buf.length);
         if (n <= 0)
             return true;
         for (long k = 0; k < n; k++)
@@ -376,7 +376,7 @@ void handleEvent(const(GfxEvent)* ev) @nogc nothrow
 /// Once a frame: bring in the output; when the program has ended and everything it wrote is shown, new prompt.
 void service() @nogc nothrow
 {
-    bool gone = uttyWriters(tty) == 0; // asked first: a program that has ended cannot write any more
+    bool gone = chWriters(tty) == 0; // asked first: a program that has ended cannot write any more
     bool drained = pump();
     if (busy && gone && drained)
     {
@@ -434,7 +434,7 @@ int main(string[] args)
     if (!win.serverRunning)
         uputs("gterm: no graphics server running yet (gfx start); the window shows up when it is\n");
 
-    tty = uttyCreate();
+    tty = chCreate();
     if (tty < 0)
     {
         uputs("gterm: no output channel available\n");
@@ -464,7 +464,7 @@ int main(string[] args)
         }
     }
 
-    uttyClose(tty); // programs still running lose their output
+    chClose(tty); // programs still running lose their output
     windowClose(&win);
     if (fontImage.data.length > 0)
         ufree(fontImage.data.ptr);

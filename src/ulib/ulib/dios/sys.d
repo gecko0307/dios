@@ -63,20 +63,33 @@ enum ulong SYS_RENAME   = SYS_GROUP2 + 11;
 enum ulong SYS_SYNC     = SYS_GROUP2 + 12;
 enum ulong SYS_CHDIR    = SYS_GROUP2 + 13;
 
-// System calls group 3 (200-299): standard I/O device control
+// System calls group 3 (200-299): stdout/channel control
 enum ulong SYS_GROUP3     = 200;
-enum ulong SYS_TTY_CREATE = SYS_GROUP3 + 0;
-enum ulong SYS_TTY_READ   = SYS_GROUP3 + 1;
-enum ulong SYS_TTY_STAT   = SYS_GROUP3 + 2;
-enum ulong SYS_TTY_CLOSE  = SYS_GROUP3 + 3;
+enum ulong SYS_CH_CREATE = SYS_GROUP3 + 0;
+enum ulong SYS_CH_READ   = SYS_GROUP3 + 1;
+enum ulong SYS_CH_STAT   = SYS_GROUP3 + 2;
+enum ulong SYS_CH_CLOSE  = SYS_GROUP3 + 3;
 
 // System calls group 4 (300-399): reserved
+enum ulong SYS_GROUP4     = 300;
+
 // System calls group 5 (400-499): reserved
+enum ulong SYS_GROUP5     = 400;
+
 // System calls group 6 (500-599): reserved
+enum ulong SYS_GROUP6     = 500;
+
 // System calls group 7 (600-699): reserved
+enum ulong SYS_GROUP7     = 600;
+
 // System calls group 8 (700-799): reserved
+enum ulong SYS_GROUP8     = 700;
+
 // System calls group 9 (800-899): reserved
+enum ulong SYS_GROUP9     = 800;
+
 // System calls group 10 (900-999): reserved
+enum ulong SYS_GROUP10    = 900;
 
 // Extended system calls
 enum ulong SYS_EXT1     = 1000; // Graphics server

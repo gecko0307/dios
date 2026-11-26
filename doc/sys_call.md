@@ -8,6 +8,19 @@ The system call is a DIOS kernel function call that can be made from application
 
 Calls a kernel function. `nr` is a function number, `a0`, `a1`, `a2` are parameters.
 
+Kernel functions are organized to groups. There are 10 standard groups with 100 reserved function numbers in each. This allows to extend each group without breaking the ABI in the future.
+
+- `SYS_GROUP1` - functions 0-99: process control, memory control, system info
+- `SYS_GROUP2` - functions 100-199: filesystem control
+- `SYS_GROUP3` - functions 200-299: channel control
+- `SYS_GROUP4` - 
+- `SYS_GROUP5` - 
+- `SYS_GROUP6` - 
+- `SYS_GROUP7` - 
+- `SYS_GROUP8` - 
+- `SYS_GROUP9` - 
+- `SYS_GROUP10` - 
+
 Supported function numbers:
 
 - `SYS_EXIT` (0) - terminates the application. Return code is passed via `a0`
@@ -36,10 +49,10 @@ Supported function numbers:
 - `SYS_RENAME` (111) - renames or moves a file or directory within one volume; the new name must not exist. `a0` is a zero-terminated path. Returns 0 on success or a negative error code (`UERR_*`)
 - `SYS_SYNC` (112) - asks the disks to put everything they hold on the medium
 - `SYS_CHDIR` (113) - changes the current directory. CWD is currently one for the whole system, shared by the kernel shell and every program. Returns 0 on success or a negative error code: UERR_NOT_FOUND or UERR_NOT_DIR
-- `SYS_TTY_CREATE` (200) - creates a standard output channel. Returns its descriptor (> 0), or -1 if there is no room for another one
-- `SYS_TTY_READ` (201) - reads from a channel. Does not wait. `a0` is the channel descriptor, `a1` is the pointer to a buffer, `a2` is the buffer size in bytes. Returns the number of bytes read (0 = nothing in the channel right now), or -1 if the channel doesn't belong the program or is gone
-- `SYS_TTY_STAT` (202) - returns the number of programs that are writing to a channel now (they end by themselves). `a0` is the channel descriptor. Returns -1 on error
-- `SYS_TTY_CLOSE` (203) - closes a channel. Programs still writing to it lose their output (their `SYS_WRITE` calls fail). It is also closed at exit. `a0` is the channel descriptor.
+- `SYS_CH_CREATE` (200) - creates a standard output channel. Returns its descriptor (> 0), or -1 if there is no room for another one
+- `SYS_CH_READ` (201) - reads from a channel. Does not wait. `a0` is the channel descriptor, `a1` is the pointer to a buffer, `a2` is the buffer size in bytes. Returns the number of bytes read (0 = nothing in the channel right now), or -1 if the channel doesn't belong the program or is gone
+- `SYS_CH_STAT` (202) - returns the number of programs that are writing to a channel now (they end by themselves). `a0` is the channel descriptor. Returns -1 on error
+- `SYS_CH_CLOSE` (203) - closes a channel. Programs still writing to it lose their output (their `SYS_WRITE` calls fail). It is also closed at exit. `a0` is the channel descriptor.
 
 ## Data Types
 

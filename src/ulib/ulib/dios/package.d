@@ -28,8 +28,8 @@ module ulib.dios;
 public
 {
     import ulib.dios.alloc;
+    import ulib.dios.channel;
     import ulib.dios.io;
     import ulib.dios.mem;
     import ulib.dios.sys;
-    import ulib.dios.tty;
 }

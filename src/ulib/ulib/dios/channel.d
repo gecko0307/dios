@@ -23,18 +23,21 @@ OTHER DEALINGS IN THE SOFTWARE.
 
 For more information, please refer to <https://unlicense.org>
 */
-module ulib.dios.tty;
+module ulib.dios.channel;
 
 import ulib.dios.sys;
 
 extern(C):
 
-// Terminals: programs that show the standard output of other programs.
+/**
+ * Channel control.
+ * Channels allow programs to show the standard output of other programs.
+ */
 
 /// Creates an output channel that you read. Returns its id (> 0), or -1 if there is no room for another one.
-int uttyCreate() @nogc nothrow
+int chCreate() @nogc nothrow
 {
-    return cast(int)sys_call(SYS_TTY_CREATE, 0, 0, 0);
+    return cast(int)sys_call(SYS_CH_CREATE, 0, 0, 0);
 }
 
 /**
@@ -42,19 +45,19 @@ int uttyCreate() @nogc nothrow
  * bytes (0 = nothing there right now), or -1 if the channel is not yours or is gone.
  * The bytes are raw: '\n', 8 (backspace) and 12 (clear) are yours to interpret.
  */
-long uttyRead(int tty, void* buf, size_t n) @nogc nothrow
+long chRead(int ch, void* buf, size_t n) @nogc nothrow
 {
-    return sys_call(SYS_TTY_READ, cast(ulong)tty, cast(ulong)buf, n);
+    return sys_call(SYS_CH_READ, cast(ulong)ch, cast(ulong)buf, n);
 }
 
 /// Number of programs that are writing to your channel now (they end by themselves), or -1 on error.
-int uttyWriters(int tty) @nogc nothrow
+int chWriters(int ch) @nogc nothrow
 {
-    return cast(int)sys_call(SYS_TTY_STAT, cast(ulong)tty, 0, 0);
+    return cast(int)sys_call(SYS_CH_STAT, cast(ulong)ch, 0, 0);
 }
 
 /// Closes your channel. Programs still writing to it lose their output (their writes fail). It is also closed when you exit.
-int uttyClose(int tty) @nogc nothrow
+int chClose(int ch) @nogc nothrow
 {
-    return cast(int)sys_call(SYS_TTY_CLOSE, cast(ulong)tty, 0, 0);
+    return cast(int)sys_call(SYS_CH_CLOSE, cast(ulong)ch, 0, 0);
 }

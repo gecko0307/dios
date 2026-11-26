@@ -107,7 +107,7 @@ enum ulong USER_SHM_BASE   = 0x70000000;                                    // s
 enum ulong USER_SHM_LIMIT  = USER_STACK_TOP - USER_STACK_PAGES * 4096;
 enum ulong USER_HEAP_LIMIT = USER_SHM_BASE;                                 // the heap stops where it starts
 
-// System calls group 1 (0..99): process and memory management
+// System calls group 1 (0..99): process control, memory control, system info
 enum ulong SYS_GROUP1   = 0;
 enum ulong SYS_EXIT     = SYS_GROUP1 + 0;
 enum ulong SYS_WRITE    = SYS_GROUP1 + 1;
@@ -124,7 +124,7 @@ enum ulong SYS_SPAWN    = SYS_GROUP1 + 11;
 
 enum uint SPAWN_INHERIT = 0xFFFFFFFF; // spawn(): use the caller's own stdout
 
-// System calls group 2 (100..199): filesystem I/O
+// System calls group 2 (100..199): filesystem control
 enum ulong SYS_GROUP2   = 100;
 enum ulong SYS_OPEN     = SYS_GROUP2 + 0;
 enum ulong SYS_READ     = SYS_GROUP2 + 1;
@@ -139,14 +139,14 @@ enum ulong SYS_MKDIR    = SYS_GROUP2 + 9;
 enum ulong SYS_RMDIR    = SYS_GROUP2 + 10;
 enum ulong SYS_RENAME   = SYS_GROUP2 + 11;
 enum ulong SYS_SYNC     = SYS_GROUP2 + 12;
-enum ulong SYS_CHDIR    = SYS_GROUP2 + 13;   // chdir(path) -> 0 or a negative FW_ERR_* code
+enum ulong SYS_CHDIR    = SYS_GROUP2 + 13;
 
-// System calls group 3 (200-299): standard I/O device control
+// System calls group 3 (200-299): channel control
 enum ulong SYS_GROUP3     = 200;
-enum ulong SYS_TTY_CREATE = SYS_GROUP3 + 0;   // tty_create() -> channel id or -1
-enum ulong SYS_TTY_READ   = SYS_GROUP3 + 1;   // tty_read(id, buf, len) -> bytes (0: none), -1 error
-enum ulong SYS_TTY_STAT   = SYS_GROUP3 + 2;   // tty_stat(id) -> number of live writers, -1 error
-enum ulong SYS_TTY_CLOSE  = SYS_GROUP3 + 3;   // tty_close(id) -> 0 or -1
+enum ulong SYS_CH_CREATE = SYS_GROUP3 + 0;
+enum ulong SYS_CH_READ   = SYS_GROUP3 + 1;
+enum ulong SYS_CH_STAT   = SYS_GROUP3 + 2;
+enum ulong SYS_CH_CLOSE  = SYS_GROUP3 + 3;
 
 // System calls group 4 (300-399): reserved
 // System calls group 5 (400-499): reserved
@@ -1091,7 +1091,7 @@ long sysWrite(ulong buf, ulong len) @nogc nothrow
 
     // Output that does not go to the kernel console goes into a channel for a terminal.
     if (cur.stdoutId != TTY_CONSOLE)
-        return sysTtyWrite(cur.stdoutId, cast(const(ubyte)*)buf, len);
+        return sysChannelWrite(cur.stdoutId, cast(const(ubyte)*)buf, len);
 
     // A background task prints while the shell is waiting at its prompt: get the input
     // line out of the way first and bring it back afterwards.
@@ -1121,7 +1121,7 @@ long sysWrite(ulong buf, ulong len) @nogc nothrow
 // Put len bytes into channel `id`, waiting for the reader whenever the buffer is full.
 // `p` is validated memory of the running task (or kernel memory). Returns len, or -1 if
 // the channel is gone (its reader closed it or exited): the output is dropped then.
-long sysTtyWrite(uint id, const(ubyte)* p, ulong len) @nogc nothrow
+long sysChannelWrite(uint id, const(ubyte)* p, ulong len) @nogc nothrow
 {
     ulong done = 0;
     while (done < len)
@@ -1142,7 +1142,7 @@ long sysClear() @nogc nothrow
     if (cur.stdoutId != TTY_CONSOLE)
     {
         ubyte ff = 12;
-        return sysTtyWrite(cur.stdoutId, &ff, 1);
+        return sysChannelWrite(cur.stdoutId, &ff, 1);
     }
     consoleClear();
     gfxPresent();
@@ -1150,7 +1150,7 @@ long sysClear() @nogc nothrow
 }
 
 // Only programs may have channels (the shell has the console).
-long sysTtyCreate() @nogc nothrow
+long sysChannelCreate() @nogc nothrow
 {
     if (cur.pml4Phys == 0)
         return -1;
@@ -1159,7 +1159,7 @@ long sysTtyCreate() @nogc nothrow
 }
 
 // Non-blocking: whatever is waiting, up to len bytes. Only the reader may call this.
-long sysTtyRead(ulong id, ulong buf, ulong len) @nogc nothrow
+long sysChannelRead(ulong id, ulong buf, ulong len) @nogc nothrow
 {
     if (len > 65536)
         len = 65536;
@@ -1168,14 +1168,14 @@ long sysTtyRead(ulong id, ulong buf, ulong len) @nogc nothrow
     return ttyGet(cast(uint)id, cast(ubyte*)buf, len);
 }
 
-long sysTtyStat(ulong id) @nogc nothrow
+long sysChannelStat(ulong id) @nogc nothrow
 {
     if (!ttyIsReader(cast(uint)id, cur.id))
         return -1;
     return ttyWriters(cast(uint)id);
 }
 
-long sysTtyClose(ulong id) @nogc nothrow
+long sysChannelClose(ulong id) @nogc nothrow
 {
     if (!ttyIsReader(cast(uint)id, cur.id))
         return -1;
@@ -1431,14 +1431,14 @@ long syscallDispatch(ulong nr, ulong a0, ulong a1, ulong a2) @nogc nothrow
             return sysClear();
         case SYS_SPAWN:
             return sysSpawn(a0, a1, a2);
-        case SYS_TTY_CREATE:
-            return sysTtyCreate();
-        case SYS_TTY_READ:
-            return sysTtyRead(a0, a1, a2);
-        case SYS_TTY_STAT:
-            return sysTtyStat(a0);
-        case SYS_TTY_CLOSE:
-            return sysTtyClose(a0);
+        case SYS_CH_CREATE:
+            return sysChannelCreate();
+        case SYS_CH_READ:
+            return sysChannelRead(a0, a1, a2);
+        case SYS_CH_STAT:
+            return sysChannelStat(a0);
+        case SYS_CH_CLOSE:
+            return sysChannelClose(a0);
         case SYS_OPEN:
             return sysOpen(a0, a1);
         case SYS_FWRITE:
