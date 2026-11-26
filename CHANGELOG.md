@@ -1,7 +1,18 @@
+DIOS 0.8.0 - TBD
+----------------
+- **Kernel**:
+  - tty and the corresponding syscalls (group 3): `SYS_TTY_CREATE`, `SYS_TTY_READ`, `SYS_TTY_STAT`, `SYS_TTY_CLOSE`
+  - `SYS_SPAWN`
+  - Support automatically starting the graphics mode after boot
+- **ulib**:
+  - New functions `uspawn`, `uttyCreate`, `uttyRead`, `uttyWriters`, `uttyClose`
+- **GTerm**:
+  - New built-in program GTerm, a graphical terminal.
+
 DIOS 0.7.0 - 26 Nov, 2026
 -------------------------
 - **Kernel**:
-  - **ABI breaking change**: syscall numbers were changed
+  - **ABI breaking change**: syscall numbers were changed. Now they are grouped by 100
   - Experimental FAT32 writing support. Drives are mounted as read-only by default, to enable writing run e.g. `remount usb0p1 rw`
   - File writing syscalls: `SYS_FWRITE`, `SYS_UNLINK`, `SYS_MKDIR`, `SYS_RMDIR`, `SYS_RENAME`, `SYS_SYNC`
   - New shell commands: `touch`, `mkdir`, `rmdir`, `rm`, `mv`, `cp`, `write`

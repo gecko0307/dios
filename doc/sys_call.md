@@ -19,10 +19,9 @@ Supported function numbers:
 - `SYS_BRK` (6) - changes the program break. If `a0` is 0, returns the current break; otherwise sets the break to requested, returns the new break or -1 on error
 - `SYS_YIELD` (7) - let other programs run now
 - `SYS_GETPID` (8) - task ID of this program.
-- `SYS_DATETIME` (9) -
+- `SYS_DATETIME` (9) - retrieves current date and time (`DateTime` struct)
 - `SYS_RANDOM` (10) -
 - `SYS_SPAWN` (11) -
-
 - `SYS_OPEN` (100) - opens a file/directory. `a0` is the path. Returns a descriptor on success, or -1 on error
 - `SYS_READ` (101) - reads bytes from the file at the current offset. `a0` is the file descriptor, `a1` is the destination buffer, `a2` is the number of bytes to read. Returns number of bytes actually read (0 = end of file), or -1 on error
 - `SYS_FWRITE` (102) -
@@ -37,11 +36,31 @@ Supported function numbers:
 - `SYS_RENAME` (111) -
 - `SYS_SYNC` (112) -
 
+- `SYS_TTY_CREATE` (200) - 
+- `SYS_TTY_READ` (201) - 
+- `SYS_TTY_STAT` (202) - 
+- `SYS_TTY_CLOSE` (203) - 
+
 ## Data Types
+
+Used in `SYS_DATETIME`:
+
+```d
+struct DateTime
+{
+    ushort year;
+    ubyte month;
+    ubyte day;
+    ubyte weekday;
+    ubyte hour;
+    ubyte minute;
+    ubyte second;
+}
+```
 
 Used in `SYS_STAT`:
 
-```
+```d
 struct UStat
 {
     ulong size;
@@ -52,7 +71,7 @@ struct UStat
 
 Used in `SYS_READDIR`:
 
-```
+```d
 struct UDirent
 {
     ulong size;

@@ -31,4 +31,5 @@ public
     import ulib.dios.io;
     import ulib.dios.mem;
     import ulib.dios.sys;
+    import ulib.dios.tty;
 }

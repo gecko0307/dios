@@ -62,7 +62,7 @@ enum ulong SYS_RMDIR    = SYS_GROUP2 + 10;
 enum ulong SYS_RENAME   = SYS_GROUP2 + 11;
 enum ulong SYS_SYNC     = SYS_GROUP2 + 12;
 
-// System call group 3 (200-299): standard text I/O
+// System call group 3 (200-299): standard I/O device control
 enum ulong SYS_GROUP3     = 200;
 enum ulong SYS_TTY_CREATE = SYS_GROUP3 + 0;
 enum ulong SYS_TTY_READ   = SYS_GROUP3 + 1;
@@ -108,6 +108,17 @@ enum int UERR_NOT_DIR = -8;
 enum int UERR_READ_ONLY = -9;
 enum int UERR_INVALID = -10;
 
+struct DateTime
+{
+    ushort year;
+    ubyte month;
+    ubyte day;
+    ubyte weekday;
+    ubyte hour;
+    ubyte minute;
+    ubyte second;
+}
+
 // useek() origins
 enum int SEEK_SET = 0;
 enum int SEEK_CUR = 1;
@@ -136,17 +147,6 @@ enum int KEY_RIGHT = 0x104;
 enum int KEY_HOME = 0x105;
 enum int KEY_END = 0x106;
 enum int KEY_DELETE = 0x107;
-
-struct DateTime
-{
-    ushort year;
-    ubyte month;
-    ubyte day;
-    ubyte weekday;
-    ubyte hour;
-    ubyte minute;
-    ubyte second;
-}
 
 extern(C):
 
@@ -279,6 +279,17 @@ void urandom(void* buffer, size_t size) @nogc nothrow
 }
 
 /**
+ * Starts the ELF file `path` (exact path; no search, no ".elf" added) as a background program.
+ * `args` is its argument string (or null). `stdoutTarget` is where its uwrite()/uprintf() output goes:
+ * STDOUT_CONSOLE, STDOUT_INHERIT, or a channel from uttyCreate() (that you read, or that you write to yourself).
+ * Returns the task id of the new program (as shown by `ps`), or -1.
+ */
+int uspawn(const(char)* path, const(char)* args, uint stdoutTarget) @nogc nothrow
+{
+    return cast(int)sys_call(SYS_SPAWN, cast(ulong)path, cast(ulong)args, cast(ulong)stdoutTarget);
+}
+
+/**
  * Writes bytes to a file opened with O_WRONLY or O_RDWR, at the current offset (the end with
  * O_APPEND). Returns the number of bytes written (fewer if the volume is full), or -1 on error.
  * The data is on the disk when the call returns.
@@ -319,45 +330,4 @@ int urename(const(char)* from, const(char)* to) @nogc nothrow
 void usync() @nogc nothrow
 {
     sys_call(SYS_SYNC, 0, 0, 0);
-}
-
-// Terminals: programs that show the standard output of other programs.
-
-/**
- * Starts the ELF file `path` (exact path; no search, no ".elf" added) as a background program.
- * `args` is its argument string (or null). `stdoutTarget` is where its uwrite()/uprintf() output goes:
- * STDOUT_CONSOLE, STDOUT_INHERIT, or a channel from uttyCreate() (that you read, or that you write to yourself).
- * Returns the task id of the new program (as shown by `ps`), or -1.
- */
-int uspawn(const(char)* path, const(char)* args, uint stdoutTarget) @nogc nothrow
-{
-    return cast(int)sys_call(SYS_SPAWN, cast(ulong)path, cast(ulong)args, cast(ulong)stdoutTarget);
-}
-
-/// Creates an output channel that you read. Returns its id (> 0), or -1 if there is no room for another one.
-int uttyCreate() @nogc nothrow
-{
-    return cast(int)sys_call(SYS_TTY_CREATE, 0, 0, 0);
-}
-
-/**
- * Takes up to n bytes that programs wrote to your channel. Does not wait: returns the number of
- * bytes (0 = nothing there right now), or -1 if the channel is not yours or is gone.
- * The bytes are raw: '\n', 8 (backspace) and 12 (clear) are yours to interpret.
- */
-long uttyRead(int tty, void* buf, size_t n) @nogc nothrow
-{
-    return sys_call(SYS_TTY_READ, cast(ulong)tty, cast(ulong)buf, n);
-}
-
-/// Number of programs that are writing to your channel now (they end by themselves), or -1 on error.
-int uttyWriters(int tty) @nogc nothrow
-{
-    return cast(int)sys_call(SYS_TTY_STAT, cast(ulong)tty, 0, 0);
-}
-
-/// Closes your channel. Programs still writing to it lose their output (their writes fail). It is also closed when you exit.
-int uttyClose(int tty) @nogc nothrow
-{
-    return cast(int)sys_call(SYS_TTY_CLOSE, cast(ulong)tty, 0, 0);
 }

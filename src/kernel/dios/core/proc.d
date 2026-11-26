@@ -140,7 +140,7 @@ enum ulong SYS_RMDIR    = SYS_GROUP2 + 10;
 enum ulong SYS_RENAME   = SYS_GROUP2 + 11;
 enum ulong SYS_SYNC     = SYS_GROUP2 + 12;
 
-// System call group 3 (200-299): standard text I/O
+// System call group 3 (200-299): standard I/O device control
 enum ulong SYS_GROUP3     = 200;
 enum ulong SYS_TTY_CREATE = SYS_GROUP3 + 0;   // tty_create() -> channel id or -1
 enum ulong SYS_TTY_READ   = SYS_GROUP3 + 1;   // tty_read(id, buf, len) -> bytes (0: none), -1 error
