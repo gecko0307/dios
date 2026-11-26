@@ -67,29 +67,10 @@ Applications are also written in D, but they actually can be written in any lang
 
 DIOS project consists of a several structural layers, each with its own workflow.
 
-- `src/kernel` contains the kernel code:
-  - `src/kernel/dios/bootloader` - boot protocol; currently only Limine protocol is implemented. Multiboot support was dropped
-  - `src/kernel/dios/core` - kernel modules, including core drivers necessary to run the main I/O loop
-  - `src/kernel/main.d` - the kernel entry point
-- `src/ulib` contains the **ulib** runtime library code:
-  - `src/ulib/ulib/dios` - implements basic [libc-like functionality](doc/ulib.md) on top of [DIOS syscalls](doc/sys_call.md)
-  - `src/ulib/ulib/math` - elementary math functions
-  - `src/ulib/ulib/gfx` - DIOS graphics protocol and userspace rendering API. Read more [here](doc/graphics.md)
-  - `src/ulib/umain.d` - runtime entry point. Allocates an arguments array and calls compiler-generated `_Dmain`
-- `src/user` contains userspace services and built-in programs:
-  - `src/user/gfxd` - **GFXD**, the DIOS Graphics Server
-  - `src/user/gterm` - **GTerm**, a graphical terminal
-  - `src/user/time` - prints current UTC date and time
-  - `src/user/timer` - a simple background timer program (`timer 10s &`)
-  - `src/user/image` - work-in-progress image viewer. Currently supports only TGA format (`image img.tga &`, then start/switch to graphics mode)
-- `src/demos` contains sample applications:
-  - `src/demos/hello`
-  - `src/demos/file`
-  - `src/demos/dir`
-  - `src/demos/memtest`
-  - `src/demos/math`
-  - `src/demos/random`
-  - `src/demos/gfxdemo`
+- `src/kernel` contains the kernel code
+- `src/ulib` contains the **ulib** runtime library code
+- `src/user` contains built-in programs
+- `src/demos` contains sample applications.
 
 ## ulib
 
