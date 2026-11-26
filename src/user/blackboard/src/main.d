@@ -46,9 +46,9 @@ module main;
 import ulib.dios;
 import ulib.gfx;
 
-enum uint WIDTH = 320;
-enum uint HEIGHT = 240;
-enum uint PAPER = 0x00101820;
+enum uint WIDTH = 640;
+enum uint HEIGHT = 480;
+enum uint PAPER = 0x00153535;
 
 struct Demo
 {
