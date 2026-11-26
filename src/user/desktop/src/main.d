@@ -159,6 +159,14 @@ void openTerminal()
         uprintf("Warning: failed to run /bin/gterm.elf. GTerm is not installed\n");
 }
 
+void openBlackboard()
+{
+    // TODO: make configurable
+    int blackboardId = uspawn("/bin/blackboard.elf", "", STDOUT_INHERIT);
+    if (blackboardId == -1)
+        uprintf("Warning: failed to run /bin/blackboard.elf. Blackboard is not installed\n");
+}
+
 __gshared GfxInfo gfxInfo;
 __gshared uint taskbarHeight = 48;
 __gshared uint taskbarColor = 0xFFEBEBEB;
@@ -195,11 +203,13 @@ int main(string[] args)
     Canvas* canv = &taskbar.canvas;
     canv.fillRect(0, 0, gfxInfo.width, taskbarHeight, taskbarColor);
     
+    uint iconSize = 48;
+    
     Icon terminalIcon;
     terminalIcon.x = 0;
     terminalIcon.y = 0;
-    terminalIcon.width = 48;
-    terminalIcon.height = 48;
+    terminalIcon.width = iconSize;
+    terminalIcon.height = iconSize;
     scope(exit)
     {
         if (terminalIcon.data.length)
@@ -210,6 +220,24 @@ int main(string[] args)
         if (getTaskbarIcon(&terminalIcon))
         {
             drawIcon(canv, &terminalIcon, 0, 0);
+        }
+    }
+    
+    Icon blackboardIcon;
+    blackboardIcon.x = iconSize;
+    blackboardIcon.y = 0;
+    blackboardIcon.width = iconSize;
+    blackboardIcon.height = iconSize;
+    scope(exit)
+    {
+        if (blackboardIcon.data.length)
+            ufree(blackboardIcon.data.ptr);
+    }
+    if (taskbarIconsPresent)
+    {
+        if (getTaskbarIcon(&blackboardIcon))
+        {
+            drawIcon(canv, &blackboardIcon, iconSize, 0);
         }
     }
     
@@ -253,9 +281,12 @@ int main(string[] args)
         
         if (clicked)
         {
-            if (mouseX > 0 && mouseX < terminalIcon.width &&
-                mouseY > 0 && mouseY < terminalIcon.height)
+            if (mouseX > 0 && mouseX < iconSize &&
+                mouseY > 0 && mouseY < iconSize)
                 openTerminal();
+            else if (mouseX > iconSize && mouseX < iconSize + iconSize &&
+                mouseY > 0 && mouseY < iconSize)
+                openBlackboard();
         }
     }
 
