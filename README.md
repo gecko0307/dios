@@ -134,3 +134,11 @@ dub build
 ```
 
 All *.elf binaries of the demos are automatically copied to `rootfs/bin`. To include them to the root filesystem, you should run `python build.py rootfs` to rebuild the image.
+
+## Running in QEMU
+
+Tianocore's [Open Virtual Machine Firmware](https://wiki.osdev.org/OVMF) is required.
+
+```
+qemu-system-x86_64 -cpu max,+rdrand -cdrom dios-0.8.0-x86_64.iso.iso -m 512M -bios OVMF.fd -vga std -device qemu-xhci,id=xhci -device usb-mouse,bus=xhci.0,port=1 -d guest_errors
+```
