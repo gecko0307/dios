@@ -47,6 +47,7 @@ After successful initialization, the kernel immediately starts a graphics mode a
 
 In the graphics mode, you should see a user terminal window. Terminal's possibilities are very limited at the moment, but you already can run built-in programs. For example:
 
+- `about` - prints the information about the system
 - `time` - prints current date and time
 - `file /home/hello.txt` - prints a text file
 - `image /home/lake.tga` - displays a TGA image.
