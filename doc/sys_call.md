@@ -49,7 +49,7 @@ Supported function numbers:
 - `SYS_RMDIR` (110) - removes an empty directory.`a0` is a zero-terminated path. Returns 0 on success or a negative error code (`UERR_*`)
 - `SYS_RENAME` (111) - renames or moves a file or directory within one volume; the new name must not exist. `a0` is a zero-terminated path. Returns 0 on success or a negative error code (`UERR_*`)
 - `SYS_SYNC` (112) - asks the disks to put everything they hold on the medium
-- `SYS_CHDIR` (113) - changes the current directory. CWD is currently one for the whole system, shared by the kernel shell and every program. Returns 0 on success or a negative error code: UERR_NOT_FOUND or UERR_NOT_DIR
+- `SYS_CHDIR` (113) - changes the current directory. Returns 0 on success or a negative error code: UERR_NOT_FOUND or UERR_NOT_DIR
 - `SYS_CH_CREATE` (200) - creates a standard output channel. Returns its descriptor (> 0), or -1 if there is no room for another one
 - `SYS_CH_READ` (201) - reads from a channel. Does not wait. `a0` is the channel descriptor, `a1` is the pointer to a buffer, `a2` is the buffer size in bytes. Returns the number of bytes read (0 = nothing in the channel right now), or -1 if the channel doesn't belong the program or is gone
 - `SYS_CH_STAT` (202) - returns the number of programs that are writing to a channel now (they end by themselves). `a0` is the channel descriptor. Returns -1 on error

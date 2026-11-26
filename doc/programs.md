@@ -2,8 +2,8 @@
 
 These programs are available in `/bin` directory and are recognized as commands by the kernel shell and the graphical terminal.
 
-- `echo TEXT` - prints TEXT
-- `about` - prints information about the operating system
+- `echo TEXT` - prints TEXT.
+- `about` - prints information about the operating system.
 - `pwd` - prints the current directory.
 - `ls [PATH]` - lists a directory.
 - `file PATH [OFFSET]` - prints a text file, optionally starting at a byte offset.
