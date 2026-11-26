@@ -130,6 +130,7 @@ enum ulong SYS_RANDOM   = SYS_GROUP0 + 10;
 enum ulong SYS_SPAWN    = SYS_GROUP0 + 11;
 enum ulong SYS_STR      = SYS_GROUP0 + 12;
 enum ulong SYS_TASK_ALIVE = SYS_GROUP0 + 13;
+enum ulong SYS_TASK_FIND  = SYS_GROUP0 + 14;
 
 enum uint SPAWN_INHERIT = 0xFFFFFFFF; // SYS_SPAWN: use the caller's own stdout
 
@@ -1322,6 +1323,26 @@ long sysSpawn(ulong path, ulong args, ulong stdoutArg) @nogc nothrow
     return (id != 0) ? cast(long)id : -1;
 }
 
+// The oldest (lowest id) running task whose name is the string at `namePtr` (a program name as `ps`
+// shows it: the file name without directory and extension). 0 if there is none, -1 on a bad string.
+// The caller itself counts, so a program can ask "am I the first of my kind?".
+long sysTaskFind(ulong namePtr) @nogc nothrow
+{
+    char[PROC_NAME_MAX] wanted;
+    if (!procCopyPath(namePtr, wanted.ptr, wanted.length))
+        return -1;
+    uint best = 0;
+    for (uint i = 1; i < TASK_MAX; i++)
+    {
+        Task* t = &tasks[i];
+        if (t.state == TaskState.Free || t.state == TaskState.Zombie)
+            continue;
+        if (procNameEq(t.name.ptr, wanted.ptr) && (best == 0 || t.id < best))
+            best = t.id;
+    }
+    return cast(long)best;
+}
+
 // Copy a NUL terminated string out of user memory. False if it is not mapped or too long.
 bool procCopyPath(ulong addr, char* dst, uint cap) @nogc nothrow
 {
@@ -1554,6 +1575,8 @@ long syscallDispatch(ulong nr, ulong a0, ulong a1, ulong a2) @nogc nothrow
             return sysSpawn(a0, a1, a2);
         case SYS_TASK_ALIVE:
             return (a0 <= 0xFFFFFFFF && procFindId(cast(uint)a0) !is null) ? 1 : 0;
+        case SYS_TASK_FIND:
+            return sysTaskFind(a0);
         case SYS_CH_CREATE:
             return sysChannelCreate();
         case SYS_CH_READ:

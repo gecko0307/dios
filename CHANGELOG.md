@@ -2,7 +2,11 @@ DIOS 0.9.0 - TBD
 ----------------
 - **Bootloader**:
   - Two different boot options: graphics mode and kernel shell
-  - Add a bootloader wallpaper.
+  - Add a bootloader wallpaper
+- **Kernel**:
+  - New syscall `SYS_TASK_FIND`
+- **ulib**:
+  - New function `utaskfind`
 - **Desktop**:
   - A new built-in program `desktop.elf` that implements a basic taskbar with app launcher buttons. It is automatically started by the graphics server.
 

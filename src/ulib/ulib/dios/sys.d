@@ -47,6 +47,7 @@ enum ulong SYS_RANDOM   = SYS_GROUP0 + 10;
 enum ulong SYS_SPAWN    = SYS_GROUP0 + 11;
 enum ulong SYS_STR      = SYS_GROUP0 + 12;
 enum ulong SYS_TASK_ALIVE = SYS_GROUP0 + 13;
+enum ulong SYS_TASK_FIND  = SYS_GROUP0 + 14;
 
 // System calls group 1 (100..199): filesystem
 enum ulong SYS_GROUP1   = 100;
@@ -316,6 +317,22 @@ int uspawn(const(char)* path, const(char)* args, uint stdoutTarget) @nogc nothro
 bool utaskalive(int id) @nogc nothrow
 {
     return id > 0 && sys_call(SYS_TASK_ALIVE, cast(ulong)id, 0, 0) == 1;
+}
+
+/**
+ * Task id of the oldest running program with this name (as shown by `ps`: "desktop" for
+ * /bin/desktop.elf), 0 if there is none. The calling program counts too. Task ids only grow, so
+ * the oldest instance is the same for everybody who asks:
+ *
+ *     if (utaskfind("desktop") != ugetpid())
+ *         return 0;                   // another desktop was started first: leave it alone
+ *
+ * Even if two instances are started at the same moment, exactly one of them keeps running.
+ */
+int utaskfind(const(char)* name) @nogc nothrow
+{
+    long r = sys_call(SYS_TASK_FIND, cast(ulong)name, 0, 0);
+    return r > 0 ? cast(int)r : 0;
 }
 
 /**

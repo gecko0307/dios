@@ -173,6 +173,12 @@ __gshared uint taskbarColor = 0xFFEBEBEB;
 
 int main(string[] args)
 {
+    if (utaskfind("desktop") != ugetpid())
+    {
+        uprintf("Desktop manager is already running");
+        return 0;
+    }
+    
     ugfxInfo(&gfxInfo);
     
     bool taskbarIconsPresent = loadTaskbarIcons();
