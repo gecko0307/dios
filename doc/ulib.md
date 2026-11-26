@@ -24,9 +24,23 @@ DIOS kernel functions.
 
 `void uclear()`
 
+`void* ubrk(void* newBreak)`
+
+`void udatetime(DateTime* dt)`
+
+`void urandom(void* buffer, size_t size)`
+
+`int uspawn(const(char)* path, const(char)* args, uint stdoutTarget)`
+
+`bool utaskalive(int id)`
+
+`long usysstr(char* buf, size_t size, uint strid)`
+
 `int uopen(const(char)* path, int flags)`
 
 `long uread(int fd, void* buf, size_t n)`
+
+`long ufwrite(int fd, const(void)* buf, size_t n)`
 
 `int uclose(int fd)`
 
@@ -38,9 +52,25 @@ DIOS kernel functions.
 
 `long ugetcwd(char* buf, size_t n)`
 
-`void* ubrk(void* newBreak)`
+`int uunlink(const(char)* path)`
 
-`void udatetime(DateTime* dt)`
+`int umkdir(const(char)* path)`
+
+`int urmdir(const(char)* path)`
+
+`int urename(const(char)* from, const(char)* to)`
+
+`int uchdir(const(char)* path)`
+
+`long urealpath(const(char)* path, char* buf, size_t n)`
+
+`void utargetpath(const(char)* src, const(char)* dst, char* out_, size_t cap)`
+
+`void usync()`
+
+`const(char)* uerrstr(int err)`
+
+`void uperror(const(char)* what, const(char)* path, int err)`
 
 ## ulib.dios.alloc
 

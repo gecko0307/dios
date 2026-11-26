@@ -302,7 +302,9 @@ void urandom(void* buffer, size_t size) @nogc nothrow
 /**
  * Starts the ELF file `path` (exact path; no search, no ".elf" added) as a background program.
  * `args` is its argument string (or null). `stdoutTarget` is where its uwrite()/uprintf() output goes:
- * STDOUT_CONSOLE, STDOUT_INHERIT, or a channel from uttyCreate() (that you read, or that you write to yourself).
+ *  - STDOUT_CONSOLE - kernel console
+ *  - STDOUT_INHERIT - the same as the current process
+ *  - channel created with `chCreate()`
  * Returns the task id of the new program (as shown by `ps`), or -1.
  */
 int uspawn(const(char)* path, const(char)* args, uint stdoutTarget) @nogc nothrow

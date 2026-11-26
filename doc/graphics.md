@@ -83,7 +83,3 @@ Closes the window. The canvas must not be used afterwards.
 ## Image Loading
 
 TODO
-
-## Usage
-
-TODO
