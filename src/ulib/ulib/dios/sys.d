@@ -44,6 +44,11 @@ enum ulong SYS_YIELD    = SYS_GROUP1 + 7;
 enum ulong SYS_GETPID   = SYS_GROUP1 + 8;
 enum ulong SYS_DATETIME = SYS_GROUP1 + 9;
 enum ulong SYS_RANDOM   = SYS_GROUP1 + 10;
+enum ulong SYS_SPAWN      = SYS_GROUP1 + 11;
+enum ulong SYS_TTY_CREATE = SYS_GROUP1 + 12;
+enum ulong SYS_TTY_READ   = SYS_GROUP1 + 13;
+enum ulong SYS_TTY_STAT   = SYS_GROUP1 + 14;
+enum ulong SYS_TTY_CLOSE  = SYS_GROUP1 + 15;
 
 // System call group 2 (100..199): filesystem
 enum ulong SYS_GROUP2   = 100;
@@ -66,6 +71,10 @@ enum ulong SYS_EXT1     = 1000; // Graphics server
 enum ulong SYS_EXT2     = 2000; // Reserved
 enum ulong SYS_EXT3     = 3000; // Reserved
 enum ulong SYS_EXT4     = 4000; // Reserved
+
+// Standard output targets for uspawn()
+enum uint STDOUT_CONSOLE = 0;           // the kernel console (what the kernel shell shows)
+enum uint STDOUT_INHERIT = 0xFFFFFFFF;  // wherever the spawning program writes itself
 
 // uopen() flags
 enum int O_RDONLY = 0;
@@ -140,7 +149,11 @@ void uexit(long code) @nogc nothrow
     sys_call(SYS_EXIT, cast(ulong)code, 0, 0);
 }
 
-/// Writes to the standard output (the kernel shell, if running in text mode).
+/**
+ * Writes to the standard output. Where that is depends on how the program was started:
+ * the kernel console (the kernel shell) by default, or a channel read by a terminal
+ * program (see uttyCreate / uspawn). Blocks while a channel's buffer is full.
+ */
 void uwrite(const(char)* s, size_t n) @nogc nothrow
 {
     sys_call(SYS_WRITE, cast(ulong)s, n, 0);
@@ -176,7 +189,7 @@ int ugetpid() @nogc nothrow
     return cast(int)sys_call(SYS_GETPID, 0, 0, 0);
 }
 
-/// Clears the standard ouput (the kernel shell, if running in text mode).
+/// Clears the standard output. On a terminal channel this sends a form feed (12) and the terminal decides what it does.
 void uclear() @nogc nothrow
 {
     sys_call(SYS_CLEAR, 0, 0, 0);
@@ -295,4 +308,45 @@ int urename(const(char)* from, const(char)* to) @nogc nothrow
 void usync() @nogc nothrow
 {
     sys_call(SYS_SYNC, 0, 0, 0);
+}
+
+// Terminals: programs that show the standard output of other programs.
+
+/**
+ * Starts the ELF file `path` (exact path; no search, no ".elf" added) as a background program.
+ * `args` is its argument string (or null). `stdoutTarget` is where its uwrite()/uprintf() output goes:
+ * STDOUT_CONSOLE, STDOUT_INHERIT, or a channel from uttyCreate() (that you read, or that you write to yourself).
+ * Returns the task id of the new program (as shown by `ps`), or -1.
+ */
+int uspawn(const(char)* path, const(char)* args, uint stdoutTarget) @nogc nothrow
+{
+    return cast(int)sys_call(SYS_SPAWN, cast(ulong)path, cast(ulong)args, cast(ulong)stdoutTarget);
+}
+
+/// Creates an output channel that you read. Returns its id (> 0), or -1 if there is no room for another one.
+int uttyCreate() @nogc nothrow
+{
+    return cast(int)sys_call(SYS_TTY_CREATE, 0, 0, 0);
+}
+
+/**
+ * Takes up to n bytes that programs wrote to your channel. Does not wait: returns the number of
+ * bytes (0 = nothing there right now), or -1 if the channel is not yours or is gone.
+ * The bytes are raw: '\n', 8 (backspace) and 12 (clear) are yours to interpret.
+ */
+long uttyRead(int tty, void* buf, size_t n) @nogc nothrow
+{
+    return sys_call(SYS_TTY_READ, cast(ulong)tty, cast(ulong)buf, n);
+}
+
+/// Number of programs that are writing to your channel now (they end by themselves), or -1 on error.
+int uttyWriters(int tty) @nogc nothrow
+{
+    return cast(int)sys_call(SYS_TTY_STAT, cast(ulong)tty, 0, 0);
+}
+
+/// Closes your channel. Programs still writing to it lose their output (their writes fail). It is also closed when you exit.
+int uttyClose(int tty) @nogc nothrow
+{
+    return cast(int)sys_call(SYS_TTY_CLOSE, cast(ulong)tty, 0, 0);
 }

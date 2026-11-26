@@ -80,6 +80,14 @@ module dios.core.proc;
  *   21 rmdir()
  *   22 rename()
  *   23 sync()
+ *   (the numbers above are historic; the SYS_* constants below are authoritative)
+ *
+ * Standard output: write() and clear() go to the stdout target of the calling task
+ * (Task.stdoutId): the kernel console (0, the default, what the shell shows) or a channel
+ * (tty.d) read by a user program such as a terminal. A task inherits nothing implicitly:
+ * programs started by the shell write to the console; programs started with spawn() get the
+ * target the spawner chose (see sysSpawn).
+ *
  *   1000..1999 reserved for an extension that registers syscallExtHook1 (currently the graphics server)
  *   2000..2999 reserved for an extension that registers syscallExtHook2
  *   3000..3999 reserved for an extension that registers syscallExtHook3
@@ -100,6 +108,8 @@ import dios.core.paging;
 import dios.core.ps2;
 import dios.core.fs;
 import dios.core.stdio;
+import dios.core.exfat;
+import dios.core.tty;
 import dios.core.ramfs;
 import dios.core.sysfile;
 import dios.core.usbstor;
@@ -136,6 +146,13 @@ enum ulong SYS_YIELD    = SYS_GROUP1 + 7;
 enum ulong SYS_GETPID   = SYS_GROUP1 + 8;
 enum ulong SYS_DATETIME = SYS_GROUP1 + 9;
 enum ulong SYS_RANDOM   = SYS_GROUP1 + 10;
+enum ulong SYS_SPAWN      = SYS_GROUP1 + 11;   // spawn(path, args, stdoutId) -> task id or -1
+enum ulong SYS_TTY_CREATE = SYS_GROUP1 + 12;   // tty_create() -> channel id or -1
+enum ulong SYS_TTY_READ   = SYS_GROUP1 + 13;   // tty_read(id, buf, len) -> bytes (0: none), -1 error
+enum ulong SYS_TTY_STAT   = SYS_GROUP1 + 14;   // tty_stat(id) -> number of live writers, -1 error
+enum ulong SYS_TTY_CLOSE  = SYS_GROUP1 + 15;   // tty_close(id) -> 0 or -1
+
+enum uint SPAWN_INHERIT = 0xFFFFFFFF;          // spawn(): use the caller's own stdout
 
 // System call group 2 (100..199): filesystem
 enum ulong SYS_GROUP2   = 100;
@@ -229,6 +246,7 @@ struct Task
     ulong wakeNs;
     ulong startMs;
     long exitCode;
+    uint stdoutId;              // where write()/clear() go: TTY_CONSOLE or a channel of tty.d
     char[PROC_NAME_MAX] name;
     OpenFile[SYSFILE_MAX_OPEN] files;
 }
@@ -803,6 +821,9 @@ void taskReap() @nogc nothrow
 
         procFreeSpace(t.pml4Phys);
         t.pml4Phys = 0;
+        ttyDropWriter(t.stdoutId);              // its output channel has one writer less...
+        ttyReaderGone(id);                      // ...and the channels it was reading are closed
+        t.stdoutId = TTY_CONSOLE;
         if (taskDeathHook !is null)
             taskDeathHook(i, id);               // shared resources (gfxsrv.d) go back now
         t.state = TaskState.Free;
@@ -885,8 +906,11 @@ void procPrintTasks() @nogc nothrow
             st = "key";
         else if (t.state == TaskState.Zombie)
             st = "zombie";
-        cprintf("%c %u  %s  %llu s  %s\n", t is fgTask ? '*' : ' ', t.id, st,
+        cprintf("%c %u  %s  %llu s  %s", t is fgTask ? '*' : ' ', t.id, st,
             (nowMs - t.startMs) / 1000, t.name.ptr);
+        if (t.stdoutId != TTY_CONSOLE)
+            cprintf("  (stdout: tty %u)", t.stdoutId);
+        cprintf("\n");
     }
     cprintf("(* = foreground; the shell waits for it)\n");
 }
@@ -915,7 +939,8 @@ extern(C) void procUserTick(InterruptFrame* f) @nogc nothrow
 
 /// Create a task for `prog`: address space, kernel stack, ready to run. 0 on failure.
 /// The image only has to stay around until this returns (it is copied).
-uint procSpawn(Program* prog, const(char)* args, bool foreground) @nogc nothrow
+/// `stdoutId` is where its write() output goes: TTY_CONSOLE, or an open channel of tty.d.
+uint procSpawn(Program* prog, const(char)* args, bool foreground, uint stdoutId) @nogc nothrow
 {
     Task* t = null;
     for (uint i = 1; i < TASK_MAX; i++)
@@ -951,6 +976,8 @@ uint procSpawn(Program* prog, const(char)* args, bool foreground) @nogc nothrow
     t.id = nextTaskId++;
     t.startMs = clockNowNs() / 1_000_000UL;
     t.exitCode = 0;
+    t.stdoutId = ttyExists(stdoutId) ? stdoutId : TTY_CONSOLE;
+    ttyAddWriter(t.stdoutId);
     if (foreground)
     {
         keyQueueClear();                    // keys typed before the program started are not its input
@@ -965,17 +992,24 @@ uint procLaunch(uint index, const(char)* args, bool foreground) @nogc nothrow
 {
     if (index >= programCount)
         return 0;
-    return procSpawn(&programs[index], args, foreground);
+    return procSpawn(&programs[index], args, foreground, TTY_CONSOLE);
 }
 
 /// Start an ELF image that is already in memory (for example read from a disk).
 uint procLaunchImage(const(char)* name, const(ubyte)* image, ulong size, const(char)* args, bool foreground) @nogc nothrow
 {
+    return procLaunchImageOut(name, image, size, args, foreground, TTY_CONSOLE);
+}
+
+/// Same, with a chosen stdout target (TTY_CONSOLE or a channel id).
+uint procLaunchImageOut(const(char)* name, const(ubyte)* image, ulong size, const(char)* args,
+    bool foreground, uint stdoutId) @nogc nothrow
+{
     Program p;
     procCopyName(p.name.ptr, name);
     p.image = image;
     p.size = size;
-    return procSpawn(&p, args, foreground);
+    return procSpawn(&p, args, foreground, stdoutId);
 }
 
 // System calls
@@ -1069,6 +1103,10 @@ long sysWrite(ulong buf, ulong len) @nogc nothrow
     if (!procUserOk(buf, len, false))
         return -1;
 
+    // Output that does not go to the kernel console goes into a channel for a terminal.
+    if (cur.stdoutId != TTY_CONSOLE)
+        return sysTtyWrite(cur.stdoutId, cast(const(ubyte)*)buf, len);
+
     // A background task prints while the shell is waiting at its prompt: get the input
     // line out of the way first and bring it back afterwards.
     bool park = (cur !is fgTask) && fgTask is null && taskOutBegin !is null;
@@ -1092,6 +1130,146 @@ long sysWrite(ulong buf, ulong len) @nogc nothrow
         taskOutEnd();
     gfxPresent();
     return cast(long)len;
+}
+
+// Put len bytes into channel `id`, waiting for the reader whenever the buffer is full.
+// `p` is validated memory of the running task (or kernel memory). Returns len, or -1 if
+// the channel is gone (its reader closed it or exited): the output is dropped then.
+long sysTtyWrite(uint id, const(ubyte)* p, ulong len) @nogc nothrow
+{
+    ulong done = 0;
+    while (done < len)
+    {
+        long n = ttyPut(id, p + done, len - done);
+        if (n < 0)
+            return -1;
+        if (n == 0)
+            sysSleep(1);            // full: other tasks (the terminal) run, then we try again
+        done += cast(ulong)n;
+    }
+    return cast(long)len;
+}
+
+// clear(): the console is blanked; a channel gets a form feed (12), the terminal decides.
+long sysClear() @nogc nothrow
+{
+    if (cur.stdoutId != TTY_CONSOLE)
+    {
+        ubyte ff = 12;
+        return sysTtyWrite(cur.stdoutId, &ff, 1);
+    }
+    consoleClear();
+    gfxPresent();
+    return 0;
+}
+
+// Only programs may have channels (the shell has the console).
+long sysTtyCreate() @nogc nothrow
+{
+    if (cur.pml4Phys == 0)
+        return -1;
+    uint id = ttyCreate(cur.id);
+    return (id != 0) ? cast(long)id : -1;
+}
+
+// Non-blocking: whatever is waiting, up to len bytes. Only the reader may call this.
+long sysTtyRead(ulong id, ulong buf, ulong len) @nogc nothrow
+{
+    if (len > 65536)
+        len = 65536;
+    if (!ttyIsReader(cast(uint)id, cur.id) || !procUserOk(buf, len, true))
+        return -1;
+    return ttyGet(cast(uint)id, cast(ubyte*)buf, len);
+}
+
+long sysTtyStat(ulong id) @nogc nothrow
+{
+    if (!ttyIsReader(cast(uint)id, cur.id))
+        return -1;
+    return ttyWriters(cast(uint)id);
+}
+
+long sysTtyClose(ulong id) @nogc nothrow
+{
+    if (!ttyIsReader(cast(uint)id, cur.id))
+        return -1;
+    ttyClose(cast(uint)id);
+    return 0;
+}
+
+// Buffers of spawn(). Static, like sysPathA: a system call runs with interrupts off and the
+// file system layer never switches tasks, so nobody else can use them in the meantime.
+__gshared char[FS_PATH_MAX] spawnPath;
+__gshared char[USER_ARGS_MAX] spawnArgs;
+__gshared ExfatEntry spawnEntry;
+__gshared ExfatFile spawnFile;
+
+/**
+ * spawn(path, args, stdoutId): start the ELF file `path` as a background task.
+ *   path      NUL terminated, exact (no ".elf" or /bin search: the caller resolves names)
+ *   args      NUL terminated argument string (shorter than USER_ARGS_MAX), or 0 for none
+ *   stdoutId  TTY_CONSOLE (0): the program writes to the kernel console;
+ *             SPAWN_INHERIT: to wherever the caller writes;
+ *             a channel id: allowed if the caller reads that channel or writes to it itself.
+ * Returns the task id of the new program, or -1.
+ */
+long sysSpawn(ulong path, ulong args, ulong stdoutArg) @nogc nothrow
+{
+    if (cur.pml4Phys == 0)
+        return -1;
+
+    uint target = cast(uint)stdoutArg;
+    if (stdoutArg == SPAWN_INHERIT)
+        target = cur.stdoutId;
+    else if (stdoutArg > SPAWN_INHERIT)
+        return -1;
+    else if (target != TTY_CONSOLE && !ttyIsReader(target, cur.id) && target != cur.stdoutId)
+        return -1;
+    if (target != TTY_CONSOLE && !ttyExists(target))
+        return -1;
+
+    if (!procCopyPath(path, spawnPath.ptr, spawnPath.length))
+        return -1;
+    spawnArgs[0] = 0;
+    if (args != 0 && !procCopyPath(args, spawnArgs.ptr, spawnArgs.length))
+        return -1;
+
+    int slot;
+    if (!fsStat(spawnPath.ptr, &spawnEntry, &slot) || spawnEntry.isDir)
+        return -1;
+    enum ulong MAX_IMAGE = 4UL * 1024 * 1024;
+    if (spawnEntry.size == 0 || spawnEntry.size > MAX_IMAGE)
+        return -1;
+
+    ulong size = spawnEntry.size;
+    ulong pages = (size + 4095) / 4096;
+    ulong phys = pmmAllocContiguousZeroed(pages, 1, 0);
+    if (phys == 0)
+        return -1;
+    ubyte* image = cast(ubyte*)pmmPhysToVirt(phys);
+
+    exfatOpen(&spawnFile, &spawnEntry);
+    ulong off = 0;
+    while (off < size)
+    {
+        ulong want = size - off;
+        if (want > 65536)
+            want = 65536;
+        ulong got = fsRead(slot, &spawnFile, off, image + off, want);
+        if (got == 0)
+            break;
+        off += got;
+    }
+
+    uint id = 0;
+    if (off == size)
+    {
+        char[PROC_NAME_MAX] name;
+        procMakeName(spawnPath.ptr, name.ptr);
+        id = procLaunchImageOut(name.ptr, image, size, spawnArgs.ptr, false, target);
+    }
+    pmmFreePages(phys, pages);
+    return (id != 0) ? cast(long)id : -1;
 }
 
 // Copy a NUL terminated string out of user memory. False if it is not mapped or too long.
@@ -1250,9 +1428,17 @@ long syscallDispatch(ulong nr, ulong a0, ulong a1, ulong a2) @nogc nothrow
         case SYS_TICKS:
             return cast(long)(clockNowNs() / 1_000_000UL);
         case SYS_CLEAR:
-            consoleClear();
-            gfxPresent();
-            return 0;
+            return sysClear();
+        case SYS_SPAWN:
+            return sysSpawn(a0, a1, a2);
+        case SYS_TTY_CREATE:
+            return sysTtyCreate();
+        case SYS_TTY_READ:
+            return sysTtyRead(a0, a1, a2);
+        case SYS_TTY_STAT:
+            return sysTtyStat(a0);
+        case SYS_TTY_CLOSE:
+            return sysTtyClose(a0);
         case SYS_OPEN:
             return sysOpen(a0, a1);
         case SYS_FWRITE:
