@@ -107,7 +107,7 @@ enum ulong USER_SHM_BASE   = 0x70000000;                                    // s
 enum ulong USER_SHM_LIMIT  = USER_STACK_TOP - USER_STACK_PAGES * 4096;
 enum ulong USER_HEAP_LIMIT = USER_SHM_BASE;                                 // the heap stops where it starts
 
-// System call group 1 (0..99): process and memory management
+// System calls group 1 (0..99): process and memory management
 enum ulong SYS_GROUP1   = 0;
 enum ulong SYS_EXIT     = SYS_GROUP1 + 0;
 enum ulong SYS_WRITE    = SYS_GROUP1 + 1;
@@ -124,7 +124,7 @@ enum ulong SYS_SPAWN    = SYS_GROUP1 + 11;
 
 enum uint SPAWN_INHERIT = 0xFFFFFFFF; // spawn(): use the caller's own stdout
 
-// System call group 2 (100..199): filesystem I/O
+// System calls group 2 (100..199): filesystem I/O
 enum ulong SYS_GROUP2   = 100;
 enum ulong SYS_OPEN     = SYS_GROUP2 + 0;
 enum ulong SYS_READ     = SYS_GROUP2 + 1;
@@ -141,20 +141,20 @@ enum ulong SYS_RENAME   = SYS_GROUP2 + 11;
 enum ulong SYS_SYNC     = SYS_GROUP2 + 12;
 enum ulong SYS_CHDIR    = SYS_GROUP2 + 13;   // chdir(path) -> 0 or a negative FW_ERR_* code
 
-// System call group 3 (200-299): standard I/O device control
+// System calls group 3 (200-299): standard I/O device control
 enum ulong SYS_GROUP3     = 200;
 enum ulong SYS_TTY_CREATE = SYS_GROUP3 + 0;   // tty_create() -> channel id or -1
 enum ulong SYS_TTY_READ   = SYS_GROUP3 + 1;   // tty_read(id, buf, len) -> bytes (0: none), -1 error
 enum ulong SYS_TTY_STAT   = SYS_GROUP3 + 2;   // tty_stat(id) -> number of live writers, -1 error
 enum ulong SYS_TTY_CLOSE  = SYS_GROUP3 + 3;   // tty_close(id) -> 0 or -1
 
-// System call group 4 (300-399): reserved
-// System call group 5 (400-499): reserved
-// System call group 6 (500-599): reserved
-// System call group 7 (600-699): reserved
-// System call group 8 (700-799): reserved
-// System call group 9 (800-899): reserved
-// System call group 10 (900-999): reserved
+// System calls group 4 (300-399): reserved
+// System calls group 5 (400-499): reserved
+// System calls group 6 (500-599): reserved
+// System calls group 7 (600-699): reserved
+// System calls group 8 (700-799): reserved
+// System calls group 9 (800-899): reserved
+// System calls group 10 (900-999): reserved
 
 // Extended system calls, handled by corresponding syscallExtHook*
 enum ulong SYS_EXT1     = 1000; // [1000..1999 - SYS_EXT1] - graphics server
