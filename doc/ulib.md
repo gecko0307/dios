@@ -42,6 +42,8 @@ DIOS kernel functions.
 
 `long uread(int fd, void* buf, size_t n)`
 
+`long ureadfull(int fd, void* buf, size_t len)`
+
 `long ufwrite(int fd, const(void)* buf, size_t n)`
 
 `int uclose(int fd)`

@@ -8,7 +8,7 @@ DIOS 0.9.0 - TBD
 - **ulib**:
   - New function `utaskfind`
 - **Desktop**:
-  - A new built-in program `desktop.elf` that implements a basic taskbar with app launcher buttons. It is automatically started by the graphics server.
+  - New built-in program `desktop.elf` - a basic desktop manager. It is automatically started by the graphics server.
 - **Blackboard**:
   - Bigger window, new background color.
 
