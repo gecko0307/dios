@@ -33,11 +33,12 @@ You can use DIOS as a basis for creating your own operating system! PRs implemen
 - PS/2 keyboard and mouse
 - A shell with built-in kernel commands
 - Basic multi-tasking userspace in Ring 3; system calls; a simple standard library for applications
+- Spawning processes from other processes
 - Virtual filesystem; multiple mount points
 - RAM filesystem image loaded from a TAR archive (`rootfs.tar`) provided by the bootloader
 - Standard output channels
 - Userspace graphics server (GFXD), windowed applications
-- Simple image viewer.
+- A number of basic built-in applications.
 
 Note: all storage devices are mounted as read-only by default. FAT32 partitions can be remounted as read/write; exFAT is currently read-only.
 
