@@ -20,4 +20,4 @@ These programs are available in `/bin` directory and are recognized as commands 
 - `gfxd` - starts the graphics mode.
 - `gterm` - graphical terminal.
 - `image [PATH]` - displays an image (only TGA format is supported currently).
-- `blackboard` - a tiny drawing application.
+- `blackboard` - a tiny sketching application.

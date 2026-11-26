@@ -50,7 +50,8 @@ In the graphics mode, you should see a user terminal window. Terminal's possibil
 - `about` - prints the information about the system
 - `time` - prints current date and time
 - `file /home/hello.txt` - prints a text file
-- `image /home/lake.tga` - displays a TGA image.
+- `image /home/lake.tga &` - displays a TGA image
+- `blackboard &` - a simple sketching app.
 
 Full list of built-in programs is [here](doc/programs.md).
 
