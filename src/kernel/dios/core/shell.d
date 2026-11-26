@@ -52,13 +52,13 @@ import dios.core.xhci;
 enum size_t SHELL_LINE_CAPACITY = 128;
 enum size_t SHELL_HISTORY_CAPACITY = 16;
 
-immutable string[41] SHELL_COMMANDS = [
+immutable string[33] SHELL_COMMANDS = [
     "help", "mem", "clock", "irq", "pci", "history", "poweroff", "shutdown",
     "reboot", "clear", "cpuinfo", "acpi", "irqstat",
     "sleep", "hexdump", "crash", "run", "memmap",
     "programs", "disk", "mount", "cd", "cat", "dmesg", "usb",
     "ps", "kill", "fg", "gfx", "umount",
-    "touch", "mkdir", "rmdir", "rm", "mv", "cp", "write", "append", "sync", "remount"
+    "sync", "remount"
 ];
 
 __gshared char[SHELL_LINE_CAPACITY] shellLine;
@@ -672,6 +672,7 @@ void shellUmount(const(char)* args) @nogc nothrow
     fsUnmount(slot);
 }
 
+/*
 void shellFsError(const(char)* what, const(char)* path, int err) @nogc nothrow
 {
     cprintf("%s: %s: %s\n", what, path, fsErrorText(err));
@@ -715,7 +716,7 @@ void shellTouch(const(char)* path) @nogc nothrow
     }
     ExfatEntry e;
     if (fsStat(path, &e))
-        return;                     // exists (changing the time is not supported)
+        return; // exists (changing the time is not supported)
     int r = fsCreate(path, false);
     if (r != FW_OK)
         shellFsError("touch", path, r);
@@ -870,6 +871,7 @@ void shellCp(const(char)* args) @nogc nothrow
         off += got;
     }
 }
+*/
 
 // Run an ELF file from the mounted volume. Tries `path`, then `path.elf`.
 void shellRunFile(const(char)* path, const(char)* args, bool background) @nogc nothrow
@@ -1046,14 +1048,6 @@ void shellExecute() @nogc nothrow
         cprintf("  sync                Flush read-write volumes to the disk\n");
         cprintf("  cd [DIR]            Change the current directory\n");
         cprintf("  cat PATH            Print a text file\n");
-        cprintf("  touch PATH          Create a file\n");
-        cprintf("  mkdir PATH          Create a directory\n");
-        cprintf("  rmdir PATH          Remove a directory\n");
-        cprintf("  rm PATH             Remove a file\n");
-        cprintf("  mv SRC DEST         Rename or move within a volume (DEST may be a directory)\n");
-        cprintf("  cp SRC DEST         Copy (DEST may be a directory)\n");
-        cprintf("  write PATH TEXT     Replace file's content by TEXT\n");
-        cprintf("  append PATH TEXT    Add a line to the file\n");
         cprintf("  run NAME [ARGS] [&] Run a program (& = run in background); plain NAME works too\n");
         cprintf("  ps                  List running programs\n");
         cprintf("  kill ID             Kill a program\n");
@@ -1222,22 +1216,6 @@ void shellExecute() @nogc nothrow
     {
         shellCat(args);
     }
-    else if (shellEquals(shellLine.ptr, "touch"))
-        shellTouch(args);
-    else if (shellEquals(shellLine.ptr, "mkdir"))
-        shellMkdir(args);
-    else if (shellEquals(shellLine.ptr, "rmdir"))
-        shellRmdir(args);
-    else if (shellEquals(shellLine.ptr, "rm"))
-        shellRm(args);
-    else if (shellEquals(shellLine.ptr, "mv"))
-        shellMv(args);
-    else if (shellEquals(shellLine.ptr, "cp"))
-        shellCp(args);
-    else if (shellEquals(shellLine.ptr, "write"))
-        shellWriteText(args, false);
-    else if (shellEquals(shellLine.ptr, "append"))
-        shellWriteText(args, true);
     else if (shellEquals(shellLine.ptr, "sync"))
     {
         fsSyncAll();

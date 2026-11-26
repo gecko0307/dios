@@ -138,13 +138,14 @@ long sysfileOpen(const(char)* path, uint flags) @nogc nothrow
     int slot;
     if (access != 0)
     {
-        if (fsOpenWrite(path, flags, &slot, &f.entry, &f.wf) != FW_OK)
-            return -1;
+        int r = fsOpenWrite(path, flags, &slot, &f.entry, &f.wf);
+        if (r != FW_OK)
+            return r;                   // FW_ERR_*: the program learns why (read-only, bad name, ...)
         f.writable = true;
         f.append = (flags & FS_O_APPEND) != 0;
     }
     else if (!fsStat(path, &f.entry, &slot))
-        return -1;
+        return FW_ERR_NOT_FOUND;
     f.isDir = f.entry.isDir;
     f.pos = 0;
     if (!f.isDir && !exfatOpen(&f.file, &f.entry))

@@ -152,6 +152,7 @@ enum ulong SYS_RMDIR    = SYS_GROUP2 + 10;
 enum ulong SYS_RENAME   = SYS_GROUP2 + 11;
 enum ulong SYS_SYNC     = SYS_GROUP2 + 12;
 enum ulong SYS_CHDIR    = SYS_GROUP2 + 13;
+enum ulong SYS_REALPATH = SYS_GROUP2 + 14;   // realpath(path, buf, len) -> length, -1 on error
 
 // System calls group 3 (200-299): channel control
 enum ulong SYS_GROUP3    = 200;
@@ -1383,6 +1384,23 @@ long sysChdir(ulong path) @nogc nothrow
     return sysfileStat(p, &st) ? FW_ERR_NOT_DIR : FW_ERR_NOT_FOUND;
 }
 
+// realpath: the absolute, normalised form of a path (relative paths start at the caller's current
+// directory). Returns its length, -1 if it does not fit or a pointer is bad.
+long sysRealpath(ulong path, ulong buf, ulong len) @nogc nothrow
+{
+    if (!procCopyPath(path, sysPathA.ptr, FS_PATH_MAX) || !fsResolve(sysPathA.ptr, sysPathB.ptr))
+        return -1;
+    ulong n = 0;
+    while (sysPathB[n] != 0)
+        n++;
+    if (n + 1 > len || !procUserOk(buf, n + 1, true))
+        return -1;
+    char* out_ = cast(char*)buf;
+    for (ulong i = 0; i <= n; i++)
+        out_[i] = sysPathB[i];
+    return cast(long)n;
+}
+
 long sysRename(ulong from, ulong to) @nogc nothrow
 {
     if (!procCopyPath(from, sysPathA.ptr, FS_PATH_MAX) || !procCopyPath(to, sysPathB.ptr, FS_PATH_MAX))
@@ -1553,6 +1571,8 @@ long syscallDispatch(ulong nr, ulong a0, ulong a1, ulong a2) @nogc nothrow
             return sysRename(a0, a1);
         case SYS_CHDIR:
             return sysChdir(a0);
+        case SYS_REALPATH:
+            return sysRealpath(a0, a1, a2);
         case SYS_SYNC:
             fsSyncAll();
             return 0;

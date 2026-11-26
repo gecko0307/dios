@@ -63,6 +63,7 @@ enum ulong SYS_RMDIR    = SYS_GROUP2 + 10;
 enum ulong SYS_RENAME   = SYS_GROUP2 + 11;
 enum ulong SYS_SYNC     = SYS_GROUP2 + 12;
 enum ulong SYS_CHDIR    = SYS_GROUP2 + 13;
+enum ulong SYS_REALPATH = SYS_GROUP2 + 14;
 
 // System calls group 3 (200-299): stdout/channel control
 enum ulong SYS_GROUP3     = 200;
@@ -229,8 +230,8 @@ void uclear() @nogc nothrow
 // At most 8 files can be open at once; they are closed when the program ends.
 
 /**
- * Returns the file descriptor of a file or directory, or -1 if it doesn't exist (or cannot be
- * opened that way). flag is O_RDONLY (0), or O_WRONLY / O_RDWR optionally with O_CREATE,
+ * Returns the file descriptor of a file or directory, or a negative UERR_* code (UERR_NOT_FOUND,
+ * UERR_READ_ONLY, UERR_BAD_NAME, ...) if it doesn't exist or cannot be opened that way. flag is O_RDONLY (0), or O_WRONLY / O_RDWR optionally with O_CREATE,
  * O_TRUNC and O_APPEND. Directories can only be opened with O_RDONLY.
  */
 int uopen(const(char)* path, int flag) @nogc nothrow
@@ -365,6 +366,68 @@ int urename(const(char)* from, const(char)* to) @nogc nothrow
 int uchdir(const(char)* path) @nogc nothrow
 {
     return cast(int)sys_call(SYS_CHDIR, cast(ulong)path, 0, 0);
+}
+
+/**
+ * Writes the absolute, normalised form of `path` (relative paths start at the current directory; "." and ".."
+ * are resolved) to `buf`. The file does not have to exist. Returns its length, or -1 if it does not fit.
+ */
+long urealpath(const(char)* path, char* buf, size_t n) @nogc nothrow
+{
+    return sys_call(SYS_REALPATH, cast(ulong)path, cast(ulong)buf, n);
+}
+
+/// Text for a negative UERR_* code returned by the file system calls.
+const(char)* uerrstr(int err) @nogc nothrow
+{
+    switch (err)
+    {
+        case UERR_IO: return "I/O error";
+        case UERR_NOT_FOUND: return "not found";
+        case UERR_EXISTS: return "already exists";
+        case UERR_NO_SPACE: return "no space left on the volume";
+        case UERR_BAD_NAME: return "invalid name (ASCII only, no \\ / : * ? \" < > |)";
+        case UERR_NOT_EMPTY: return "directory not empty";
+        case UERR_IS_DIR: return "is a directory";
+        case UERR_NOT_DIR: return "not a directory";
+        case UERR_READ_ONLY: return "read-only (only /home and FAT32 volumes mounted with 'rw' can be changed)";
+        default: return "invalid operation";
+    }
+}
+
+/// Prints "what: path: reason" for a UERR_* code (to the standard output, like the other messages of the programs).
+void uperror(const(char)* what, const(char)* path, int err) @nogc nothrow
+{
+    uprintf("%s: %s: %s\n", what, path, uerrstr(err));
+}
+
+/**
+ * For cp and mv: if `dst` is an existing directory, `out_` becomes "dst/name-of-src", otherwise a copy of `dst`.
+ * `out_` has room for `cap` bytes.
+ */
+void utargetpath(const(char)* src, const(char)* dst, char* out_, size_t cap) @nogc nothrow
+{
+    size_t n = 0;
+    while (dst[n] != 0 && n + 1 < cap)
+    {
+        out_[n] = dst[n];
+        n++;
+    }
+    out_[n] = 0;
+
+    UStat st;
+    if (ustat(dst, &st) < 0 || !st.isDir)
+        return;
+
+    size_t base = 0;
+    for (size_t s = 0; src[s] != 0; s++)
+        if (src[s] == '/' && src[s + 1] != 0)
+            base = s + 1;
+    if (n > 0 && out_[n - 1] != '/' && n + 1 < cap)
+        out_[n++] = '/';
+    while (src[base] != 0 && src[base] != '/' && n + 1 < cap)
+        out_[n++] = src[base++];
+    out_[n] = 0;
 }
 
 /// Asks the disks to put everything they hold on the medium.
