@@ -2,7 +2,7 @@ DIOS 0.8.0 - TBD
 ----------------
 - **Kernel**:
   - Standard output channels and the corresponding syscalls (group 3): `SYS_CH_CREATE`, `SYS_CH_READ`, `SYS_CH_STAT`, `SYS_CH_CLOSE`
-  - New syscalls `SYS_SPAWN`, `SYS_CHDIR`, `SYS_STR`
+  - New syscalls `SYS_SPAWN`, `SYS_CHDIR`, `SYS_STR`, `SYS_TASK_ALIVE`, `SYS_REALPATH`
   - Unique working directory per process
   - `uptime` command removed, use `time -u` instead
   - Automatically start the graphics mode after boot if `gfx` kernel argument specified

@@ -36,6 +36,7 @@ Supported function numbers:
 - `SYS_RANDOM` (10) - generates a random number. This function currently directly uses a hardware RNG (RDRAND)
 - `SYS_SPAWN` (11) - executes a userspace program (ELF64 binary). `a0` is the path to an executable, `a1` is a zero-terminated arguments string, `a2` - stdout descriptor (where `SYS_WRITE` output goes): `STDOUT_CONSOLE`, `STDOUT_INHERIT`, or a channel from `SYS_TTY_CREATE`
 - `SYS_STR` (12) - retrieves a system info string to a user-provided buffer. `a0` - character buffer, `a1` - buffer size, `a2` - string identifier: `SYS_STR_VERSION`, `SYS_STR_ABOUT`. Returns number of bytes actually written, or -1 on error
+- `SYS_TASK_ALIVE` (13) - 
 - `SYS_OPEN` (100) - opens a file/directory. `a0` is a zero-terminated path. Returns a descriptor on success, or -1 on error
 - `SYS_READ` (101) - reads bytes from the file at the current offset. `a0` is the file descriptor, `a1` is the destination buffer, `a2` is the number of bytes to read. Returns number of bytes actually read (0 = end of file), or -1 on error
 - `SYS_FWRITE` (102) - writes bytes to the given file (if opened for writing). `a0` is the file descriptor, `a1` is the input buffer, `a2` is the size of the input in bytes. Returns the number of bytes written (fewer than the input if the volume is full), or -1 on error
@@ -50,6 +51,7 @@ Supported function numbers:
 - `SYS_RENAME` (111) - renames or moves a file or directory within one volume; the new name must not exist. `a0` is a zero-terminated path. Returns 0 on success or a negative error code (`UERR_*`)
 - `SYS_SYNC` (112) - asks the disks to put everything they hold on the medium
 - `SYS_CHDIR` (113) - changes the current directory. Returns 0 on success or a negative error code: UERR_NOT_FOUND or UERR_NOT_DIR
+- `SYS_REALPATH` (114) - 
 - `SYS_CH_CREATE` (200) - creates a standard output channel. Returns its descriptor (> 0), or -1 if there is no room for another one
 - `SYS_CH_READ` (201) - reads from a channel. Does not wait. `a0` is the channel descriptor, `a1` is the pointer to a buffer, `a2` is the buffer size in bytes. Returns the number of bytes read (0 = nothing in the channel right now), or -1 if the channel doesn't belong the program or is gone
 - `SYS_CH_STAT` (202) - returns the number of programs that are writing to a channel now (they end by themselves). `a0` is the channel descriptor. Returns -1 on error

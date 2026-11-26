@@ -39,6 +39,10 @@ module main;
  * Programs are looked up as /bin/<name>.elf, /bin/<name>; a name with a '/' is used as given
  * (".elf" is tried too). Built-in commands: help, cd, clear, exit.
  *
+ * A command ending with '&' runs in the background: the prompt comes back at once, and the
+ * program's output appears above the line being typed. "[ID] done" is shown when it ends.
+ * Without '&' the prompt waits for the program.
+ *
  * Not yet implemented:
  *  - input for the programs (they cannot read keys),
  *  - a way to stop a running program
@@ -66,6 +70,8 @@ enum uint LINE_MAX = 200; // longest command line (the kernel allows 255 bytes o
 enum uint NAME_MAX = 64;
 enum uint PATH_MAX = 128;
 
+enum uint MAX_BG = 8; // background programs that are watched (more can run, but without the "done" message)
+
 enum uint MAX_READS_PER_FRAME = 16; // 16 x 256 bytes: a chatty program must not freeze the window
 enum ulong BLINK_MS = 500;
 
@@ -83,6 +89,10 @@ __gshared uint lineLen;
 
 __gshared bool running = true;
 __gshared bool busy; // a program is running: no command line until it has ended
+__gshared uint fgTask; // task id of the program the prompt waits for (when busy)
+__gshared uint[MAX_BG] bgTasks; // task ids of the background programs, 0 = free slot
+__gshared uint promptY; // row where the command line starts
+__gshared bool parked; // the command line is taken off the screen while output is printed
 __gshared bool dirty = true;
 __gshared ulong blinkPhase;
 
@@ -94,12 +104,15 @@ void termClear() @nogc nothrow
         cells[i] = ' ';
     curX = 0;
     curY = 0;
+    promptY = 0;
     dirty = true;
 }
 
 void termScroll() @nogc nothrow
 {
     memmove(cells.ptr, cells.ptr + COLS, COLS * (ROWS - 1));
+    if (promptY > 0)
+        promptY--;
     for (uint i = 0; i < COLS; i++)
         cells[COLS * (ROWS - 1) + i] = ' ';
 }
@@ -157,12 +170,77 @@ void termPutString(const(char)* s) @nogc nothrow
         termPutChar(cast(ubyte)*s++);
 }
 
-void prompt() @nogc nothrow
+void termPutUint(uint v) @nogc nothrow
+{
+    char[10] d;
+    uint k = d.length;
+    do
+    {
+        d[--k] = cast(char)('0' + v % 10);
+        v /= 10;
+    }
+    while (v != 0);
+    for (; k < d.length; k++)
+        termPutChar(cast(ubyte)d[k]);
+}
+
+void showPrompt() @nogc nothrow
 {
     if (curX != 0)
         termNewline();                  // the program's last line had no newline
+    promptY = curY;
     termPutString("> ");
+}
+
+void prompt() @nogc nothrow
+{
     lineLen = 0;
+    showPrompt();
+}
+
+// Output of a background program arrives while the user may be typing: take the prompt and the
+// line off the screen first (parkInput), and put them back below the output (unparkInput).
+
+void parkInput() @nogc nothrow
+{
+    if (busy || parked)
+        return;
+    for (uint i = promptY * COLS; i < (curY + 1) * COLS; i++)
+        cells[i] = ' ';
+    curX = 0;
+    curY = promptY;
+    parked = true;
+    dirty = true;
+}
+
+void unparkInput() @nogc nothrow
+{
+    if (!parked)
+        return;
+    parked = false;
+    showPrompt();
+    for (uint i = 0; i < lineLen; i++)
+        termPutChar(cast(ubyte)line[i]);
+}
+
+/// "[id] text" at the cursor, which must be at the start of a line.
+void printJob(uint id, const(char)* text) @nogc nothrow
+{
+    termPutChar('[');
+    termPutUint(id);
+    termPutString("] ");
+    termPutString(text);
+    termPutChar('\n');
+}
+
+/// The same for a message that comes at any time (a background program has ended): on a line of
+/// its own, without disturbing the command line.
+void notifyJob(uint id, const(char)* text) @nogc nothrow
+{
+    parkInput();
+    if (busy && curX != 0)
+        termNewline();
+    printJob(id, text);
 }
 
 // Drawing
@@ -210,6 +288,7 @@ bool pump() @nogc nothrow
         long n = chRead(tty, buf.ptr, buf.length);
         if (n <= 0)
             return true;
+        parkInput();
         for (long k = 0; k < n; k++)
             termPutChar(buf[cast(size_t)k]);
     }
@@ -281,6 +360,18 @@ bool resolve(const(char)* name, char* path) @nogc nothrow
 void runLine() @nogc nothrow
 {
     termNewline();
+
+    // A trailing '&' means: do not wait for the program
+    bool background = false;
+    while (lineLen > 0 && isSpace(line[lineLen - 1]))
+        lineLen--;
+    if (lineLen > 0 && line[lineLen - 1] == '&')
+    {
+        background = true;
+        lineLen--;
+        while (lineLen > 0 && isSpace(line[lineLen - 1]))
+            lineLen--;
+    }
     line[lineLen] = 0;
 
     // First word: the program, the rest: its arguments
@@ -330,6 +421,7 @@ void runLine() @nogc nothrow
     {
         termPutString("Type a program name and its arguments, then Enter.\n");
         termPutString("Programs are searched in /bin. Built-ins: help, cd, clear, exit.\n");
+        termPutString("End a command with & to run it in the background.\n");
         prompt();
     }
     else
@@ -342,15 +434,35 @@ void runLine() @nogc nothrow
             termPutChar('\n');
             prompt();
         }
-        else if (uspawn(path.ptr, args, cast(uint)tty) < 0)
-        {
-            termPutString("Could not start ");
-            termPutString(path.ptr);
-            termPutChar('\n');
-            prompt();
-        }
         else
-            busy = true; // service() brings the prompt back when it has ended
+        {
+            int id = uspawn(path.ptr, args, cast(uint)tty);
+            if (id < 0)
+            {
+                termPutString("Could not start ");
+                termPutString(path.ptr);
+                termPutChar('\n');
+                prompt();
+            }
+            else if (background)
+            {
+                for (uint k = 0; k < MAX_BG; k++)
+                {
+                    if (bgTasks[k] == 0)
+                    {
+                        bgTasks[k] = cast(uint)id;
+                        break;
+                    }
+                }
+                printJob(cast(uint)id, name.ptr); // the cursor is on a fresh line below the command
+                prompt();
+            }
+            else
+            {
+                fgTask = cast(uint)id;
+                busy = true; // service() brings the prompt back when it has ended
+            }
+        }
     }
 }
 
@@ -389,13 +501,32 @@ void handleEvent(const(GfxEvent)* ev) @nogc nothrow
 /// Once a frame: bring in the output; when the program has ended and everything it wrote is shown, new prompt.
 void service() @nogc nothrow
 {
-    bool gone = chWriters(tty) == 0; // asked first: a program that has ended cannot write any more
+    // Asked before the output is read: a program that has ended cannot write any more, so once
+    // the channel is empty after this, all of its output has been shown.
+    bool fgGone = busy && !utaskalive(cast(int)fgTask);
+    bool[MAX_BG] bgGone;
+    for (uint k = 0; k < MAX_BG; k++)
+        bgGone[k] = bgTasks[k] != 0 && !utaskalive(cast(int)bgTasks[k]);
+
     bool drained = pump();
-    if (busy && gone && drained)
+    if (drained)
     {
-        busy = false;
-        prompt();
+        for (uint k = 0; k < MAX_BG; k++)
+        {
+            if (bgGone[k])
+            {
+                notifyJob(bgTasks[k], "done");
+                bgTasks[k] = 0;
+            }
+        }
+        if (fgGone)
+        {
+            busy = false;
+            fgTask = 0;
+            prompt();
+        }
     }
+    unparkInput();
     ulong phase = uticks() / BLINK_MS;
     if (phase != blinkPhase)
     {

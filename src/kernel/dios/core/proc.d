@@ -129,6 +129,7 @@ enum ulong SYS_DATETIME = SYS_GROUP1 + 9;
 enum ulong SYS_RANDOM   = SYS_GROUP1 + 10;
 enum ulong SYS_SPAWN    = SYS_GROUP1 + 11;
 enum ulong SYS_STR      = SYS_GROUP1 + 12;
+enum ulong SYS_TASK_ALIVE = SYS_GROUP1 + 13;
 
 enum uint SPAWN_INHERIT = 0xFFFFFFFF; // SYS_SPAWN: use the caller's own stdout
 
@@ -152,7 +153,7 @@ enum ulong SYS_RMDIR    = SYS_GROUP2 + 10;
 enum ulong SYS_RENAME   = SYS_GROUP2 + 11;
 enum ulong SYS_SYNC     = SYS_GROUP2 + 12;
 enum ulong SYS_CHDIR    = SYS_GROUP2 + 13;
-enum ulong SYS_REALPATH = SYS_GROUP2 + 14;   // realpath(path, buf, len) -> length, -1 on error
+enum ulong SYS_REALPATH = SYS_GROUP2 + 14;
 
 // System calls group 3 (200-299): channel control
 enum ulong SYS_GROUP3    = 200;
@@ -1551,6 +1552,8 @@ long syscallDispatch(ulong nr, ulong a0, ulong a1, ulong a2) @nogc nothrow
             return sysClear();
         case SYS_SPAWN:
             return sysSpawn(a0, a1, a2);
+        case SYS_TASK_ALIVE:
+            return (a0 <= 0xFFFFFFFF && procFindId(cast(uint)a0) !is null) ? 1 : 0;
         case SYS_CH_CREATE:
             return sysChannelCreate();
         case SYS_CH_READ:

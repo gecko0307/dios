@@ -46,6 +46,7 @@ enum ulong SYS_DATETIME = SYS_GROUP1 + 9;
 enum ulong SYS_RANDOM   = SYS_GROUP1 + 10;
 enum ulong SYS_SPAWN    = SYS_GROUP1 + 11;
 enum ulong SYS_STR      = SYS_GROUP1 + 12;
+enum ulong SYS_TASK_ALIVE = SYS_GROUP1 + 13;
 
 // System calls group 2 (100..199): filesystem
 enum ulong SYS_GROUP2   = 100;
@@ -307,6 +308,12 @@ void urandom(void* buffer, size_t size) @nogc nothrow
 int uspawn(const(char)* path, const(char)* args, uint stdoutTarget) @nogc nothrow
 {
     return cast(int)sys_call(SYS_SPAWN, cast(ulong)path, cast(ulong)args, cast(ulong)stdoutTarget);
+}
+
+/// Is the program with this task id (from uspawn(), or as shown by `ps`) still running? Task ids are never reused.
+bool utaskalive(int id) @nogc nothrow
+{
+    return id > 0 && sys_call(SYS_TASK_ALIVE, cast(ulong)id, 0, 0) == 1;
 }
 
 /**
