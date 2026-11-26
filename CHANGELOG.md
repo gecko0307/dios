@@ -1,12 +1,12 @@
 DIOS 0.8.0 - TBD
 ----------------
 - **Kernel**:
-  - tty and the corresponding syscalls (group 3): `SYS_TTY_CREATE`, `SYS_TTY_READ`, `SYS_TTY_STAT`, `SYS_TTY_CLOSE`
-  - `SYS_SPAWN`, `SYS_CHDIR`
+  - Standard output channels and the corresponding syscalls (group 3): `SYS_CH_CREATE`, `SYS_CH_READ`, `SYS_CH_STAT`, `SYS_CH_CLOSE`
+  - New syscalls `SYS_SPAWN`, `SYS_CHDIR`
   - `uptime` command removed, use `time -u` instead
   - Support automatically starting the graphics mode after boot
 - **ulib**:
-  - New functions `uspawn`, `uchdir`, `uttyCreate`, `uttyRead`, `uttyWriters`, `uttyClose`
+  - New functions `uspawn`, `uchdir`, `chCreate`, `chRead`, `chWriters`, `chClose`
 - **Userspace**
   - `cd`, `ls`, `file` are now built-in programs
 - **GTerm**:

@@ -35,6 +35,7 @@ You can use DIOS as a basis for creating your own operating system! PRs implemen
 - Basic multi-tasking userspace in Ring 3; system calls; a simple standard library for applications
 - Virtual filesystem; multiple mount points
 - RAM filesystem image loaded from a TAR archive (`rootfs.tar`) provided by the bootloader
+- Standard output channels
 - Userspace graphics server (GFXD), windowed applications
 - Simple image viewer.
 
