@@ -100,9 +100,9 @@ Most of its functions are libc-like and self-explanatory. Full list of them can 
 
 [GFXD](src/user/gfxd) is a graphics server and a window manager that allows other applications to draw graphics.
 
-GFXD is a userspace program that is provided to the kernel as a binary module via Limine (see `limine.conf`). It must be present as `cdroot/user/gfxd.elf` before building the ISO image. DIOS repository provides a prebuilt GFXD binary for convenience.
+In DIOS, the graphics server is a userspace program that must be present as `/bin/gfxd.elf` in the root filesystem.
 
-The graphics server is started with `gfx start` command. `Ctrl+F1` switches back to the shell, `Ctrl+F2` shows the server, `Ctrl+F3` stops it.
+It is launched with `gfx start` command in the kernel shell. `Ctrl+F1` switches back to the shell, `Ctrl+F2` shows the server, `Ctrl+F3` stops it.
 
 ## "Hello, World" application in D
 
