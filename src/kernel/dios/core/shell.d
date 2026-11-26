@@ -1044,7 +1044,7 @@ void shellExecute() @nogc nothrow
         cprintf("  remount NAME rw|ro  Switch a mounted volume between read-write and read-only\n");
         cprintf("  umount NAME         Unmount /mnt/NAME (flushes a read-write volume)\n");
         cprintf("  sync                Flush read-write volumes to the disk\n");
-        cprintf("  cd [DIR]            Change the current directory (of the shell only)\n");
+        cprintf("  cd [DIR]            Change the current directory\n");
         cprintf("  cat PATH            Print a text file\n");
         cprintf("  touch PATH          Create a file\n");
         cprintf("  mkdir PATH          Create a directory\n");
