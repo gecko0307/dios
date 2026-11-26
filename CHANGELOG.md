@@ -9,9 +9,9 @@ DIOS 0.8.0 - TBD
 - **ulib**:
   - New functions `uspawn`, `uchdir`, `chCreate`, `chRead`, `chWriters`, `chClose`
 - **Userspace**
-  - `echo`, `about`, `pwd`, `ls`, `file` are now built-in programs
+  - `echo`, `about`, `pwd`, `ls`, `touch`, `mkdir`, `rmdir`, `rm`, `mv`, `cp`, `write`, `append`, `file` are now built-in programs
 - **GTerm**:
-  - New built-in program GTerm, a graphical terminal.
+  - New built-in program `gterm`, a graphical terminal.
 
 DIOS 0.7.0 - 26 Nov, 2026
 -------------------------
