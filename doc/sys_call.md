@@ -53,7 +53,7 @@ Group 1 - process control, memory control, system info:
 Group 2 - filesystem control:
 
 - `SYS_OPEN` (100) - opens a file/directory. `a0` is a zero-terminated path. Returns a descriptor on success, or -1 on error
-- `SYS_READ` (101) - reads bytes from the file at the current offset. `a0` is the file descriptor, `a1` is the destination buffer, `a2` is the number of bytes to read. Returns number of bytes actually read (0 = end of file), or -1 on error
+- `SYS_READ` (101) - reads bytes from the file at the current offset. `a0` is the file descriptor, `a1` is the destination buffer, `a2` is the number of bytes to read. Returns number of bytes actually read (0 = end of file), or -1 on error. Currently `SYS_READ` is limited to 2 MiB per one call
 - `SYS_FWRITE` (102) - writes bytes to the given file (if opened for writing). `a0` is the file descriptor, `a1` is the input buffer, `a2` is the size of the input in bytes. Returns the number of bytes written (fewer than the input if the volume is full), or -1 on error
 - `SYS_CLOSE` (103) - closes the file. `a0` is the file descriptor. Returns 0 on success, -1 on error
 - `SYS_SEEK` (104) - jumps to a byte offset in the file. `a0` is the file descriptor, `a1` is the offset, `a2` is the origin for the new offset (`SEEK_SET = 0`, `SEEK_CUR = 1`, `SEEK_END = 2`). Returns a new position, or -1 on error

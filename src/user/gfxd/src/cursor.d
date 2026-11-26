@@ -72,7 +72,7 @@ bool loadCursor()
             ufree(buf);
     }
     
-    long bytesRead = uread(file, buf, len);
+    long bytesRead = ureadfull(file, buf, len);
     if (bytesRead != cast(long)len)
     {
         uprintf("Error: failed to read \"%s\"\n", path.ptr);

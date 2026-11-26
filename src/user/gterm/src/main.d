@@ -552,7 +552,7 @@ bool loadFont(const(char)* path) @nogc nothrow
         uclose(f);
         return false;
     }
-    bool ok = uread(f, buf, len) == cast(long)len;
+    bool ok = ureadfull(f, buf, len) == cast(long)len;
     uclose(f);
     ok = ok && loadTGA(buf[0 .. len], &fontImage);
     ufree(buf);

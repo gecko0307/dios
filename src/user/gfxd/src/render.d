@@ -56,11 +56,11 @@ import wm;
 import cursor;
 
 enum uint COLOR_DESKTOP      = 0x00203A5A;
-enum uint COLOR_FRAME        = 0x00505050;      // border and title bar
-enum uint COLOR_FRAME_FOCUS  = 0x003A6EA5;
-enum uint COLOR_CLOSE        = 0x00B03030;
+enum uint COLOR_FRAME        = 0x00E4E4E4;
+enum uint COLOR_FRAME_FOCUS  = 0x00EBEBEB;
+enum uint COLOR_CLOSE        = 0x00DC5050;
 enum uint COLOR_CLOSE_X      = 0x00FFFFFF;
-enum uint CURSOR_KEY         = 0x00FF00FF;      // transparent pixels in cursor.d
+enum uint CURSOR_KEY         = 0x00FF00FF; // transparent pixels in cursor.d
 
 __gshared Canvas renderScene;       // desktop and windows, no cursor
 __gshared Canvas renderScreen;      // scene + cursor: what is presented

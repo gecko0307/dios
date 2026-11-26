@@ -241,10 +241,26 @@ int uopen(const(char)* path, int flag) @nogc nothrow
     return cast(int)sys_call(SYS_OPEN, cast(ulong)path, cast(ulong)flag, 0);
 }
 
-/// Reads bytes from the file at the current offset. Returns the number of bytes read (0 = end of file), or -1 on error.
+/// Reads bytes from the file at the current offset. Returns the number of bytes read (0 = end of file), or -1 on error. Redaing is limited to 2 MiB per one call.
 long uread(int fd, void* buf, size_t n) @nogc nothrow
 {
     return sys_call(SYS_READ, cast(ulong)fd, cast(ulong)buf, n);
+}
+
+///
+long ureadfull(int fd, void* buf, size_t len) @nogc nothrow
+{
+    size_t total = 0;
+    while (total < len)
+    {
+        long n = uread(fd, cast(void*)(cast(ubyte*)buf + total), len - total);
+        if (n < 0)
+            return total > 0 ? cast(long)total : -1;
+        if (n == 0)
+            break;
+        total += cast(size_t)n;
+    }
+    return cast(long)total;
 }
 
 /// Closes the file.
