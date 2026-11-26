@@ -168,8 +168,9 @@ void openBlackboard()
 }
 
 __gshared GfxInfo gfxInfo;
+__gshared uint desktopColor = 0x00203A5A;
 __gshared uint taskbarHeight = 48;
-__gshared uint taskbarColor = 0xFFEBEBEB;
+__gshared uint taskbarColor = 0x00EBEBEB;
 
 int main(string[] args)
 {
@@ -193,21 +194,23 @@ int main(string[] args)
             ufree(taskbarIcons.ptr);
     }
     
-    Window taskbar;
+    Window desktop;
     bool running = true;
     
-    uint taskbarY = gfxInfo.height - taskbarHeight;
-    if (!windowCreateDesktop(&taskbar, gfxInfo.width, taskbarHeight, 0, taskbarY))
+    if (!windowCreateDesktop(&desktop, gfxInfo.width, gfxInfo.height, 0, 0))
     {
-        uprintf("Error: could not create a taskbar window\n");
+        uprintf("Error: could not create a desktop window\n");
         return 1;
     }
 
-    if (!taskbar.serverRunning)
+    if (!desktop.serverRunning)
         uprintf("Warning: no graphics server running\n");
 
-    Canvas* canv = &taskbar.canvas;
-    canv.fillRect(0, 0, gfxInfo.width, taskbarHeight, taskbarColor);
+    Canvas* canv = &desktop.canvas;
+    canv.fillRect(0, 0, canv.width, canv.height, desktopColor);
+
+    uint taskbarY = canv.height - taskbarHeight;
+    canv.fillRect(0, taskbarY, canv.width, taskbarHeight, taskbarColor);
     
     uint iconSize = 48;
     
@@ -225,7 +228,7 @@ int main(string[] args)
     {
         if (getTaskbarIcon(&terminalIcon))
         {
-            drawIcon(canv, &terminalIcon, 0, 0);
+            drawIcon(canv, &terminalIcon, 0, taskbarY);
         }
     }
     
@@ -243,7 +246,7 @@ int main(string[] args)
     {
         if (getTaskbarIcon(&blackboardIcon))
         {
-            drawIcon(canv, &blackboardIcon, iconSize, 0);
+            drawIcon(canv, &blackboardIcon, iconSize, taskbarY);
         }
     }
     
@@ -257,7 +260,7 @@ int main(string[] args)
         clicked = false;
         
         GfxEvent event;
-        bool got = windowPoll(&taskbar, &event, 16);
+        bool got = windowPoll(&desktop, &event, 16);
         while(got)
         {
             if (event.type == GFX_EV_CLOSE)
@@ -278,25 +281,23 @@ int main(string[] args)
                 }
             }
             
-            got = windowPoll(&taskbar, &event, 0);
+            got = windowPoll(&desktop, &event, 0);
         }
-
-        //c.blit(&imgCanvas, 0, 0);
         
-        windowCommit(&taskbar);
+        windowCommit(&desktop);
         
         if (clicked)
         {
             if (mouseX > 0 && mouseX < iconSize &&
-                mouseY > 0 && mouseY < iconSize)
+                mouseY > taskbarY && mouseY < taskbarY + iconSize)
                 openTerminal();
             else if (mouseX > iconSize && mouseX < iconSize + iconSize &&
-                mouseY > 0 && mouseY < iconSize)
+                mouseY > taskbarY && mouseY < taskbarY + iconSize)
                 openBlackboard();
         }
     }
 
-    windowClose(&taskbar);
+    windowClose(&desktop);
     
     return 0;
 }
