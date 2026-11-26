@@ -52,11 +52,11 @@ import dios.core.xhci;
 enum size_t SHELL_LINE_CAPACITY = 128;
 enum size_t SHELL_HISTORY_CAPACITY = 16;
 
-immutable string[40] SHELL_COMMANDS = [
+immutable string[41] SHELL_COMMANDS = [
     "help", "mem", "clock", "irq", "pci", "history", "poweroff", "shutdown",
     "reboot", "clear", "cpuinfo", "acpi", "irqstat",
     "sleep", "hexdump", "crash", "run", "memmap",
-    "programs", "disk", "mount", "cat", "dmesg", "usb",
+    "programs", "disk", "mount", "cd", "cat", "dmesg", "usb",
     "ps", "kill", "fg", "gfx", "umount",
     "touch", "mkdir", "rmdir", "rm", "mv", "cp", "write", "append", "sync", "remount"
 ];
@@ -1044,6 +1044,7 @@ void shellExecute() @nogc nothrow
         cprintf("  remount NAME rw|ro  Switch a mounted volume between read-write and read-only\n");
         cprintf("  umount NAME         Unmount /mnt/NAME (flushes a read-write volume)\n");
         cprintf("  sync                Flush read-write volumes to the disk\n");
+        cprintf("  cd [DIR]            Change the current directory (of the shell only)\n");
         cprintf("  cat PATH            Print a text file\n");
         cprintf("  touch PATH          Create a file\n");
         cprintf("  mkdir PATH          Create a directory\n");
@@ -1244,6 +1245,13 @@ void shellExecute() @nogc nothrow
     }
     else if (shellEquals(shellLine.ptr, "remount"))
         shellRemount(args);
+    else if (shellEquals(shellLine.ptr, "cd"))
+    {
+        // Built in, not a program: the current directory belongs to the shell, and a program
+        // can only change its own. Programs started from here begin in this directory.
+        if (!fsChdir(args[0] == 0 ? "/".ptr : args))
+            cprintf("Not a directory: %s\n", args);
+    }
     else if (shellEquals(shellLine.ptr, "run"))
     {
         // First word of the arguments is the program name, the rest is passed on.

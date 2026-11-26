@@ -55,6 +55,12 @@ module dios.core.proc;
  * or by being killed. It becomes a zombie; task 0 reaps it (frees the address space) in
  * procPoll() and reports the exit through taskExitHook.
  *
+ * Current directory: every task has its own (Task.cwd). The running task's lives in fsCwd, which
+ * is what the file system code resolves relative paths against; taskSchedule() saves it into the
+ * task that is switched out and loads the next task's. A new task starts in its spawner's directory,
+ * and changing it never affects any other task. (So `cd` has to be done by the program whose
+ * directory it is: the kernel shell and term have it built in.)
+ *
  * Standard output: write() and clear() go to the stdout target of the calling task
  * (Task.stdoutId): the kernel console (0, the default, what the shell shows) or a channel
  * (tty.d) read by a user program such as a terminal. A task inherits nothing implicitly:
@@ -252,6 +258,7 @@ struct Task
     ulong startMs;
     long exitCode;
     uint stdoutId;              // where write()/clear() go: TTY_CONSOLE or a channel of tty.d
+    char[FS_PATH_MAX] cwd;      // current directory while switched out; the running task's is fsCwd
     char[PROC_NAME_MAX] name;
     OpenFile[SYSFILE_MAX_OPEN] files;
 }
@@ -328,6 +335,36 @@ bool procNameEq(const(char)* a, const(char)* b) @nogc nothrow
     return a[i] == b[i];
 }
 
+// Copy a current directory (NUL terminated, FS_PATH_MAX bytes at most).
+void procCwdCopy(char* dst, const(char)* src) @nogc nothrow
+{
+    uint i = 0;
+    while (i + 1 < FS_PATH_MAX && src[i] != 0)
+    {
+        dst[i] = src[i];
+        i++;
+    }
+    dst[i] = 0;
+}
+
+// Mount `slot` goes away: tasks whose current directory is inside it go back to "/". (The
+// running task's own was already dealt with by fsCwdLeave; it is not in Task.cwd right now.)
+extern(C) void procCwdLeave(int slot) @nogc nothrow
+{
+    for (uint i = 0; i < TASK_MAX; i++)
+    {
+        Task* t = &tasks[i];
+        const(char)* rest;
+        if (t is cur || t.state == TaskState.Free)
+            continue;
+        if (fsMountOfPath(t.cwd.ptr, &rest) == slot)
+        {
+            t.cwd[0] = '/';
+            t.cwd[1] = 0;
+        }
+    }
+}
+
 /// Set up SYSCALL/SYSRET and collect the programs the bootloader loaded.
 void procInit() @nogc nothrow
 {
@@ -349,6 +386,9 @@ void procInit() @nogc nothrow
     cur = &tasks[0];
     sysfileClear(tasks[0].files.ptr);
     sysfileBind(tasks[0].files.ptr);
+    fsInitCwd();
+    procCwdCopy(tasks[0].cwd.ptr, fsCwd.ptr);
+    fsCwdLeaveHook = &procCwdLeave;
 
     programCount = 0;
     if (moduleRequest.response is null)
@@ -762,6 +802,8 @@ void taskSchedule() @nogc nothrow
             syscallSetStack(top);
         }
         sysfileBind(next.files.ptr);
+        procCwdCopy(prev.cwd.ptr, fsCwd.ptr);       // each task has its own current directory
+        procCwdCopy(fsCwd.ptr, next.cwd.ptr);
         sliceTicks = 0;
         taskSwitch(&prev.savedSp, next.savedSp);
         // ... and we are back: somebody switched to this task again.
@@ -969,6 +1011,7 @@ uint procSpawn(Program* prog, const(char)* args, bool foreground, uint stdoutId)
         return 0;
     }
     sysfileClear(t.files.ptr);
+    procCwdCopy(t.cwd.ptr, fsCwd.ptr);      // starts where its spawner is (fsCwd is the running task's)
 
     // First switch to this task "returns" from taskSwitch into taskTrampoline.
     ulong top = taskStackTop(t);
@@ -1327,9 +1370,8 @@ long sysPathOp(ulong path, ulong op) @nogc nothrow
     return fsRmdir(p);
 }
 
-// chdir: the current directory is one for the whole system (fsCwd), shared by the kernel shell and
-// every program, so a program that changes it changes it for the shell too (that is what makes
-// /bin/cd possible). 0, FW_ERR_NOT_DIR if the path is a file, FW_ERR_NOT_FOUND if it does not exist.
+// chdir: changes the current directory of the calling task only (fsCwd is the running task's).
+// 0, FW_ERR_NOT_DIR if the path is a file, FW_ERR_NOT_FOUND if it does not exist.
 long sysChdir(ulong path) @nogc nothrow
 {
     char* p = sysPathA.ptr;

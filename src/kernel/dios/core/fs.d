@@ -70,7 +70,14 @@ struct Mount
 }
 
 __gshared Mount[FS_MAX_MOUNTS] mounts;
-__gshared char[FS_PATH_MAX] fsCwd;           // absolute, "/" when empty (see fsInitCwd)
+// The current directory of the RUNNING task: absolute, "/" when empty (see fsInitCwd). Every task has
+// its own (Task.cwd in proc.d); the scheduler swaps them in and out when it switches tasks.
+__gshared char[FS_PATH_MAX] fsCwd;
+
+/// Called when mount `slot` goes away, so that the owner of the other directories (proc.d) can
+/// send the tasks whose current directory is inside it back to "/".
+alias FsCwdLeaveHook = extern(C) void function(int slot) @nogc nothrow;
+__gshared FsCwdLeaveHook fsCwdLeaveHook;
 
 extern(C):
 
@@ -264,7 +271,7 @@ int fsMountOfPath(const(char)* full, const(char)** rest) @nogc nothrow
     return slot;
 }
 
-/// If the current directory is inside mount `slot`, go back to "/".
+/// If the current directory (of this task and of every other) is inside mount `slot`, go back to "/".
 void fsCwdLeave(int slot) @nogc nothrow
 {
     const(char)* rest;
@@ -273,6 +280,8 @@ void fsCwdLeave(int slot) @nogc nothrow
         fsCwd[0] = '/';
         fsCwd[1] = 0;
     }
+    if (fsCwdLeaveHook !is null)
+        fsCwdLeaveHook(slot);
 }
 
 /// Unmount slot `slot`. Open files on it become invalid.

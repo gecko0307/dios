@@ -358,9 +358,9 @@ int urename(const(char)* from, const(char)* to) @nogc nothrow
 }
 
 /**
- * Changes the current directory. It is one for the whole system, not per program: the kernel shell and
- * all programs (also other terminals) see the change. Returns 0 or a negative UERR_* code
- * (UERR_NOT_FOUND, UERR_NOT_DIR).
+ * Changes the current directory of this program. Every program has its own: it starts in the directory
+ * of the program that started it, and changing it affects nobody else (so a separate `cd` program
+ * cannot exist; a shell does it itself). Returns 0 or a negative UERR_* code (UERR_NOT_FOUND, UERR_NOT_DIR).
  */
 int uchdir(const(char)* path) @nogc nothrow
 {

@@ -11,6 +11,7 @@
 - `hexdump [-p] ADDR [LEN]` - dump memory (-p: physical address)
 - `history` - show recent commands
 - `sleep SECONDS` - wait (Ctrl+C aborts)
+- `cd [DIR]` - changes the current directory
 - `programs` - list the programs in `/bin`
 - `dmesg [N [SKIP]]` - kernel log (last N lines, SKIP lines before the end)
 - `usb` - list USB devices (hubs, keyboards, removable disks...)

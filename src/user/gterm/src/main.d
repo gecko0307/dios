@@ -37,7 +37,7 @@ module main;
  *
  * Usage: type a program name with arguments and press Enter.
  * Programs are looked up as /bin/<name>.elf, /bin/<name>; a name with a '/' is used as given
- * (".elf" is tried too). Built-in commands: help, clear, exit.
+ * (".elf" is tried too). Built-in commands: help, cd, clear, exit.
  *
  * Not yet implemented:
  *  - input for the programs (they cannot read keys),
@@ -313,10 +313,23 @@ void runLine() @nogc nothrow
         termClear();
         prompt();
     }
+    else if (streq(name.ptr, "cd"))
+    {
+        // Built in: the current directory belongs to this program, and programs started from
+        // here begin in it. A separate `cd` program could only change its own.
+        int r = uchdir(args[0] == 0 ? "/" : args);
+        if (r != 0)
+        {
+            termPutString("cd: ");
+            termPutString(args);
+            termPutString(r == UERR_NOT_DIR ? ": not a directory\n" : ": no such directory\n");
+        }
+        prompt();
+    }
     else if (streq(name.ptr, "help"))
     {
         termPutString("Type a program name and its arguments, then Enter.\n");
-        termPutString("Programs are searched in /bin. Built-ins: help, clear, exit.\n");
+        termPutString("Programs are searched in /bin. Built-ins: help, cd, clear, exit.\n");
         prompt();
     }
     else
