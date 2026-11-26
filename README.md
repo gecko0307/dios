@@ -75,6 +75,7 @@ DIOS project consists of a several structural layers, each with its own workflow
   - `src/ulib/umain.d` - runtime entry point. Allocates an arguments array and calls compiler-generated `_Dmain`
 - `src/user` contains userspace services and built-in programs:
   - `src/user/gfxd` - **GFXD**, the DIOS Graphics Server
+  - `src/user/gterm` - **GTerm**, a graphical terminal
   - `src/user/time` - prints current UTC date and time
   - `src/user/timer` - a simple background timer program (`timer 10s &`)
   - `src/user/image` - work-in-progress image viewer. Currently supports only TGA format (`image img.tga &`, then start/switch to graphics mode)
