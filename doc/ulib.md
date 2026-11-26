@@ -34,6 +34,8 @@ DIOS kernel functions.
 
 `bool utaskalive(int id)`
 
+`int utaskfind(const(char)* name)`
+
 `long usysstr(char* buf, size_t size, uint strid)`
 
 `int uopen(const(char)* path, int flags)`

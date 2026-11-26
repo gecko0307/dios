@@ -47,7 +47,8 @@ Group 1 - process control, memory control, system info:
 - `SYS_RANDOM` (10) - generates a random number. This function currently directly uses a hardware RNG (RDRAND)
 - `SYS_SPAWN` (11) - executes a userspace program (ELF64 binary). `a0` is the path to an executable, `a1` is a zero-terminated arguments string, `a2` - stdout descriptor (where `SYS_WRITE` output goes): `STDOUT_CONSOLE`, `STDOUT_INHERIT`, or a channel from `SYS_TTY_CREATE`
 - `SYS_STR` (12) - retrieves a system information string to a user-provided buffer. `a0` - output buffer, `a1` - buffer size in bytes, `a2` - string identifier: `SYS_STR_VERSION` or `SYS_STR_ABOUT`. Returns number of bytes actually written, or -1 on error
-- `SYS_TASK_ALIVE` (13) - returns 1 if task is running, 0 otherwise. `a0` is a task ID
+- `SYS_TASK_ALIVE` (13) - returns 1 if a task is running, 0 otherwise. `a0` is a task ID
+- `SYS_TASK_FIND` (14) - returns the ID of the oldest running task whose name is the given string. `a0` is the name (without the directory and `.elf` extension). Returns 0 if there is none, -1 on error
 
 Group 2 - filesystem control:
 
