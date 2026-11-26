@@ -587,7 +587,7 @@ int main(string[] args)
     }
 
     termClear();
-    termPutString("DIOS Graphical Terminal\n");
+    termPutString("DIOS Terminal\n");
     termPutString("Enter 'help' to list the built-in commands.\n");
     prompt();
 

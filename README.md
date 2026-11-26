@@ -38,6 +38,7 @@ You can use DIOS as a basis for creating your own operating system! PRs implemen
 - RAM filesystem image loaded from a TAR archive (`rootfs.tar`) provided by the bootloader
 - Standard output channels
 - Userspace graphics server (GFXD), windowed applications
+- Work-in-progress desktop manager
 - A number of basic built-in applications.
 
 Note: all storage devices are mounted as read-only by default. FAT32 partitions can be remounted as read/write; exFAT is currently read-only.
@@ -46,7 +47,7 @@ Note: all storage devices are mounted as read-only by default. FAT32 partitions 
 
 After successful initialization, the kernel immediately starts a graphics mode and runs its own shell at the background. You can always revert to the shell with `Ctrl+F1` and back to graphics with `Ctrl+F2`. Available shell commands are listed [here](doc/commands.md).
 
-In the graphics mode, you should see a user terminal window. Terminal's possibilities are very limited at the moment, but you already can run built-in programs. For example:
+In the graphics mode, you can open a terminal window by pressing a launcher button. Terminal's possibilities are very limited at the moment, but you already can run built-in programs. For example:
 
 - `about` - prints the information about the system
 - `time` - prints current date and time
