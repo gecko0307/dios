@@ -1,7 +1,6 @@
 ## Kernel Shell Commands
 
 - `help` - show the command list
-- `about` - kernel version information
 - `cpuinfo` - CPU identification and features
 - `mem` - physical memory statistics
 - `memmap` - show the memory map
