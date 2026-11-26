@@ -1390,12 +1390,6 @@ void shellAutostartGfx() @nogc nothrow
         return;
     }
     shellRunFile(file.ptr, "".ptr, true);
-    if (!shellResolveProgram("gterm".ptr, file.ptr))
-    {
-        cprintf("gfx: /bin/gterm.elf not found, no terminal started\n");
-        return;
-    }
-    shellRunFile(file.ptr, "".ptr, true);
 }
 
 void shellInit() @nogc nothrow
