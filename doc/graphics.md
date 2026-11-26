@@ -1,6 +1,6 @@
 # The Graphics Stack
 
-The DIOS kernel does not draw windows by itself. Instead, it provides a protocol that connects userspace graphics server (the program that draws windows) with graphics clients (normal applications).
+The DIOS kernel does not draw windows by itself. Instead, it provides a protocol that connects userspace graphics server (the program that draws windows) with graphics clients (applications that need a window).
 
 The screen belongs either to the console (the kernel shell) or to the graphics server. `Ctrl+F1` shows the shell, `Ctrl+F2` shows the server, `Ctrl+F3` stops it. If the server crashes, the console comes back. While the server is on screen the console keeps drawing into its scene buffer, so the shell is exactly as it was when you return to it.
 

@@ -27,7 +27,7 @@ For more information, please refer to <https://unlicense.org>
 module main;
 
 /**
- * gfxdemo - template for a graphical program.
+ * Blackboard - a simple drawing application and a template for a graphical program.
  *
  *   1. windowCreate()   gives you a drawable area (win.canvas) of the size you ask for
  *   2. draw into it     win.canvas.fillRect(), line(), blit(), setPixel()... or write the
@@ -35,11 +35,12 @@ module main;
  *   3. windowCommit()   tells the graphics server that something changed
  *   4. windowPoll()     input and other events: mouse (relative to the window), keys, focus, close
  *
- * Run it from the shell: `run gfxdemo &`. It also works before the graphics server is
- * started (`gfx start`): the server picks it up when it comes.
+ * Run it from the shell: `run blackboard &`.
+ * It also works before the graphics server is started - the server picks it up when it comes.
  *
- * The program implements painting with the left mouse button.
- * Right button and C key clear the canvas, press Q or Escape to quit.
+ * Draw in the window with the left mouse button.
+ * Press the right mouse button or C key to clear the board.
+ * Press Q or Escape to quit.
  */
 
 import ulib.dios;
@@ -124,13 +125,8 @@ struct Demo
     {
         if (!needRedraw)
             return;
-        
         Canvas* c = &win.canvas;
         c.blit(&paint, 0, 0);
-        //c.hline(mouseX - 6, mouseY, 13, rgb(255, 255, 255));
-        //c.vline(mouseX, mouseY - 6, 13, rgb(255, 255, 255));
-        //c.rect(0, 0, c.width, c.height, focused ? rgb(255, 200, 40) : rgb(90, 90, 90));
-        
         needRedraw = false;
     }
 }
@@ -142,7 +138,7 @@ int main(string[] args)
 
     if (!windowCreate(&d.win, WIDTH, HEIGHT))
     {
-        uputs("gfxdemo: could not create a window\n");
+        uprintf("Error: could not create a window\n");
         return 1;
     }
     
@@ -159,7 +155,7 @@ int main(string[] args)
     d.paint.clear(PAPER);
 
     if (!d.win.serverRunning)
-        uputs("gfxdemo: no graphics server yet - 'gfx start' shows this window\n");
+        uprintf("Warning: no graphics server yet\n");
 
     while(d.running)
     {

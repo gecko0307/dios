@@ -1,6 +1,6 @@
 {
-    "name": "gfxdemo",
-    "description": "DIOS graphics client example",
+    "name": "blackboard",
+    "description": "A simple drawing application",
     "homepage": "",
     "license": "Unlicense",
     "authors": [
@@ -20,7 +20,7 @@
     ],
     
     "targetType": "executable",
-    "targetName": "gfxdemo.elf",
+    "targetName": "blackboard.elf",
     
     "dflags-ldc": [
         "-mtriple=x86_64-none-elf",
@@ -45,7 +45,7 @@
     ],
     
     "postBuildCommands-windows": [
-        "move /Y gfxdemo.elf.exe gfxdemo.elf",
-        "copy /Y gfxdemo.elf ..\\..\\..\\rootfs\\bin\\gfxdemo.elf"
+        "move /Y blackboard.elf.exe blackboard.elf",
+        "copy /Y blackboard.elf ..\\..\\..\\rootfs\\bin\\blackboard.elf"
     ]
 }

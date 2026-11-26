@@ -11,7 +11,9 @@ DIOS 0.8.0 - TBD
 - **Userspace**
   - `echo`, `about`, `pwd`, `ls`, `touch`, `mkdir`, `rmdir`, `rm`, `mv`, `cp`, `write`, `append`, `file` are now built-in programs
 - **GTerm**:
-  - New built-in program `gterm`, a graphical terminal.
+  - A new built-in program `gterm.elf`, a graphical terminal.
+- **Blackboard**:
+  - A new built-in program `blackboard.elf`, a simple sketching application.
 
 DIOS 0.7.0 - 26 Nov, 2026
 -------------------------

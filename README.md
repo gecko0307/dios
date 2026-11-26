@@ -59,8 +59,7 @@ The repo also contains a number of simple examples of what can be done in DIOS u
 - `hello` - "Hello, World!" program that prints its arguments
 - `memtest` - dynamic memory allocation test
 - `math` - floating-point math functions test
-- `random` - random number generator test
-- `gfxdemo` - a graphical demo (simple painting app).
+- `random` - random number generator test.
 
 Applications are also written in D, but they actually can be written in any language that can make platform-independent ELF64 binaries.
 
