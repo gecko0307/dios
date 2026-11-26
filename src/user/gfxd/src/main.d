@@ -125,6 +125,7 @@ int main(string[] args)
     uprintf("gfxd: started. Ctrl+F1 shell, Ctrl+F2 server, Ctrl+F3 kill it, Ctrl+Q quit\n");
 
     // TODO: make configurable
+    // TODO: how to detect if the desktop is already running?
     int desktopId = uspawn("/bin/desktop.elf", "", STDOUT_INHERIT);
     if (desktopId == -1)
         uprintf("gfxd: failed to run /bin/desktop.elf. Desktop manager is not installed\n");

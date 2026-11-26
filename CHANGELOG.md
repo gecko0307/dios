@@ -3,6 +3,8 @@ DIOS 0.9.0 - TBD
 - **Bootloader**:
   - Two different boot options: graphics mode and kernel shell
   - Add a bootloader wallpaper.
+- **Desktop**:
+  - A new built-in program `desktop.elf` that implements a basic taskbar with app launcher buttons. It is automatically started by the graphics server.
 
 DIOS 0.8.0 - 26 Nov, 2026
 -------------------------
