@@ -1,13 +1,13 @@
 DIOS 0.8.0 - TBD
 ----------------
 - **Kernel**:
-  - Standard output channels and the corresponding syscalls (group 3): `SYS_CH_CREATE`, `SYS_CH_READ`, `SYS_CH_STAT`, `SYS_CH_CLOSE`
+  - Standard output channels and the corresponding syscalls: `SYS_CH_CREATE`, `SYS_CH_READ`, `SYS_CH_STAT`, `SYS_CH_CLOSE`
   - New syscalls `SYS_SPAWN`, `SYS_CHDIR`, `SYS_STR`, `SYS_TASK_ALIVE`, `SYS_REALPATH`
   - Unique working directory per process
-  - `uptime` command removed, use `time -u` instead
+  - `uptime` kernel command removed, use `time -u` instead
   - Automatically start the graphics mode after boot if `gfx` kernel argument specified
 - **ulib**:
-  - New functions `uspawn`, `uchdir`, `chCreate`, `chRead`, `chWriters`, `chClose`
+  - New functions `uspawn`, `uchdir`, `usysstr`, `utaskalive`, `urealpath`, `chCreate`, `chRead`, `chWriters`, `chClose`
 - **Userspace**
   - `echo`, `about`, `pwd`, `ls`, `touch`, `mkdir`, `rmdir`, `rm`, `mv`, `cp`, `write`, `append`, `file` are now built-in programs
 - **GTerm**:
