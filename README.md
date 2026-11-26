@@ -50,18 +50,13 @@ In the graphics mode, you should see a user terminal window. Terminal's possibil
 - `file /home/hello.txt` - prints a text file
 - `image /home/lake.tga` - displays a TGA image.
 
-## Applications
+This repo also contains a number of simple examples of what can be done in DIOS userspace. They are included in the prebuilt ISO image:
 
-Simple examples of what can be done in DIOS userspace.
-
-- `hello.elf` - "Hello, World!" program that prints its arguments
-- `file.elf FILE [OFFSET]` - print a text file, optionally starting at a byte offset.
-- `dir.elf [PATH]` - lists a directory
-- `memtest.elf` - dynamic memory allocation test
-- `timer.elf` - a timer that can be run in background (for example, `timer 10s &`)
-- `math.elf` - floating-point math functions test
-- `random.elf` - random number generator test
-- `gfxdemo.elf` - a graphical demo (simple painting app). Run `gfxdemo &` to start it in background, then switch to graphics mode (see below).
+- `hello` - "Hello, World!" program that prints its arguments
+- `memtest` - dynamic memory allocation test
+- `math` - floating-point math functions test
+- `random` - random number generator test
+- `gfxdemo` - a graphical demo (simple painting app).
 
 Applications are also written in D, but they actually can be written in any language that can make platform-independent ELF64 binaries.
 

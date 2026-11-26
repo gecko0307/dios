@@ -1,5 +1,5 @@
 {
-    "name": "dir",
+    "name": "ls",
     "description": "A program that lists a directory",
     "homepage": "",
     "license": "Unlicense",
@@ -20,7 +20,7 @@
     ],
     
     "targetType": "executable",
-    "targetName": "dir.elf",
+    "targetName": "ls.elf",
     
     "dflags-ldc": [
         "-mtriple=x86_64-none-elf",
@@ -45,7 +45,7 @@
     ],
     
     "postBuildCommands-windows": [
-        "move /Y dir.elf.exe dir.elf",
-        "copy /Y dir.elf ..\\..\\..\\rootfs\\bin\\dir.elf"
+        "move /Y ls.elf.exe ls.elf",
+        "copy /Y ls.elf ..\\..\\..\\rootfs\\bin\\ls.elf"
     ]
 }

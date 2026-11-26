@@ -50,7 +50,7 @@ void putTwo(uint v)
     uputc(cast(char)('0' + v % 10));
 }
 
-// dir [PATH] - list a directory
+// ls [PATH] - list a directory
 int main(string[] args)
 {
     string path = args.length == 0 ? "." : args[0];
