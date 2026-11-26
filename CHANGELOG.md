@@ -6,6 +6,8 @@ DIOS 0.8.0 - TBD
   - Support automatically starting the graphics mode after boot
 - **ulib**:
   - New functions `uspawn`, `uttyCreate`, `uttyRead`, `uttyWriters`, `uttyClose`
+- **Userspace**
+  - `ls` and `file` are now built-in programs
 - **GTerm**:
   - New built-in program GTerm, a graphical terminal.
 

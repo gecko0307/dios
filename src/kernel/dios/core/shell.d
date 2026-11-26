@@ -52,8 +52,8 @@ import dios.core.xhci;
 enum size_t SHELL_LINE_CAPACITY = 128;
 enum size_t SHELL_HISTORY_CAPACITY = 16;
 
-immutable string[45] SHELL_COMMANDS = [
-    "help", "about", "mem", "uptime", "clock",
+immutable string[44] SHELL_COMMANDS = [
+    "help", "about", "mem", "clock",
     "irq", "pci", "history", "echo", "poweroff", "shutdown",
     "reboot", "clear", "cpuinfo", "acpi", "irqstat",
     "sleep", "hexdump", "crash", "version", "run", "memmap",
@@ -1028,7 +1028,6 @@ void shellExecute() @nogc nothrow
         cprintf("  about               Kernel version information\n");
         cprintf("  mem                 Physical memory statistics\n");
         cprintf("  memmap              Show the physical memory map\n");
-        cprintf("  uptime              Time since boot\n");
         cprintf("  clock               Clock source and timer status\n");
         cprintf("  irq                 Interrupt controller status\n");
         cprintf("  irqstat             Interrupt counts per vector\n");
@@ -1109,17 +1108,6 @@ void shellExecute() @nogc nothrow
         }
         if (memMapTruncated)
             cprintf("  (map truncated at %u entries)\n", cast(uint)MEMMAP_MAX_ENTRIES);
-    }
-    else if (shellEquals(shellLine.ptr, "uptime"))
-    {
-        ulong ms = clockNowNs() / 1_000_000;
-        ulong seconds = ms / 1000;
-        ulong days = seconds / 86400;
-        ulong hours = (seconds / 3600) % 24;
-        ulong minutes = (seconds / 60) % 60;
-        ulong secs = seconds % 60;
-        cprintf("Uptime: %llu day(s), %llu hour(s), %llu minute(s), %llu second(s)\n",
-            days, hours, minutes, secs);
     }
     else if (shellEquals(shellLine.ptr, "clock"))
     {

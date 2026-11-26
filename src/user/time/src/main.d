@@ -25,10 +25,31 @@ For more information, please refer to <https://unlicense.org>
 */
 module main;
 
+/*
+ * time - a program that prints current date and time.
+ * `time -u` prints time since the system boot.
+ */
+
 import ulib.dios;
 
 int main(string[] args)
 {
+    if (args.length > 0)
+    {
+        if (args[0] == "-u")
+        {
+            ulong ms = uticks();
+            ulong seconds = ms / 1000;
+            ulong days = seconds / 86400;
+            ulong hours = (seconds / 3600) % 24;
+            ulong minutes = (seconds / 60) % 60;
+            ulong secs = seconds % 60;
+            uprintf("Uptime: %llu day(s), %llu hour(s), %llu minute(s), %llu second(s)\n",
+                days, hours, minutes, secs);
+            return 0;
+        }
+    }
+
     DateTime dt;
     udatetime(&dt);
     uprintf("%02d.%02d.%d %02d:%02d:%02d\n",

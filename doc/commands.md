@@ -5,8 +5,6 @@
 - `cpuinfo` - CPU identification and features
 - `mem` - physical memory statistics
 - `memmap` - show the memory map
-- `time` - print current date and time
-- `uptime` - time since boot
 - `clock` - clock source and timer status
 - `irq` - interrupt controller status
 - `irqstat` - interrupt counts per vector
@@ -23,7 +21,6 @@
 - `remount NAME rw|ro` - switch a mounted volume between read-write and read-only
 - `umount NAME` - unmount `/NAME`
 - `sync` - flush read-write volumes to the disk
-- `ls [PATH]` - list a directory on the mounted volume
 - `cd [DIR]` - change the current directory
 - `pwd` - show the current directory
 - `cat PATH` - print a text file
