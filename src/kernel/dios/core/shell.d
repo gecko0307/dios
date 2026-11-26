@@ -52,11 +52,11 @@ import dios.core.xhci;
 enum size_t SHELL_LINE_CAPACITY = 128;
 enum size_t SHELL_HISTORY_CAPACITY = 16;
 
-immutable string[46] SHELL_COMMANDS = [
+immutable string[45] SHELL_COMMANDS = [
     "help", "about", "mem", "uptime", "clock",
     "irq", "pci", "history", "echo", "poweroff", "shutdown",
     "reboot", "clear", "cpuinfo", "acpi", "irqstat",
-    "sleep", "hexdump", "crash", "version", "ls", "run", "memmap",
+    "sleep", "hexdump", "crash", "version", "run", "memmap",
     "programs", "disk", "mount", "cd", "pwd", "cat", "dmesg", "usb",
     "ps", "kill", "fg", "gfx", "umount",
     "touch", "mkdir", "rmdir", "rm", "mv", "cp", "write", "append", "sync", "remount"
@@ -449,33 +449,6 @@ bool shellResolveProgram(const(char)* name, char* out_) @nogc nothrow
         return shellProgramAt("", name, "", out_) || shellProgramAt("", name, ".elf", out_);
     return shellProgramAt("", name, "", out_) || shellProgramAt("", name, ".elf", out_) ||
            shellProgramAt("/bin/", name, "", out_) || shellProgramAt("/bin/", name, ".elf", out_);
-}
-
-void shellLs(const(char)* path) @nogc nothrow
-{
-    if (path[0] == 0)
-        path = ".";
-
-    ExfatEntry e;
-    int slot;
-    if (!fsStat(path, &e, &slot))
-    {
-        cprintf("Not found: %s\n", path);
-        return;
-    }
-
-    ShellListCtx ctx;
-    if (e.isDir)
-    {
-        if (!fsIterate(slot, &e, &shellListCb, &ctx))
-            cprintf("Read error while listing the directory.\n");
-    }
-    else
-    {
-        shellListCb(&e, &ctx);
-    }
-    cprintf("%u file(s), %llu bytes, %u director%s\n", ctx.files, ctx.bytes, ctx.dirs,
-            ctx.dirs == 1 ? "y".ptr : "ies".ptr);
 }
 
 void shellCat(const(char)* path) @nogc nothrow
@@ -1055,7 +1028,6 @@ void shellExecute() @nogc nothrow
         cprintf("  about               Kernel version information\n");
         cprintf("  mem                 Physical memory statistics\n");
         cprintf("  memmap              Show the physical memory map\n");
-        cprintf("  time                Print current date and time\n");
         cprintf("  uptime              Time since boot\n");
         cprintf("  clock               Clock source and timer status\n");
         cprintf("  irq                 Interrupt controller status\n");
@@ -1076,7 +1048,6 @@ void shellExecute() @nogc nothrow
         cprintf("  remount NAME rw|ro  Switch a mounted volume between read-write and read-only\n");
         cprintf("  umount NAME         Unmount /mnt/NAME (flushes a read-write volume)\n");
         cprintf("  sync                Flush read-write volumes to the disk\n");
-        cprintf("  ls [PATH]           List a directory ('ls /mnt' shows the mounted disks)\n");
         cprintf("  cat PATH            Print a text file\n");
         cprintf("  touch PATH          Create a file\n");
         cprintf("  mkdir PATH          Create a directory\n");
@@ -1246,10 +1217,6 @@ void shellExecute() @nogc nothrow
             diagCrash(3);
         else
             cprintf("Usage: crash pf|ud|div|gp\n");
-    }
-    else if (shellEquals(shellLine.ptr, "ls"))
-    {
-        shellLs(args);
     }
     else if (shellEquals(shellLine.ptr, "usb"))
     {

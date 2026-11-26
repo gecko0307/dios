@@ -71,7 +71,7 @@ bool parseDuration(string str, out ulong milliseconds)
 
 void printUsage()
 {
-    uprintf("Usage: timer.elf Ns|Nm|Nh\n");
+    uprintf("Usage: timer Ns|Nm|Nh\n");
     uprintf(" N - time in seconds, minutes, or hours\n");
 }
 
