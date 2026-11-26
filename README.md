@@ -10,6 +10,7 @@ You can use DIOS as a basis for creating your own operating system! PRs implemen
 
 [![Screenshot1](media/screenshot1.png)](media/screenshot1.png)
 [![Screenshot2](media/screenshot2.jpg)](media/screenshot2.jpg)
+[![Screenshot3](media/screenshot3.png)](media/screenshot3.png)
 
 ## Notes
 
