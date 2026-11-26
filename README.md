@@ -107,7 +107,7 @@ DIOS uses its own build system written in Python that compiles the entire system
 
 - Compiles the kernel (by default `cdroot/kernel64.bin`)
 - Compiles ulib (`rootfs/lib/libulib.a`)
-- Compiles the userspace (programs in `rootfs/bin`)
+- Compiles userspace programs (`rootfs/bin/*.elf`)
 - Builds the root filesystem image (`cdroot/rootfs.tar`)
 - Generates a bootable CD image (`dios64.iso`).
 
