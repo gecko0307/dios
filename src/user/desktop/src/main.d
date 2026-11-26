@@ -215,13 +215,12 @@ int main(string[] args)
     
     uint mouseX = 0;
     uint mouseY = 0;
-    
-    ulong lastClickTime = uticks();
-    bool click = false;
+    bool mouseDown = false;
+    bool clicked = false;
 
     while(running)
     {
-        click = false;
+        clicked = false;
         
         GfxEvent event;
         bool got = windowPoll(&taskbar, &event, 16);
@@ -237,10 +236,11 @@ int main(string[] args)
                 mouseX = event.a;
                 mouseY = event.b;
                 if ((event.c & GFX_BTN_LEFT) != 0)
+                    mouseDown = true;
+                else if (mouseDown)
                 {
-                    ulong curClickTime = uticks();
-                    if (curClickTime - lastClickTime > 100) // 0.1s interval
-                        click = true;
+                    mouseDown = false;
+                    clicked = true;
                 }
             }
             
@@ -251,7 +251,7 @@ int main(string[] args)
         
         windowCommit(&taskbar);
         
-        if (click)
+        if (clicked)
         {
             if (mouseX > 0 && mouseX < terminalIcon.width &&
                 mouseY > 0 && mouseY < terminalIcon.height)
