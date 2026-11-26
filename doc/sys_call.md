@@ -35,6 +35,7 @@ Supported function numbers:
 - `SYS_DATETIME` (9) - retrieves current date and time. `a0` is a pointer to an output `DateTime` struct. Returns 0
 - `SYS_RANDOM` (10) - generates a random number. This function currently directly uses a hardware RNG (RDRAND)
 - `SYS_SPAWN` (11) - executes a userspace program (ELF64 binary). `a0` is the path to an executable, `a1` is a zero-terminated arguments string, `a2` - stdout descriptor (where `SYS_WRITE` output goes): `STDOUT_CONSOLE`, `STDOUT_INHERIT`, or a channel from `SYS_TTY_CREATE`
+- `SYS_STR` (12) - retrieves a system info string to a user-provided buffer. `a0` - character buffer, `a1` - buffer size, `a2` - string identifier: `SYS_STR_VERSION`, `SYS_STR_ABOUT`. Returns number of bytes actually written, or -1 on error
 - `SYS_OPEN` (100) - opens a file/directory. `a0` is a zero-terminated path. Returns a descriptor on success, or -1 on error
 - `SYS_READ` (101) - reads bytes from the file at the current offset. `a0` is the file descriptor, `a1` is the destination buffer, `a2` is the number of bytes to read. Returns number of bytes actually read (0 = end of file), or -1 on error
 - `SYS_FWRITE` (102) - writes bytes to the given file (if opened for writing). `a0` is the file descriptor, `a1` is the input buffer, `a2` is the size of the input in bytes. Returns the number of bytes written (fewer than the input if the volume is full), or -1 on error
