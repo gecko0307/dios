@@ -31,68 +31,68 @@ import ulib.dios.io;
  * DIOS kernel API
  */
 
-// System calls group 1 (0..99): process and memory management
-enum ulong SYS_GROUP1   = 0;
-enum ulong SYS_EXIT     = SYS_GROUP1 + 0;
-enum ulong SYS_WRITE    = SYS_GROUP1 + 1;
-enum ulong SYS_GETKEY   = SYS_GROUP1 + 2;
-enum ulong SYS_SLEEP    = SYS_GROUP1 + 3;
-enum ulong SYS_TICKS    = SYS_GROUP1 + 4;
-enum ulong SYS_CLEAR    = SYS_GROUP1 + 5;
-enum ulong SYS_BRK      = SYS_GROUP1 + 6;
-enum ulong SYS_YIELD    = SYS_GROUP1 + 7;
-enum ulong SYS_GETPID   = SYS_GROUP1 + 8;
-enum ulong SYS_DATETIME = SYS_GROUP1 + 9;
-enum ulong SYS_RANDOM   = SYS_GROUP1 + 10;
-enum ulong SYS_SPAWN    = SYS_GROUP1 + 11;
-enum ulong SYS_STR      = SYS_GROUP1 + 12;
-enum ulong SYS_TASK_ALIVE = SYS_GROUP1 + 13;
+// System calls group 0 (0..99): process and memory management
+enum ulong SYS_GROUP0   = 0;
+enum ulong SYS_EXIT     = SYS_GROUP0 + 0;
+enum ulong SYS_WRITE    = SYS_GROUP0 + 1;
+enum ulong SYS_GETKEY   = SYS_GROUP0 + 2;
+enum ulong SYS_SLEEP    = SYS_GROUP0 + 3;
+enum ulong SYS_TICKS    = SYS_GROUP0 + 4;
+enum ulong SYS_CLEAR    = SYS_GROUP0 + 5;
+enum ulong SYS_BRK      = SYS_GROUP0 + 6;
+enum ulong SYS_YIELD    = SYS_GROUP0 + 7;
+enum ulong SYS_GETPID   = SYS_GROUP0 + 8;
+enum ulong SYS_DATETIME = SYS_GROUP0 + 9;
+enum ulong SYS_RANDOM   = SYS_GROUP0 + 10;
+enum ulong SYS_SPAWN    = SYS_GROUP0 + 11;
+enum ulong SYS_STR      = SYS_GROUP0 + 12;
+enum ulong SYS_TASK_ALIVE = SYS_GROUP0 + 13;
 
-// System calls group 2 (100..199): filesystem
-enum ulong SYS_GROUP2   = 100;
-enum ulong SYS_OPEN     = SYS_GROUP2 + 0;
-enum ulong SYS_READ     = SYS_GROUP2 + 1;
-enum ulong SYS_FWRITE   = SYS_GROUP2 + 2;
-enum ulong SYS_CLOSE    = SYS_GROUP2 + 3;
-enum ulong SYS_SEEK     = SYS_GROUP2 + 4;
-enum ulong SYS_STAT     = SYS_GROUP2 + 5;
-enum ulong SYS_READDIR  = SYS_GROUP2 + 6;
-enum ulong SYS_GETCWD   = SYS_GROUP2 + 7;
-enum ulong SYS_UNLINK   = SYS_GROUP2 + 8;
-enum ulong SYS_MKDIR    = SYS_GROUP2 + 9;
-enum ulong SYS_RMDIR    = SYS_GROUP2 + 10;
-enum ulong SYS_RENAME   = SYS_GROUP2 + 11;
-enum ulong SYS_SYNC     = SYS_GROUP2 + 12;
-enum ulong SYS_CHDIR    = SYS_GROUP2 + 13;
-enum ulong SYS_REALPATH = SYS_GROUP2 + 14;
+// System calls group 1 (100..199): filesystem
+enum ulong SYS_GROUP1   = 100;
+enum ulong SYS_OPEN     = SYS_GROUP1 + 0;
+enum ulong SYS_READ     = SYS_GROUP1 + 1;
+enum ulong SYS_FWRITE   = SYS_GROUP1 + 2;
+enum ulong SYS_CLOSE    = SYS_GROUP1 + 3;
+enum ulong SYS_SEEK     = SYS_GROUP1 + 4;
+enum ulong SYS_STAT     = SYS_GROUP1 + 5;
+enum ulong SYS_READDIR  = SYS_GROUP1 + 6;
+enum ulong SYS_GETCWD   = SYS_GROUP1 + 7;
+enum ulong SYS_UNLINK   = SYS_GROUP1 + 8;
+enum ulong SYS_MKDIR    = SYS_GROUP1 + 9;
+enum ulong SYS_RMDIR    = SYS_GROUP1 + 10;
+enum ulong SYS_RENAME   = SYS_GROUP1 + 11;
+enum ulong SYS_SYNC     = SYS_GROUP1 + 12;
+enum ulong SYS_CHDIR    = SYS_GROUP1 + 13;
+enum ulong SYS_REALPATH = SYS_GROUP1 + 14;
 
-// System calls group 3 (200-299): stdout/channel control
-enum ulong SYS_GROUP3     = 200;
-enum ulong SYS_CH_CREATE = SYS_GROUP3 + 0;
-enum ulong SYS_CH_READ   = SYS_GROUP3 + 1;
-enum ulong SYS_CH_STAT   = SYS_GROUP3 + 2;
-enum ulong SYS_CH_CLOSE  = SYS_GROUP3 + 3;
+// System calls group 2 (200-299): stdout/channel control
+enum ulong SYS_GROUP2    = 200;
+enum ulong SYS_CH_CREATE = SYS_GROUP2 + 0;
+enum ulong SYS_CH_READ   = SYS_GROUP2 + 1;
+enum ulong SYS_CH_STAT   = SYS_GROUP2 + 2;
+enum ulong SYS_CH_CLOSE  = SYS_GROUP2 + 3;
 
-// System calls group 4 (300-399): reserved
-enum ulong SYS_GROUP4     = 300;
+// System calls group 3 (300-399): reserved
+enum ulong SYS_GROUP3   = 300;
 
-// System calls group 5 (400-499): reserved
-enum ulong SYS_GROUP5     = 400;
+// System calls group 4 (400-499): reserved
+enum ulong SYS_GROUP4   = 400;
 
-// System calls group 6 (500-599): reserved
-enum ulong SYS_GROUP6     = 500;
+// System calls group 5 (500-599): reserved
+enum ulong SYS_GROUP5   = 500;
 
-// System calls group 7 (600-699): reserved
-enum ulong SYS_GROUP7     = 600;
+// System calls group 6 (600-699): reserved
+enum ulong SYS_GROUP6   = 600;
 
-// System calls group 8 (700-799): reserved
-enum ulong SYS_GROUP8     = 700;
+// System calls group 7 (700-799): reserved
+enum ulong SYS_GROUP7   = 700;
 
-// System calls group 9 (800-899): reserved
-enum ulong SYS_GROUP9     = 800;
+// System calls group 8 (800-899): reserved
+enum ulong SYS_GROUP8   = 800;
 
-// System calls group 10 (900-999): reserved
-enum ulong SYS_GROUP10    = 900;
+// System calls group 9 (900-999): reserved
+enum ulong SYS_GROUP9   = 900;
 
 // Extended system calls
 enum ulong SYS_EXT1     = 1000; // Graphics server
