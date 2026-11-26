@@ -139,6 +139,7 @@ enum ulong SYS_MKDIR    = SYS_GROUP2 + 9;
 enum ulong SYS_RMDIR    = SYS_GROUP2 + 10;
 enum ulong SYS_RENAME   = SYS_GROUP2 + 11;
 enum ulong SYS_SYNC     = SYS_GROUP2 + 12;
+enum ulong SYS_CHDIR    = SYS_GROUP2 + 13;   // chdir(path) -> 0 or a negative FW_ERR_* code
 
 // System call group 3 (200-299): standard I/O device control
 enum ulong SYS_GROUP3     = 200;
@@ -1307,6 +1308,20 @@ long sysPathOp(ulong path, ulong op) @nogc nothrow
     return fsRmdir(p);
 }
 
+// chdir: the current directory is one for the whole system (fsCwd), shared by the kernel shell and
+// every program, so a program that changes it changes it for the shell too (that is what makes
+// /bin/cd possible). 0, FW_ERR_NOT_DIR if the path is a file, FW_ERR_NOT_FOUND if it does not exist.
+long sysChdir(ulong path) @nogc nothrow
+{
+    char* p = sysPathA.ptr;
+    if (!procCopyPath(path, p, FS_PATH_MAX))
+        return -1;
+    if (fsChdir(p))
+        return 0;
+    UserStat st;
+    return sysfileStat(p, &st) ? FW_ERR_NOT_DIR : FW_ERR_NOT_FOUND;
+}
+
 long sysRename(ulong from, ulong to) @nogc nothrow
 {
     if (!procCopyPath(from, sysPathA.ptr, FS_PATH_MAX) || !procCopyPath(to, sysPathB.ptr, FS_PATH_MAX))
@@ -1434,6 +1449,8 @@ long syscallDispatch(ulong nr, ulong a0, ulong a1, ulong a2) @nogc nothrow
             return sysPathOp(a0, nr);
         case SYS_RENAME:
             return sysRename(a0, a1);
+        case SYS_CHDIR:
+            return sysChdir(a0);
         case SYS_SYNC:
             fsSyncAll();
             return 0;

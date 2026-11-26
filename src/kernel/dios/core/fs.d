@@ -46,6 +46,20 @@ enum uint FS_O_CREATE = 0x40;
 enum uint FS_O_TRUNC = 0x200;
 enum uint FS_O_APPEND = 0x400;
 
+enum int FW_OK = 0;
+enum int FW_ERR_IO = -1;
+enum int FW_ERR_NOT_FOUND = -2;
+enum int FW_ERR_EXISTS = -3;
+enum int FW_ERR_NO_SPACE = -4;
+enum int FW_ERR_BAD_NAME = -5;
+enum int FW_ERR_NOT_EMPTY = -6;
+enum int FW_ERR_IS_DIR = -7;
+enum int FW_ERR_NOT_DIR = -8;
+enum int FW_ERR_RO = -9;            // volume is not mounted for writing
+enum int FW_ERR_INVALID = -10;
+
+enum uint FW_MAX_SET = 22;          // 20 long name entries + the short entry + a terminator
+
 struct Mount
 {
     bool mounted;

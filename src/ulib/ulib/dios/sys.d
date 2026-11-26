@@ -61,6 +61,7 @@ enum ulong SYS_MKDIR    = SYS_GROUP2 + 9;
 enum ulong SYS_RMDIR    = SYS_GROUP2 + 10;
 enum ulong SYS_RENAME   = SYS_GROUP2 + 11;
 enum ulong SYS_SYNC     = SYS_GROUP2 + 12;
+enum ulong SYS_CHDIR    = SYS_GROUP2 + 13;
 
 // System call group 3 (200-299): standard I/O device control
 enum ulong SYS_GROUP3     = 200;
@@ -324,6 +325,16 @@ int urmdir(const(char)* path) @nogc nothrow
 int urename(const(char)* from, const(char)* to) @nogc nothrow
 {
     return cast(int)sys_call(SYS_RENAME, cast(ulong)from, cast(ulong)to, 0);
+}
+
+/**
+ * Changes the current directory. It is one for the whole system, not per program: the kernel shell and
+ * all programs (also other terminals) see the change. Returns 0 or a negative UERR_* code
+ * (UERR_NOT_FOUND, UERR_NOT_DIR).
+ */
+int uchdir(const(char)* path) @nogc nothrow
+{
+    return cast(int)sys_call(SYS_CHDIR, cast(ulong)path, 0, 0);
 }
 
 /// Asks the disks to put everything they hold on the medium.
