@@ -1,6 +1,6 @@
 # DIOS
 
-DIOS stands for *D Incomplete Operating System* (because it is a toy project that will likely never be feature-complete). It is a minimalistic multi-tasking x86_64 OS written in [D language](https://dlang.org) with some small parts in NASM assembly. It is tested on a real hardware and emulators like VirtualBox and QEMU. I've written it initially in D1/GDC and ported to D2/LDC in 2025.
+DIOS stands for *Desktop-oriented Independent Operating System*. It is a minimalistic multi-tasking x86_64 OS written in [D language](https://dlang.org) with some small parts in NASM assembly. It is tested on a real hardware and emulators like VirtualBox and QEMU. I've written it initially in D1/GDC and ported to D2/LDC in 2025.
 
 Although many features of DIOS are inspired by Unix, this is only to keep a degree of familiarity with existing systems for better user experience; making a full Unix clone is not the goal of the project. The main purpose is experimenting with OS design and demonstrating D's fitness for system development.
 
@@ -76,7 +76,7 @@ DIOS project consists of a several structural layers, each with its own workflow
 
 ## ulib
 
-ulib stands for "user library" (or, alternatively, "unfinished library" because, again, it is a hobby project that will likely never be finished). It is a low-level runtime library for DIOS applications written in D.
+ulib stands for "user library". It is a low-level runtime for DIOS applications written in D.
 
 Most of its functions are libc-like and self-explanatory. Full list of them can be found [here](doc/ulib.md).
 
