@@ -59,8 +59,9 @@ enum int CELL_H = 14;
 enum int GLYPH_W = 8; // size of a glyph in the font picture (wider than CELL_W: they overlap)
 enum int GLYPH_H = 14;
 enum int ATLAS_COLS = 16; // glyph c is at column c % 16, row c / 16
-enum uint WIN_W = COLS * CELL_W + (GLYPH_W - CELL_W);
-enum uint WIN_H = ROWS * CELL_H;
+enum int MARGIN = 6; // empty border around the text, in pixels
+enum uint WIN_W = COLS * CELL_W + (GLYPH_W - CELL_W) + 2 * MARGIN;
+enum uint WIN_H = ROWS * CELL_H + 2 * MARGIN;
 
 enum uint COLOR_BG     = 0x003a004d; //0x00101820;
 enum uint COLOR_FG     = 0x00FFFFFF; //0x00C8D0D8;
@@ -291,11 +292,15 @@ void render() @nogc nothrow
         {
             char c = cells[row * COLS + col];
             if (c != ' ')
-                drawGlyph(c, cast(int)(col * CELL_W), cast(int)(row * CELL_H));
+                drawGlyph(c,
+                          MARGIN + cast(int)(col * CELL_W),
+                          MARGIN + cast(int)(row * CELL_H));
         }
     }
     if (!busy && (blinkPhase & 1) == 0)
-        win.canvas.fillRect(cast(int)(curX * CELL_W), cast(int)(curY * CELL_H + CELL_H - 3), CELL_W, 2, COLOR_CURSOR);
+        win.canvas.fillRect(MARGIN + cast(int)(curX * CELL_W),
+                            MARGIN + cast(int)(curY * CELL_H + CELL_H - 3),
+                            CELL_W, 2, COLOR_CURSOR);
     windowCommit(&win);
 }
 
