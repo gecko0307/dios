@@ -28,5 +28,5 @@ module dios.core._version;
 __gshared
 {
     string diosVersion = "DIOS 0.10.0 for x86_64\n";
-    string diosVersionInfo = "D Incomplete Operating System 0.10.0 for x86_64\nCopyright (c) 2017-2026 Timur Gafarov\n";
+    string diosVersionInfo = "Desktop-oriented Independent Operating System 0.10.0 for x86_64\nCopyright (c) 2017-2026 Timur Gafarov\n";
 }
