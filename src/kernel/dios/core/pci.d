@@ -27,6 +27,7 @@ module dios.core.pci;
 
 import dios.core.port;
 import dios.core.vmem;
+import dios.core.ahci;
 import dios.core.xhci;
 import dios.core.stdio;
 
@@ -276,14 +277,16 @@ void pciInitUsb(uint bus, uint device, uint func, ushort vendorID, ushort device
         kprintf("  could not map MMIO\n");
         return;
     }
+    
     // Machines often have several xHCI controllers (e.g. a Thunderbolt one
     // plus the PCH one with the real USB-A ports). Every one is brought up
-    // and kept if it has a keyboard, a mouse or a storage device on it.
+    // and kept if it has a keyboard, a mouse or a storage device on it
     xhciInit(regs);
     if (xhciKeyboardRunning())
         xhciFound = true;
+    
     // The controller stays up even when it has nothing useful on it right now: devices
-    // and hubs can be plugged in later (hot-plug, see xhciHotplugTick).
+    // and hubs can be plugged in later (hot-plug, see xhciHotplugTick)
 }
 
 void pciInitAhci(uint bus, uint device, uint func, ushort vendorID, ushort deviceID) @nogc nothrow
@@ -297,15 +300,25 @@ void pciInitAhci(uint bus, uint device, uint func, ushort vendorID, ushort devic
     
     ulong abarPhys;
     ulong abarSize;
-    if (pciGetBar5(bus, device, func, &abarPhys, &abarSize))
-        kprintf("  AHCI ABAR phys %llx size %llu\n", abarPhys, abarSize);
-    else
+    if (!pciGetBar5(bus, device, func, &abarPhys, &abarSize))
     {
-        kprintf("  AHCI: invalid ABAR\n");
+        kprintf("  invalid ABAR\n");
+        return;
+    }
+    kprintf("  ABAR phys %llx size %llu\n", abarPhys, abarSize);
+    
+    // Memory decode + bus mastering (the controller DMAs into our rings).
+    pciWriteCommand(bus, device, func,
+        cast(ushort)(pciReadCommand(bus, device, func) | PCI_CMD_MEMORY | PCI_CMD_BUSMASTER));
+    
+    void* regs = vmemMapMMIO(abarPhys, abarSize);
+    if (regs is null)
+    {
+        kprintf("  could not map MMIO\n");
         return;
     }
     
-    // TODO
+    ahciInit(regs);
 }
 
 void pciCheckFunction(uint bus, uint device, uint func) @nogc nothrow

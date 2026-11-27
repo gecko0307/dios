@@ -92,3 +92,130 @@ enum ubyte ATA_CMD_DOWNLOAD_MICROCODE   = 0x92;
 
 // Device register flags
 enum ubyte ATA_DEVICE_LBA               = 0x40;
+
+//
+struct AtaDeviceInfo
+{
+    char[21] serial;
+    char[9] firmware;
+    char[41] model;
+
+    ulong sectorCount;
+
+    uint logicalSectorSize;
+    uint physicalSectorSize;
+
+    bool lba48;
+    bool writeCacheSupported;
+    bool writeCacheEnabled;
+    bool flushCacheExt;
+}
+
+ushort ataIdWord(const(ubyte)* data, size_t index) @nogc nothrow
+{
+    size_t off = index * 2;
+
+    return cast(ushort)(
+        data[off] | (cast(ushort)data[off + 1] << 8)
+    );
+}
+
+void ataIdString(
+    const(ubyte)* data,
+    size_t firstWord,
+    size_t wordCount,
+    char* dst,
+    size_t dstCapacity
+) @nogc nothrow
+{
+    size_t len = wordCount * 2;
+
+    if (len >= dstCapacity)
+        len = dstCapacity - 1;
+
+    foreach (size_t i; 0 .. len)
+    {
+        size_t off = (firstWord + i / 2) * 2;
+        dst[i] = cast(char)data[off + ((i & 1) == 0 ? 1 : 0)];
+    }
+
+    while (len > 0 && (dst[len - 1] == ' ' || dst[len - 1] == '\0'))
+        len--;
+
+    dst[len] = '\0';
+}
+
+bool ataParseIdentify(
+    const(ubyte)* data,
+    AtaDeviceInfo* info
+) @nogc nothrow
+{
+    if (data is null || info is null)
+        return false;
+
+    *info = AtaDeviceInfo.init;
+
+    ataIdString(data, 10, 10, info.serial.ptr, info.serial.length);
+    ataIdString(data, 23, 4, info.firmware.ptr, info.firmware.length);
+    ataIdString(data, 27, 20, info.model.ptr, info.model.length);
+
+    ushort w49  = ataIdWord(data, 49);
+    ushort w82  = ataIdWord(data, 82);
+    ushort w83  = ataIdWord(data, 83);
+    ushort w85  = ataIdWord(data, 85);
+    ushort w106 = ataIdWord(data, 106);
+
+    if (!(w49 & (1 << 9)))
+        return false; // LBA not supported
+
+    bool valid83 = (w83 & 0xC000) == 0x4000;
+
+    info.lba48 = valid83 && (w83 & (1 << 10));
+    info.writeCacheSupported = (w82 & (1 << 5)) != 0;
+    info.writeCacheEnabled = (w85 & (1 << 5)) != 0;
+    info.flushCacheExt = valid83 && (w83 & (1 << 13));
+
+    info.logicalSectorSize = 512;
+    info.physicalSectorSize = 512;
+
+    if ((w106 & 0xC000) == 0x4000)
+    {
+        if (w106 & (1 << 12))
+        {
+            uint words =
+                cast(uint)ataIdWord(data, 117) |
+                (cast(uint)ataIdWord(data, 118) << 16);
+
+            if (words != 0)
+                info.logicalSectorSize = words * 2;
+        }
+
+        info.physicalSectorSize = info.logicalSectorSize;
+
+        if (w106 & (1 << 13))
+        {
+            uint exponent = w106 & 0xF;
+
+            if (exponent < 32)
+                info.physicalSectorSize =
+                    info.logicalSectorSize << exponent;
+        }
+    }
+
+    if (info.lba48)
+    {
+        info.sectorCount =
+            cast(ulong)ataIdWord(data, 100) |
+            (cast(ulong)ataIdWord(data, 101) << 16) |
+            (cast(ulong)ataIdWord(data, 102) << 32) |
+            (cast(ulong)ataIdWord(data, 103) << 48);
+    }
+    else
+    {
+        info.sectorCount =
+            cast(ulong)ataIdWord(data, 60) |
+            (cast(ulong)ataIdWord(data, 61) << 16);
+    }
+
+    return info.sectorCount != 0;
+}

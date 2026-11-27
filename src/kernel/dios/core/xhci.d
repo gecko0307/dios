@@ -101,8 +101,8 @@ enum : uint
 }
 
 enum uint XHCI_MAX_CONTROLLERS = 4;
-enum uint XHCI_MAX_HUB_DEPTH = 5;           // route strings have room for five tiers
-enum ubyte XHCI_PORT_FAILED = 0xFF;         // marks a port whose device could not be brought up
+enum uint XHCI_MAX_HUB_DEPTH = 5;          // route strings have room for five tiers
+enum ubyte XHCI_PORT_FAILED = 0xFF;        // marks a port whose device could not be brought up
 enum uint XHCI_MSC_BOUNCE_PAGES = 16;      // 64 KiB data buffer per storage device
 enum uint XHCI_MSC_CBW_OFF = 2048;         // CBW/CSW live in the device's scratch page
 enum uint XHCI_MSC_CSW_OFF = 2560;
