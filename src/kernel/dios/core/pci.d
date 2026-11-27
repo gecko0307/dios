@@ -50,6 +50,7 @@ enum ubyte PCI_CONFIG_HEADER_TYPE = 0x0E;
 
 enum ubyte PCI_CONFIG_BAR0 = 0x10;
 enum ubyte PCI_CONFIG_BAR1 = 0x14;
+enum ubyte PCI_CONFIG_BAR5 = 0x24;
 
 enum ushort PCI_CMD_IO = 0x1;
 enum ushort PCI_CMD_MEMORY = 0x2;
@@ -158,13 +159,20 @@ void pciWriteCommand(uint bus, uint device, uint func, ushort value) @nogc nothr
 bool pciGetBar0(uint bus, uint device, uint func, ulong* outPhys, ulong* outSize) @nogc nothrow
 {
     uint orig0 = pciConfigRead32(bus, device, func, PCI_CONFIG_BAR0);
+    // Must be a memory BAR
     if (orig0 & 1)
         return false; // I/O BAR
     bool is64 = ((orig0 >> 1) & 3) == 2;
     uint orig1 = is64 ? pciConfigRead32(bus, device, func, PCI_CONFIG_BAR1) : 0;
 
     ushort cmd = pciReadCommand(bus, device, func);
-    pciWriteCommand(bus, device, func, cast(ushort)(cmd & ~(PCI_CMD_IO | PCI_CMD_MEMORY | PCI_CMD_BUSMASTER)));
+    pciWriteCommand(bus, device, func,
+        cast(ushort)(cmd & ~(
+            PCI_CMD_IO |
+            PCI_CMD_MEMORY |
+            PCI_CMD_BUSMASTER
+        ))
+    );
 
     pciConfigWrite32(bus, device, func, PCI_CONFIG_BAR0, 0xFFFFFFFF);
     if (is64)
@@ -182,6 +190,54 @@ bool pciGetBar0(uint bus, uint device, uint func, ulong* outPhys, ulong* outSize
     ulong phys = (cast(ulong)orig1 << 32) | (orig0 & 0xFFFFFFF0);
     if (phys == 0 || size == 0)
         return false; // firmware never assigned it
+    *outPhys = phys;
+    *outSize = size;
+    return true;
+}
+
+// Find size and physical address of AHCI ABAR (PCI BAR5).
+// ABAR must be a 32-bit memory BAR.
+bool pciGetBar5(uint bus, uint device, uint func, ulong* outPhys, ulong* outSize) @nogc nothrow
+{
+    uint orig = pciConfigRead32(bus, device, func, PCI_CONFIG_BAR5);
+    
+    // Must be a memory BAR
+    if (orig & 1)
+        return false; // I/O BAR
+
+    // BAR5 cannot be 64-bit
+    uint type = (orig >> 1) & 3;
+    if (type != 0)
+        return false;
+
+    ushort cmd = pciReadCommand(bus, device, func);
+
+    // Disable decoding while sizing the BAR
+    pciWriteCommand(bus, device, func,
+        cast(ushort)(cmd & ~(
+            PCI_CMD_IO |
+            PCI_CMD_MEMORY |
+            PCI_CMD_BUSMASTER
+        ))
+    );
+
+    pciConfigWrite32(bus, device, func, PCI_CONFIG_BAR5, 0xFFFFFFFF);
+
+    uint mask = pciConfigRead32(bus, device, func, PCI_CONFIG_BAR5);
+
+    // Restore BAR and PCI command
+    pciConfigWrite32(bus, device, func, PCI_CONFIG_BAR5, orig);
+    pciWriteCommand(bus, device, func, cmd);
+
+    if (mask == 0 || mask == 0xFFFFFFFF)
+        return false;
+
+    mask &= 0xFFFFFFF0;
+    uint size32 = ~mask + 1u;
+    ulong phys = orig & 0xFFFFFFF0;
+    ulong size = size32;
+    if (phys == 0 || size == 0)
+        return false;
     *outPhys = phys;
     *outSize = size;
     return true;
@@ -235,6 +291,19 @@ void pciInitAhci(uint bus, uint device, uint func, ushort vendorID, ushort devic
     ubyte progIf = pciReadProgIF(bus, device, func);
     kprintf("AHCI controller @ %u:%u.%u  %x:%x\n", bus, device, func,
         cast(uint)vendorID, cast(uint)deviceID);
+    
+    if (progIf != 0x01)
+        return;
+    
+    ulong abarPhys;
+    ulong abarSize;
+    if (pciGetBar5(bus, device, func, &abarPhys, &abarSize))
+        kprintf("  AHCI ABAR phys %llx size %llu\n", abarPhys, abarSize);
+    else
+    {
+        kprintf("  AHCI: invalid ABAR\n");
+        return;
+    }
     
     // TODO
 }
