@@ -2,7 +2,7 @@
 
 DIOS stands for *Desktop-oriented Independent Operating System*. It is a minimalistic multi-tasking x86_64 OS written in [D language](https://dlang.org) with some small parts in NASM assembly. It is tested on a real hardware and emulators like VirtualBox and QEMU. I've written it initially in D1/GDC and ported to D2/LDC in 2025.
 
-Although many features of DIOS are inspired by Unix, this is only to keep a degree of familiarity with existing systems for better user experience; making a full Unix clone is not the goal of the project. The main purpose is experimenting with OS design and demonstrating D's fitness for system development.
+DIOS does not replicate either Unix or Windows. While some parts of the system are modeled after Unix and others are inspired by Windows, this is only to keep a degree of familiarity with existing systems for better user experience. The goal is not to create a complete clone of any existing architecture. The purpose of DIOS is experimenting with system APIs and desktop environment design.
 
 You can use DIOS as a basis for creating your own operating system! PRs implementing new features are welcome. The code is a bit messy but readable.
 
