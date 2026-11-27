@@ -15,6 +15,8 @@ DIOS 0.9.0 - 27 Nov, 2026
   - New anti-aliased cursor
 - **Desktop**:
   - New built-in program `desktop.elf` - a basic desktop manager. It is automatically started by the graphics server
+- **GTerm**:
+  - New font (JetBrains Mono)
 - **Blackboard**:
   - Bigger window, new background color.
 
