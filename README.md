@@ -84,9 +84,7 @@ Most of its functions are libc-like and self-explanatory. Full list of them can 
 
 [GFXD](src/user/gfxd) is a graphics server and a window manager that allows other applications to create windows and draw graphics. It is a userspace program that must be present as `/bin/gfxd.elf` in the root filesystem.
 
-It is launched with `gfx start` command in the kernel shell. `Ctrl+F1` switches back to the shell, `Ctrl+F2` shows the server, `Ctrl+F3` stops it.
-
-When the kernel is started with `gfx` argument (first boot option in the list), GFXD is started automatically.
+When the kernel is started with `gfx` argument (first boot option in the list), GFXD is launched automatically. If you accidently booted the system in shell mode, you can start GFXD by running `gfx start` command. `Ctrl+F1` switches back to the shell, `Ctrl+F2` shows the server, `Ctrl+F3` stops it.
 
 ## "Hello, World" application in D
 
