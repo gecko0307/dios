@@ -115,9 +115,18 @@ int main(string[] args)
         uprintf("Error: could not create a window\n");
         return 1;
     }
-
+    
     if (!window.serverRunning)
         uprintf("Warning: no graphics server running\n");
+    else
+    {
+        GfxInfo gfxInfo;
+        ugfxInfo(&gfxInfo);
+
+        int windowX = gfxInfo.width / 2 - img.width / 2;
+        int windowY = gfxInfo.height / 2 - img.height / 2;
+        windowSetPosition(&window, windowX, windowY);
+    }
 
     while(running)
     {

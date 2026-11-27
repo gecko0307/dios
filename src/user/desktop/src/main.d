@@ -369,6 +369,11 @@ int main(string[] args)
         }
     }
     
+    // TODO: make configurable
+    int imageViewerId = uspawn("/bin/image.elf", "/etc/desktop/splash.tga", STDOUT_INHERIT);
+    if (imageViewerId == -1)
+        uprintf("gfxd: failed to run /bin/image.elf. Image Viewer is not installed\n");
+    
     bool running = true;
     
     uint mouseX = 0;
