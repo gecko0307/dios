@@ -30,6 +30,7 @@ import dios.core.stdio;
 import dios.core.mem;
 import dios.core.paging;
 import dios.core.ata;
+import dios.core.blockdev;
 
 enum uint AHCI_MAX_CONTROLLERS = 4;
 
@@ -296,6 +297,8 @@ enum uint AHCI_PXCMD_CR  = 1 << 15;
 
 enum uint AHCI_PXIS_TFES = 1 << 30;
 
+enum uint AHCI_MAX_TRANSFER_BYTES = 1024 * 1024;
+
 ////
 
 __gshared uint ahciCount;
@@ -312,6 +315,9 @@ __gshared ulong ahciCmdListPhys;
 __gshared ulong ahciCmdTablePhys;
 __gshared ulong ahciFisBufferPhys;
 __gshared ulong ahciIdentifyBufferPhys;
+
+__gshared void* ahciReadBuffer;
+__gshared ulong ahciReadBufferPhys;
 
 __gshared AtaDeviceInfo[AHCI_MAX_CONTROLLERS] ahciDevices;
 
@@ -609,36 +615,70 @@ bool ahciIdentifyPort0(void* port, AtaDeviceInfo* info) @nogc nothrow
     return true;
 }
 
-bool ahciReadSector(ulong lba, void* buffer) @nogc nothrow
+bool ahciReadSectors(ulong lba, uint count, void* buffer) @nogc nothrow
 {
     if (buffer is null ||
         hbaPort0 is null ||
         ahciCmdList is null ||
-        ahciCmdTable is null ||
-        ahciIdentifyBuffer is null)
+        ahciCmdTable is null)
         return false;
 
-    if (ahciCount == 0)
+    if (count == 0)
         return false;
 
     AtaDeviceInfo* info = &ahciDevices[0];
 
-    // Check sector range
-    if (lba >= info.sectorCount ||
-        lba > 0x0000FFFFFFFFFFFF)
+    uint sectorSize = info.logicalSectorSize;
+
+    if (sectorSize == 0)
+        return false;
+
+    // Calculate transfer size.
+    ulong bytes64 = cast(ulong)count * sectorSize;
+
+    if (bytes64 > AHCI_MAX_TRANSFER_BYTES)
     {
-        kprintf("AHCI: LBA out of range\n");
+        kprintf("AHCI: transfer too large\n");
         return false;
     }
 
-    // Wait until device is ready
+    size_t bytes = cast(size_t)bytes64;
+
+    // Check device capacity.
+    if (lba >= info.sectorCount ||
+        cast(ulong)count > info.sectorCount - lba)
+    {
+        kprintf("AHCI: LBA range out of bounds\n");
+        return false;
+    }
+
+    // READ DMA EXT uses a 16-bit sector count.
+    if (count > 65535)
+        return false;
+
+    // Allocate reusable DMA buffer.
+    if (ahciReadBuffer is null)
+    {
+        ahciReadBuffer = ahciDmaAlloc(
+            AHCI_MAX_TRANSFER_BYTES,
+            &ahciReadBufferPhys
+        );
+
+        if (ahciReadBuffer is null)
+        {
+            kprintf("AHCI: read buffer allocation failed\n");
+            return false;
+        }
+    }
+
+    // Wait until device is ready.
     if (!ahciWaitClear(hbaPort0, 0x20, 0x88))
     {
         kprintf("AHCI: device busy\n");
         return false;
     }
 
-    // Command slot 0 must be available
+    // Command slot 0 must be available.
     if ((ahciRd32(hbaPort0, 0x38) & 1) ||
         (ahciRd32(hbaPort0, 0x34) & 1))
     {
@@ -646,14 +686,14 @@ bool ahciReadSector(ulong lba, void* buffer) @nogc nothrow
         return false;
     }
 
-    // Clear DMA buffer
-    ahciMemZero(ahciIdentifyBuffer, 512);
+    // Clear DMA buffer.
+    ahciMemZero(ahciReadBuffer, bytes);
 
-    // Prepare command table
+    // Prepare command table.
     HBA_CMD_TBL* tbl = ahciCmdTable;
     ahciMemZero(tbl, HBA_CMD_TBL.sizeof);
 
-    // Register H2D FIS
+    // Register H2D FIS.
     SATA_FIS_REG_H2D* fis =
         cast(SATA_FIS_REG_H2D*)tbl.cfis.ptr;
 
@@ -661,7 +701,7 @@ bool ahciReadSector(ulong lba, void* buffer) @nogc nothrow
     fis.pmportc = 1 << 7;
     fis.command = ATA_CMD_READ_DMA_EXT;
 
-    // 48-bit LBA
+    // 48-bit LBA.
     fis.lba0 = cast(ubyte)(lba);
     fis.lba1 = cast(ubyte)(lba >> 8);
     fis.lba2 = cast(ubyte)(lba >> 16);
@@ -669,19 +709,19 @@ bool ahciReadSector(ulong lba, void* buffer) @nogc nothrow
     fis.lba4 = cast(ubyte)(lba >> 32);
     fis.lba5 = cast(ubyte)(lba >> 40);
 
-    // LBA mode
+    // LBA mode.
     fis.device = 1 << 6;
 
-    // Transfer one sector
-    fis.countl = 1;
-    fis.counth = 0;
+    // Sector count.
+    fis.countl = cast(ubyte)count;
+    fis.counth = cast(ubyte)(count >> 8);
 
-    // PRDT
-    tbl.prdt[0].dba = ahciIdentifyBufferPhys;
+    // PRDT.
+    tbl.prdt[0].dba = ahciReadBufferPhys;
     tbl.prdt[0]._reserved = 0;
-    tbl.prdt[0].dbc = 511;
+    tbl.prdt[0].dbc = cast(uint)(bytes - 1);
 
-    // Command header
+    // Command header.
     HBA_CMD_HEADER* header = &ahciCmdList[0];
 
     header.flags = 5;
@@ -690,13 +730,14 @@ bool ahciReadSector(ulong lba, void* buffer) @nogc nothrow
     header.ctba = cast(uint)ahciCmdTablePhys;
     header.ctbau = cast(uint)(ahciCmdTablePhys >> 32);
 
-    // Clear previous interrupt/error status
+    // Clear previous errors.
     ahciWr32(hbaPort0, 0x10, 0xFFFFFFFF);
+    ahciWr32(hbaPort0, 0x30, 0xFFFFFFFF);
 
-    // Issue READ DMA EXT
+    // Issue READ DMA EXT.
     ahciWr32(hbaPort0, 0x38, 1);
 
-    // Wait for completion
+    // Wait for completion.
     bool completed = false;
 
     foreach (i; 0..10_000_000)
@@ -706,6 +747,8 @@ bool ahciReadSector(ulong lba, void* buffer) @nogc nothrow
         if (stat & AHCI_PXIS_TFES)
         {
             kprintf("AHCI: READ DMA EXT failed\n");
+            kprintf("  PxTFD  = %x\n", ahciRd32(hbaPort0, 0x20));
+            kprintf("  PxSERR = %x\n", ahciRd32(hbaPort0, 0x30));
             return false;
         }
 
@@ -730,18 +773,60 @@ bool ahciReadSector(ulong lba, void* buffer) @nogc nothrow
     }
 
     // Verify transfer size.
-    if (header.prdbc != 512)
+    if (header.prdbc != bytes)
     {
-        kprintf("AHCI: invalid transfer size %u\n", header.prdbc);
+        kprintf("AHCI: invalid transfer size %u, expected %u\n",
+            header.prdbc, cast(uint)bytes);
         return false;
     }
 
-    // Copy sector from DMA buffer.
-    ubyte* src = cast(ubyte*)ahciIdentifyBuffer;
+    // Copy DMA buffer into destination.
+    ubyte* src = cast(ubyte*)ahciReadBuffer;
     ubyte* dst = cast(ubyte*)buffer;
 
-    foreach (i; 0..512)
+    foreach (i; 0..bytes)
         dst[i] = src[i];
+
+    return true;
+}
+
+bool ahciReadSector(ulong lba, void* buffer) @nogc nothrow
+{
+    return ahciReadSectors(lba, 1, buffer);
+}
+
+bool ahciBlockRead(void* ctx, ulong lba, uint count, void* dst) @nogc nothrow
+{
+    if (dst is null || count == 0 || ahciCount == 0)
+        return false;
+
+    AtaDeviceInfo* info = &ahciDevices[0];
+
+    uint sectorSize = info.logicalSectorSize;
+    if (sectorSize == 0)
+        return false;
+
+    uint maxSectors = AHCI_MAX_TRANSFER_BYTES / sectorSize;
+    if (maxSectors == 0)
+        return false;
+
+    ubyte* out_ = cast(ubyte*)dst;
+
+    while (count != 0)
+    {
+        uint n = count;
+        if (n > maxSectors)
+            n = maxSectors;
+
+        if (!ahciReadSectors(lba, n, out_))
+            return false;
+
+        ulong bytes = cast(ulong)n * sectorSize;
+
+        lba += n;
+        count -= n;
+        out_ += bytes;
+    }
 
     return true;
 }
@@ -779,28 +864,27 @@ bool ahciInit(void* abar) @nogc nothrow
     kprintf("  Logical sector: %u\n", info.logicalSectorSize);
     kprintf("  Physical sector: %u\n", info.physicalSectorSize);
     
-    /*
-    ubyte[512] sectorBuffer;
+    BlockDev* dev = blockRegister(
+        "sata0".ptr,
+        info.model.ptr,
+        info.sectorCount,
+        info.logicalSectorSize,
+        &ahciBlockRead,
+        null,   // Read-only for now
+        null,   // No flush
+        null    // Context
+    );
 
-    if (ahciReadSector(0, sectorBuffer.ptr))
+    if (dev is null)
     {
-        kprintf("AHCI: sector 0 read successfully\n");
-        kprintf("  First bytes: %x %x %x %x\n",
-            sectorBuffer[0],
-            sectorBuffer[1],
-            sectorBuffer[2],
-            sectorBuffer[3]);
-        kprintf("  Boot signature: %x %x\n",
-            sectorBuffer[510],
-            sectorBuffer[511]);
-    }
-    else
-    {
-        kprintf("AHCI: sector read failed\n");
+        kprintf("AHCI: block device registration failed\n");
         ahciCount--;
         return false;
     }
-    */
+
+    kprintf("AHCI: registered as %s\n", dev.name.ptr);
+
+    blockScanPartitions(dev);
     
     return true;
 }
