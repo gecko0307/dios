@@ -32,7 +32,7 @@ __gshared uint CURSOR_WIDTH;
 __gshared uint CURSOR_HEIGHT;
 __gshared uint[] CURSOR;
 
-bool loadCursor()
+bool loadCursor(bool colorKeyed = false)
 {
     deleteCursor();
     
@@ -87,7 +87,7 @@ bool loadCursor()
     if (!loadTGA(input, &img))
     {
         uprintf("Error: failed to decode \"%s\"\n", path.ptr);
-        return 1;
+        return false;
     }
     
     ufree(buf);
@@ -98,8 +98,31 @@ bool loadCursor()
     
     // TODO: array cast in object.d
     CURSOR = (cast(uint*)img.data.ptr)[0..img.data.length / uint.sizeof];
-    
+
+    if (colorKeyed)
+        convertColorKeyCursor();
     return true;
+}
+
+/**
+ * CURSOR is 0xAARRGGBB with straight (not premultiplied) alpha: what a 32 bit TGA with an alpha
+ * channel holds. Anti-aliased cursors are just that.
+ * Cursors of the old kind have no alpha at all (a TGA without alpha loads as fully opaque) and use
+ * magenta (FF00FF) for "transparent". They are recognized by not having a single pixel that is not
+ * opaque, and magenta is made transparent in them. A cursor with a real alpha channel is left alone.
+ */
+private void convertColorKeyCursor()
+{
+    for (size_t i = 0; i < CURSOR.length; i++)
+    {
+        if ((CURSOR[i] >> 24) != 255)
+            return;
+    }
+    for (size_t i = 0; i < CURSOR.length; i++)
+    {
+        if ((CURSOR[i] & 0x00FFFFFF) == 0x00FF00FF)
+            CURSOR[i] = 0x00FF00FF;         // alpha 0
+    }
 }
 
 void deleteCursor()

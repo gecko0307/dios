@@ -60,7 +60,6 @@ enum uint COLOR_FRAME        = 0x00E4E4E4;
 enum uint COLOR_FRAME_FOCUS  = 0x00EBEBEB;
 enum uint COLOR_CLOSE        = 0x00DC5050;
 enum uint COLOR_CLOSE_X      = 0x00FFFFFF;
-enum uint CURSOR_KEY         = 0x00FF00FF; // transparent pixels in cursor.d
 
 __gshared Canvas renderScene;       // desktop and windows, no cursor
 __gshared Canvas renderScreen;      // scene + cursor: what is presented
@@ -105,7 +104,27 @@ void renderRelease()
     deleteCursor();
 }
 
+// Alpha blending of a cursor pixel (0xAARRGGBB, straight alpha) over a screen pixel.
+// x / 255 rounded to nearest, without a division.
+private uint div255(uint x) @nogc nothrow
+{
+    x += 128;
+    return (x + (x >> 8)) >> 8;
+}
+
+private uint blendCursorPixel(uint src, uint dst) @nogc nothrow
+{
+    uint a = src >> 24;
+    uint ia = 255 - a;
+    uint r = div255(((src >> 16) & 0xFF) * a + ((dst >> 16) & 0xFF) * ia);
+    uint g = div255(((src >> 8) & 0xFF) * a + ((dst >> 8) & 0xFF) * ia);
+    uint b = div255((src & 0xFF) * a + (dst & 0xFF) * ia);
+    return (r << 16) | (g << 8) | b;
+}
+
 // Draws the cursor into renderScreen: clip once, then walk rows (no per-pixel checks).
+// Pixels are alpha blended over the scene: alpha 0 leaves the screen alone, 255 replaces it,
+// anything in between (anti-aliased edges, shadows) mixes the two.
 private void renderCursorDraw(int x, int y)
 {
     if (!haveCursor)
@@ -124,8 +143,10 @@ private void renderCursorDraw(int x, int y)
         for (int cx = cx0; cx < cx1; cx++)
         {
             uint pix = src[cx];
-            if (pix != CURSOR_KEY)
-                dst[cx] = pix;
+            uint a = pix >> 24;
+            if (a == 0)
+                continue;
+            dst[cx] = (a == 255) ? (pix & 0x00FFFFFF) : blendCursorPixel(pix, dst[cx]);
         }
     }
     renderCursorDrawn = true;
