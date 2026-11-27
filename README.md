@@ -15,7 +15,7 @@ You can use DIOS as a basis for creating your own operating system! PRs implemen
 - DIOS is now 64-bit only, x86 support was dropped
 - DIOS is planned as a graphical OS, but there's no built-in GUI toolkit yet. Graphical features are work-in-progress
 - DIOS is an ELF kernel that requires a bootloader to run. Currently only [Limine](https://github.com/limine-bootloader/limine) boot protocol is supported
-- Default setup in this repo assumes booting from the CD-ROM, but you can also make a bootable USB stick with the DIOS ISO image using [Ventoy](https://www.ventoy.net/en/index.html). Simply copy the `dios64.iso` file onto the flash drive that has Ventoy installed.
+- Default setup in this repo assumes booting from the CD-ROM, but you can also make a bootable USB stick with the DIOS ISO image using [Ventoy](https://www.ventoy.net/en/index.html). Simply copy the `dios-X.X.X-x86_64.iso` file onto the flash drive that has Ventoy installed.
 
 ## Features
 
@@ -138,5 +138,5 @@ All *.elf binaries of the demos are automatically copied to `rootfs/bin`. To inc
 Tianocore's [Open Virtual Machine Firmware](https://wiki.osdev.org/OVMF) is required.
 
 ```
-qemu-system-x86_64 -cpu max,+rdrand -cdrom dios-0.8.0-x86_64.iso.iso -m 512M -bios OVMF.fd -vga std -device qemu-xhci,id=xhci -device usb-mouse,bus=xhci.0,port=1 -d guest_errors
+qemu-system-x86_64 -cpu max,+rdrand -cdrom dios-0.9.0-x86_64.iso -m 512M -bios OVMF.fd -vga std -device qemu-xhci,id=xhci -device usb-mouse,bus=xhci.0,port=1 -d guest_errors
 ```
