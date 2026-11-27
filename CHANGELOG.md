@@ -1,3 +1,8 @@
+DIOS 0.10.0 - TBD
+-----------------
+- **Desktop**:
+  - Desktop now shows a splash screen on startup.
+
 DIOS 0.9.0 - 27 Nov, 2026
 -------------------------
 - **Bootloader**:
