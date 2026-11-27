@@ -9,6 +9,8 @@ DIOS 0.9.0 - TBD
 - **ulib**:
   - New function `utaskfind`
   - New functions `windowSetHints`, `windowSetPosition`, `windowCreateDesktop`, `windowCreatePopup`
+- **GFXD**
+  - Desktop and popup windows (`GFX_WIN_DESKTOP`, `GFX_WIN_POPUP`)
 - **Desktop**:
   - New built-in program `desktop.elf` - a basic desktop manager. It is automatically started by the graphics server.
 - **Blackboard**:
