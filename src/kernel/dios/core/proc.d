@@ -35,7 +35,7 @@ module dios.core.proc;
  *
  * Scheduling: round robin on one CPU.
  *   - Ring 3 is preemptive: a timer tick that interrupted a program ends its time slice
- *     (TASK_SLICE_TICKS ms) and switches to the next runnable task, from inside the interrupt.
+ *     (TASK_SLICE_MS, rounded down to whole ticks) and switches to the next runnable task, from inside the interrupt.
  *   - The kernel is not preemptive: a task switches only at the explicit points
  *     taskSchedule() is called from: the blocking system calls (sleep, getkey, yield), exit,
  *     and task 0's main loop (once per round). That is what keeps the drivers and file systems
@@ -236,7 +236,9 @@ struct Program
 
 enum uint TASK_MAX = 8;                 // slot 0 is the kernel, so 7 programs at a time
 enum ulong TASK_STACK_SIZE = 65536;     // kernel stack per task
-enum uint TASK_SLICE_TICKS = 5;         // ms (1 kHz tick)
+enum uint TASK_SLICE_MS = 4;            // length of a time slice of a program
+// ... in ticks (see TICK_HZ in clock.d): at least one, a slice cannot be shorter than the tick
+enum uint TASK_SLICE_TICKS = (TASK_SLICE_MS * TICK_HZ / 1000 > 0) ? TASK_SLICE_MS * TICK_HZ / 1000 : 1;
 
 enum TaskState : ubyte
 {

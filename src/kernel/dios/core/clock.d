@@ -32,7 +32,7 @@ module dios.core.clock;
  *    If the machine has no HPET we fall back to the PIT (and keep it fed
  *    from the tick interrupt, so its 16-bit counter cannot silently wrap
  *    twice between two reads).
- *  - A 1 kHz heartbeat from the LAPIC timer. It wakes the main loop out of HLT
+ *  - A heartbeat (TICK_HZ) from the LAPIC timer. It wakes the main loop out of HLT
  *    and is the future scheduler tick. See lapic.d for how it is calibrated -
  *    against this clock.
  */
@@ -46,7 +46,11 @@ import dios.core.stdio;
 import dios.core.vmem;
 
 enum ulong NS_PER_SEC = 1_000_000_000UL;
-enum uint TICK_HZ = 1000;
+// Frequency of the timer interrupt. It is the resolution of everything that waits: a task that sleeps
+// wakes at the first tick after its deadline (the main loop sleeps in HLT between interrupts), and it is
+// the unit of the time slices (proc.d). Higher means shorter delays but more interrupts, which costs
+// real time in a virtual machine even when idle. Input does not depend on it: devices raise their own interrupts.
+enum uint TICK_HZ = 250;
 
 enum: uint
 {
@@ -62,7 +66,7 @@ __gshared ulong hpetFreq;       // Hz
 __gshared ulong hpetHigh;       // upper half for 32-bit counters
 __gshared uint hpetLast;
 
-__gshared ulong tickCount;      // LAPIC timer interrupts since start (1 per ms)
+__gshared ulong tickCount;      // LAPIC timer interrupts since start (TICK_HZ per second)
 __gshared bool tickRunning;
 
 extern(C):
@@ -102,7 +106,7 @@ ulong hpetReadTicks() @nogc nothrow
     }
 
     // 32-bit counter (wraps every few minutes): extend it in software. Needs to
-    // be called at least that often - the 1 kHz tick takes care of that.
+    // be called at least that often - the tick takes care of that.
     ulong flags = cpuIrqSave();
     uint lo = hpetRd32(HPET_REG_COUNTER);
     if (lo < hpetLast)
@@ -148,9 +152,10 @@ void clockDelayMs(uint ms) @nogc nothrow
 }
 
 /// Milliseconds counted by the timer interrupt (0 until clockStartTick succeeds).
+/// It advances in steps of 1000 / TICK_HZ.
 ulong clockTickMs() @nogc nothrow
 {
-    return volatileLoad(&tickCount);
+    return volatileLoad(&tickCount) * 1000 / TICK_HZ;
 }
 
 bool clockHasHpet() @nogc nothrow
@@ -201,7 +206,7 @@ extern(C) void clockTimerIrq(InterruptFrame* f) @nogc nothrow
         clockNowNs();
 }
 
-/// Start the 1 kHz LAPIC timer interrupt. Needs lapicInit() and clockInit().
+/// Start the periodic LAPIC timer interrupt (TICK_HZ). Needs lapicInit() and clockInit().
 bool clockStartTick() @nogc nothrow
 {
     irqRegister(VEC_TIMER, &clockTimerIrq);

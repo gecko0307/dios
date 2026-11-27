@@ -239,7 +239,7 @@ void run() @nogc nothrow
     if (vmemInit(&bootInfo.ramInfo) != 0)
         kPanic("vmemInit failed\n");
 
-    // ACPI, HPET clock, LAPIC + IOAPIC, 1 kHz tick. Interrupts are enabled on return
+    // ACPI, HPET clock, LAPIC + IOAPIC, periodic tick. Interrupts are enabled on return
     // (if the machine has a local APIC at all)
     interruptsInit(hhdmOffset);
 

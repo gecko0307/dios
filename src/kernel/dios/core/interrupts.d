@@ -32,7 +32,7 @@ module dios.core.interrupts;
  *   interruptsEarlyInit()   GDT + TSS + IDT (CPU exceptions -> register dump).
  *                           Needs nothing but the console. Call as early as possible.
  *   interruptsInit()        ACPI -> clock (HPET) -> legacy PIC off -> LAPIC ->
- *                           IOAPIC -> 1 kHz tick. Needs vmemInit() (MMIO mappings).
+ *                           IOAPIC -> the tick (TICK_HZ). Needs vmemInit() (MMIO mappings).
  */
 import dios.core.acpi;
 import dios.core.clock;
@@ -50,7 +50,7 @@ struct InterruptStatus
     bool lapic;
     bool x2apic;
     bool ioapic;
-    bool tick;          // the 1 kHz timer interrupt is running (safe to HLT in the main loop)
+    bool tick;          // the timer interrupt is running (safe to HLT in the main loop)
     bool hpet;
     uint apicId;
     uint cpuCount;
