@@ -121,13 +121,7 @@ ushort ataIdWord(const(ubyte)* data, size_t index) @nogc nothrow
     );
 }
 
-void ataIdString(
-    const(ubyte)* data,
-    size_t firstWord,
-    size_t wordCount,
-    char* dst,
-    size_t dstCapacity
-) @nogc nothrow
+void ataIdString(const(ubyte)* data, size_t firstWord, size_t wordCount, char* dst, size_t dstCapacity) @nogc nothrow
 {
     size_t len = wordCount * 2;
 
