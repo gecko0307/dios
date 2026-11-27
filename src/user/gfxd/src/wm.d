@@ -59,7 +59,7 @@ module wm;
  * damage rectangles (wmTakeDamage), so that render.d redraws just those.
  *
  * Ideas to continue: resizing (a new surface + an event to the client), minimize, a taskbar,
- * keyboard shortcuts (Alt+Tab needs a modifier the kernel does not report yet), snapping.
+ * keyboard shortcuts (Alt+Tab needs a modifier the kernel does not report yet).
  */
 
 import ulib.dios;
@@ -70,6 +70,11 @@ enum int WM_TITLE_H = 22;               // title bar height
 enum int WM_CLOSE_SIZE = 20;            // the close button is a square this big, at the right end of the title bar
 enum int WM_BORDER = 2;
 enum int WM_OUTLINE = 1;                // black line around the whole frame of a decorated window
+
+// Snapping: while a window is dragged by its title bar, its frame edges stick to the screen edges
+// and to the edges of other windows' frames when they come this close (in pixels).
+enum bool WM_SNAP_DEFAULT = true;       // the hardcoded switch. Later: read it from the config and set wmSnapEnabled
+enum int WM_SNAP_DIST = 10;
 
 // Which part of a window a point is on
 enum int WM_PART_NONE   = 0;
@@ -104,6 +109,7 @@ __gshared int wmMouseY;
 __gshared uint wmButtons;
 __gshared int wmScreenW;
 __gshared int wmScreenH;
+__gshared bool wmSnapEnabled = WM_SNAP_DEFAULT;     // window snapping on/off; wmInit() resets it to WM_SNAP_DEFAULT
 
 // Pending damage in screen coordinates (bounding box, half open); see wmTakeDamage()
 __gshared bool wmHasDamage;
@@ -124,6 +130,7 @@ void wmInit(int screenW, int screenH)
     wmCascade = 0;
     wmScreenW = screenW;
     wmScreenH = screenH;
+    wmSnapEnabled = WM_SNAP_DEFAULT;
     wmHasDamage = false;
 }
 
@@ -337,6 +344,88 @@ void wmMoveWindow(int idx, int nx, int ny)
     wmDamageFrame(idx);                     // where it is now
 }
 
+/// If `edge` is within WM_SNAP_DIST of `target` and closer than what was found so far, remember the
+/// shift that brings it there.
+private void wmSnapTry(int edge, int target, int* shift, int* bestDist)
+{
+    int d = target - edge;
+    int a = (d < 0) ? -d : d;
+    if (a <= WM_SNAP_DIST && a < *bestDist)
+    {
+        *bestDist = a;
+        *shift = d;
+    }
+}
+
+/**
+ * Window snapping: adjusts a wanted position (drawable area, nx, ny) of window `idx` so that the
+ * edges of its frame line up with the screen edges and with the frames of the other windows when
+ * they are within WM_SNAP_DIST. Per axis, the closest edge wins. Windows only snap to each other
+ * if they are next to or across from one another (their extent on the other axis overlaps or is
+ * within WM_SNAP_DIST), so a window does not jump to a neighbour on the other side of the screen.
+ * Both "touching" (my right edge to your left edge) and "aligned" (left edge to left edge) count.
+ */
+private void wmSnapPosition(int idx, int* nx, int* ny)
+{
+    const(WmWindow)* w = &wmWindows[idx];
+    int l = *nx - (w.x - wmFrameX(w));
+    int t = *ny - (w.y - wmFrameY(w));
+    int r = l + wmFrameW(w);
+    int b = t + wmFrameH(w);
+
+    int dx = 0;
+    int dy = 0;
+    int bestX = WM_SNAP_DIST + 1;
+    int bestY = WM_SNAP_DIST + 1;
+
+    wmSnapTry(l, 0, &dx, &bestX);
+    wmSnapTry(r, wmScreenW, &dx, &bestX);
+    wmSnapTry(t, 0, &dy, &bestY);
+    wmSnapTry(b, wmScreenH, &dy, &bestY);
+
+    for (int i = 0; i < wmCount; i++)
+    {
+        int o = wmOrder[i];
+        if (o == idx)
+            continue;
+        const(WmWindow)* ow = &wmWindows[o];
+        int ol = wmFrameX(ow);
+        int ot = wmFrameY(ow);
+        int or_ = ol + wmFrameW(ow);
+        int ob = ot + wmFrameH(ow);
+
+        if (t < ob + WM_SNAP_DIST && b > ot - WM_SNAP_DIST)     // level with it: snap horizontally
+        {
+            wmSnapTry(l, or_, &dx, &bestX);
+            wmSnapTry(r, ol, &dx, &bestX);
+            wmSnapTry(l, ol, &dx, &bestX);
+            wmSnapTry(r, or_, &dx, &bestX);
+        }
+        if (l < or_ + WM_SNAP_DIST && r > ol - WM_SNAP_DIST)    // above or below it: snap vertically
+        {
+            wmSnapTry(t, ob, &dy, &bestY);
+            wmSnapTry(b, ot, &dy, &bestY);
+            wmSnapTry(t, ot, &dy, &bestY);
+            wmSnapTry(b, ob, &dy, &bestY);
+        }
+    }
+    *nx += dx;
+    *ny += dy;
+}
+
+/// Moves window `idx` for a title bar drag to the wanted position, snapping it if that is switched on.
+/// The wanted position always comes straight from the mouse, so a snapped window lets go as soon as
+/// the mouse is more than WM_SNAP_DIST away.
+private void wmDragWindow(int idx, int nx, int ny)
+{
+    if (wmSnapEnabled)
+    {
+        wmClampPosition(&wmWindows[idx], &nx, &ny);     // snap what will really be shown
+        wmSnapPosition(idx, &nx, &ny);
+    }
+    wmMoveWindow(idx, nx, ny);                          // clamps again
+}
+
 /// A program created a surface (GFX_EV_SURFACE_NEW): map it and give it a window.
 /// Returns the window index, or -1 (too many windows, or the kernel refused to map it).
 int wmAdd(uint surface, uint owner)
@@ -480,7 +569,7 @@ void wmHandleMouse(const(GfxEvent)* ev)
     // A window is being dragged: the mouse belongs to the window manager until the button is up
     if (wmDrag >= 0)
     {
-        wmMoveWindow(wmDrag, wmMouseX - wmDragDx, wmMouseY - wmDragDy);
+        wmDragWindow(wmDrag, wmMouseX - wmDragDx, wmMouseY - wmDragDy);
         if (buttons == 0)
         {
             wmDrag = -1;
