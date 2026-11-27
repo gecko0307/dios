@@ -108,6 +108,7 @@ struct AtaDeviceInfo
     bool lba48;
     bool writeCacheSupported;
     bool writeCacheEnabled;
+    bool flushCacheSupported;
     bool flushCacheExt;
 }
 
@@ -145,10 +146,7 @@ void ataIdString(
     dst[len] = '\0';
 }
 
-bool ataParseIdentify(
-    const(ubyte)* data,
-    AtaDeviceInfo* info
-) @nogc nothrow
+bool ataParseIdentify(const(ubyte)* data, AtaDeviceInfo* info) @nogc nothrow
 {
     if (data is null || info is null)
         return false;
@@ -173,6 +171,7 @@ bool ataParseIdentify(
     info.lba48 = valid83 && (w83 & (1 << 10));
     info.writeCacheSupported = (w82 & (1 << 5)) != 0;
     info.writeCacheEnabled = (w85 & (1 << 5)) != 0;
+    info.flushCacheSupported = (w82 & (1 << 12)) != 0;
     info.flushCacheExt = valid83 && (w83 & (1 << 13));
 
     info.logicalSectorSize = 512;
