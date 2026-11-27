@@ -30,7 +30,7 @@ You can use DIOS as a basis for creating your own operating system! PRs implemen
 - PCI enumeration
 - Block device interface
 - FAT32 (read-write) and exFAT (read-only)
-- SATA driver
+- AHCI driver
 - xHCI driver. USB keyboard and mouse; mass storage devices; USB hot-plug support; USB hubs support
 - PS/2 keyboard and mouse
 - A shell with built-in kernel commands
