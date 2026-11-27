@@ -54,17 +54,17 @@ import ulib.gfx;
 
 enum uint COLS = 80;
 enum uint ROWS = 25;
-enum int CELL_W = 8; // distance between two characters
-enum int CELL_H = 12;
-enum int GLYPH_W = 10; // size of a glyph in the font picture (wider than CELL_W: they overlap)
-enum int GLYPH_H = 12;
+enum int CELL_W = 7; // distance between two characters
+enum int CELL_H = 14;
+enum int GLYPH_W = 8; // size of a glyph in the font picture (wider than CELL_W: they overlap)
+enum int GLYPH_H = 14;
 enum int ATLAS_COLS = 16; // glyph c is at column c % 16, row c / 16
 enum uint WIN_W = COLS * CELL_W + (GLYPH_W - CELL_W);
 enum uint WIN_H = ROWS * CELL_H;
 
-enum uint COLOR_BG     = 0x00101820;
-enum uint COLOR_FG     = 0x00C8D0D8;
-enum uint COLOR_CURSOR = 0x00C8D0D8;
+enum uint COLOR_BG     = 0x003a004d; //0x00101820;
+enum uint COLOR_FG     = 0x00FFFFFF; //0x00C8D0D8;
+enum uint COLOR_CURSOR = 0x00FFFFFF; //0x00C8D0D8;
 
 enum uint LINE_MAX = 200; // longest command line (the kernel allows 255 bytes of arguments)
 enum uint NAME_MAX = 64;
@@ -247,17 +247,39 @@ void notifyJob(uint id, const(char)* text) @nogc nothrow
 
 void drawGlyph(char c, int px, int py) @nogc nothrow
 {
-    int gx = (cast(int)c % ATLAS_COLS) * GLYPH_W;
-    int gy = (cast(int)c / ATLAS_COLS) * GLYPH_H;
+    immutable int gx = (cast(int)c % ATLAS_COLS) * GLYPH_W;
+    immutable int gy = (cast(int)c / ATLAS_COLS) * GLYPH_H;
+
     for (int y = 0; y < GLYPH_H; y++)
     {
         for (int x = 0; x < GLYPH_W; x++)
         {
-            // The font picture is white letters on magenta (the see-through colour)
-            if ((font.getPixel(gx + x, gy + y) & 0x00FFFFFF) == 0x00FFFFFF)
+            immutable uint a = font.getPixel(gx + x, gy + y) >>> 24;  // coverage
+            if (a == 0)                      // fully transparent: leave background
+                continue;
+            if (a == 255)                    // fully opaque: no read needed
+            {
                 win.canvas.setPixel(px + x, py + y, COLOR_FG);
+                continue;
+            }
+            immutable uint dst = win.canvas.getPixel(px + x, py + y);
+            win.canvas.setPixel(px + x, py + y, blend(COLOR_FG, dst, a));
         }
     }
+}
+
+// result = fg * a/255 + bg * (255-a)/255, per channel
+uint blend(uint fg, uint bg, uint a) @nogc nothrow pure
+{
+    immutable uint ia = 255 - a;
+    uint result = 0;
+    foreach (shift; [16, 8, 0])              // R, G, B (order doesn't matter)
+    {
+        immutable uint f = (fg >> shift) & 0xFF;
+        immutable uint b = (bg >> shift) & 0xFF;
+        result |= (((f * a + b * ia + 127) / 255) & 0xFF) << shift;
+    }
+    return result;                           // alpha byte left as 0
 }
 
 void render() @nogc nothrow
