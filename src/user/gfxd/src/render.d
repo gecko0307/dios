@@ -59,6 +59,7 @@ import tgafile;
 enum uint COLOR_DESKTOP      = 0x00203A5A;
 enum uint COLOR_FRAME        = 0x00E4E4E4;
 enum uint COLOR_FRAME_FOCUS  = 0x00EBEBEB;
+enum uint COLOR_OUTLINE      = 0x00707070;
 enum uint COLOR_CLOSE        = 0x00DC5050;
 enum uint COLOR_CLOSE_X      = 0x00FFFFFF;
 
@@ -230,13 +231,18 @@ private void renderPresentRect(int x, int y, int w, int h)
     ugfxServerPresent(renderScreen.pixels, &r, 0);
 }
 
-// The frame of a window: border and title bar in one colour, a close button on the title bar
+// The frame of a window: a black outline, then border and title bar in one colour, a close button on the title bar
 // (a picture from /etc/gfxd/win-close.tga if there is one, otherwise a red square with a cross).
 // `c` is a view of the scene that starts at rx, ry: coordinates are shifted by that.
 // A title (text) would go here, as soon as there is a font.
 private void renderDecoration(Canvas* c, const(WmWindow)* w, bool focused, int rx, int ry)
 {
-    c.fillRect(wmFrameX(w) - rx, wmFrameY(w) - ry, wmFrameW(w), wmFrameH(w),
+    // The outline is the outermost WM_OUTLINE pixels of the frame: the whole frame in its colour,
+    // then the inside of it in the colour of the frame.
+    int fx = wmFrameX(w) - rx;
+    int fy = wmFrameY(w) - ry;
+    c.fillRect(fx, fy, wmFrameW(w), wmFrameH(w), COLOR_OUTLINE);
+    c.fillRect(fx + WM_OUTLINE, fy + WM_OUTLINE, wmFrameW(w) - 2 * WM_OUTLINE, wmFrameH(w) - 2 * WM_OUTLINE,
                focused ? COLOR_FRAME_FOCUS : COLOR_FRAME);
 
     // The button is the WM_CLOSE_SIZE square that wmHitPart() reacts to

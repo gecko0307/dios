@@ -34,7 +34,7 @@ module wm;
  * position, and a frame around it: a border and a title bar ABOVE the drawable area. (x, y) is
  * the top left of the drawable area, so clients never see the decoration.
  *
- *        +---------------------------+   <- frame (WM_BORDER wide)
+ *        +---------------------------+   <- outline (WM_OUTLINE wide, black), then the frame (WM_BORDER wide)
  *        | title bar            [ X ]|   <- WM_TITLE_H high; X = close button, WM_CLOSE_SIZE square
  *        +---------------------------+
  *        |                           |
@@ -69,6 +69,7 @@ enum int WM_MAX_WINDOWS = 32;
 enum int WM_TITLE_H = 22;               // title bar height
 enum int WM_CLOSE_SIZE = 20;            // the close button is a square this big, at the right end of the title bar
 enum int WM_BORDER = 2;
+enum int WM_OUTLINE = 1;                // black line around the whole frame of a decorated window
 
 // Which part of a window a point is on
 enum int WM_PART_NONE   = 0;
@@ -145,10 +146,11 @@ int wmLayer(const(WmWindow)* w) { return wmLayerOfFlags(w.flags); }
 bool wmIsFixed(const(WmWindow)* w) { return (w.flags & GFX_WIN_FIXED) != 0; }
 
 // The frame: the area including decoration. Without decoration it is the drawable area.
-int wmFrameX(const(WmWindow)* w) { return wmDecorated(w) ? w.x - WM_BORDER : w.x; }
-int wmFrameY(const(WmWindow)* w) { return wmDecorated(w) ? w.y - WM_TITLE_H - WM_BORDER : w.y; }
-int wmFrameW(const(WmWindow)* w) { return wmDecorated(w) ? w.canvas.width + 2 * WM_BORDER : w.canvas.width; }
-int wmFrameH(const(WmWindow)* w) { return wmDecorated(w) ? w.canvas.height + WM_TITLE_H + 2 * WM_BORDER : w.canvas.height; }
+// It includes the outline, which is the outermost line of it.
+int wmFrameX(const(WmWindow)* w) { return wmDecorated(w) ? w.x - WM_BORDER - WM_OUTLINE : w.x; }
+int wmFrameY(const(WmWindow)* w) { return wmDecorated(w) ? w.y - WM_TITLE_H - WM_BORDER - WM_OUTLINE : w.y; }
+int wmFrameW(const(WmWindow)* w) { return wmDecorated(w) ? w.canvas.width + 2 * (WM_BORDER + WM_OUTLINE) : w.canvas.width; }
+int wmFrameH(const(WmWindow)* w) { return wmDecorated(w) ? w.canvas.height + WM_TITLE_H + 2 * (WM_BORDER + WM_OUTLINE) : w.canvas.height; }
 
 /// Left edge of the close button: it ends at the right edge of the drawable area, with the border to its right
 int wmCloseX(const(WmWindow)* w) { return w.x + w.canvas.width - WM_CLOSE_SIZE; }
@@ -310,7 +312,7 @@ void wmRaise(int idx)
 /// Limits a position of a decorated window so that part of its title bar stays on screen.
 void wmClampPosition(const(WmWindow)* w, int* nx, int* ny)
 {
-    int minY = WM_TITLE_H + WM_BORDER;
+    int minY = WM_TITLE_H + WM_BORDER + WM_OUTLINE;     // the outline stays on screen, too
     if (*ny < minY)
         *ny = minY;
     if (*ny > wmScreenH - WM_TITLE_H)
