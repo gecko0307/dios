@@ -27,6 +27,7 @@ module cursor;
 
 import ulib.dios;
 import ulib.gfx;
+import tgafile;
 
 __gshared uint CURSOR_WIDTH;
 __gshared uint CURSOR_HEIGHT;
@@ -35,67 +36,14 @@ __gshared uint[] CURSOR;
 bool loadCursor(bool colorKeyed = false)
 {
     deleteCursor();
-    
-    string path = "/etc/gfxd/cursor.tga";
-    
-    UStat st;
-    if (ustat(path.ptr, &st) != 0)
-    {
-        uprintf("Error: cannot open \"%s\"\n", path.ptr);
-        return false;
-    }
-    
-    size_t len = st.size;
-    if (len < TGAHeader.sizeof)
-    {
-        uprintf("Error: \"%s\" is not a TGA file or corrupted\n", path.ptr);
-        return false;
-    }
-    
-    int file = uopen(path.ptr, O_RDONLY);
-    if (file < 0)
-    {
-        uprintf("Error: cannot open \"%s\"\n", path.ptr);
-        return false;
-    }
-    
-    ubyte* buf = cast(ubyte*)umalloc(len);
-    if (buf is null)
-    {
-        uprintf("Error: failed to allocate %d byte(s)\n", len);
-        return false;
-    }
-    
-    scope(exit)
-    {
-        if (buf !is null)
-            ufree(buf);
-    }
-    
-    long bytesRead = ureadfull(file, buf, len);
-    if (bytesRead != cast(long)len)
-    {
-        uprintf("Error: failed to read \"%s\"\n", path.ptr);
-        return false;
-    }
-    
-    uclose(file);
-    
-    ubyte[] input = buf[0..len];
-    
+
     ImageBGRA img;
-    if (!loadTGA(input, &img))
-    {
-        uprintf("Error: failed to decode \"%s\"\n", path.ptr);
+    if (!loadTGAFile("/etc/gfxd/cursor.tga".ptr, &img))
         return false;
-    }
-    
-    ufree(buf);
-    buf = null;
-    
+
     CURSOR_WIDTH = cast(ushort)img.width;
     CURSOR_HEIGHT = cast(ushort)img.height;
-    
+
     // TODO: array cast in object.d
     CURSOR = (cast(uint*)img.data.ptr)[0..img.data.length / uint.sizeof];
 
@@ -129,4 +77,7 @@ void deleteCursor()
 {
     if (CURSOR.length)
         ufree(CURSOR.ptr);
+    CURSOR = null;                          // not freed twice if called again
+    CURSOR_WIDTH = 0;
+    CURSOR_HEIGHT = 0;
 }

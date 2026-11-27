@@ -54,6 +54,7 @@ import ulib.dios;
 import ulib.gfx;
 import wm;
 import cursor;
+import tgafile;
 
 enum uint COLOR_DESKTOP      = 0x00203A5A;
 enum uint COLOR_FRAME        = 0x00E4E4E4;
@@ -77,6 +78,33 @@ __gshared int renderDy1;
 
 __gshared bool haveCursor;
 
+// The close button of the title bar, from /etc/gfxd/win-close.tga. 0xAARRGGBB, straight alpha.
+// Without the file (haveCloseButton is false) a button is drawn by renderDecoration itself.
+__gshared ImageBGRA closeButton;
+__gshared bool haveCloseButton;
+
+private bool loadCloseButton()
+{
+    // A missing file is nothing to complain about: there is a built-in button
+    if (!loadTGAFile("/etc/gfxd/win-close.tga".ptr, &closeButton, false))
+        return false;
+    if (closeButton.width == 0 || closeButton.height == 0 || closeButton.data.length < closeButton.width * closeButton.height * 4)
+    {
+        ufree(closeButton.data.ptr);
+        closeButton = ImageBGRA.init;
+        return false;
+    }
+    return true;
+}
+
+private void deleteCloseButton()
+{
+    if (haveCloseButton)
+        ufree(closeButton.data.ptr);
+    closeButton = ImageBGRA.init;
+    haveCloseButton = false;
+}
+
 private bool renderAlloc(Canvas* c, uint width, uint height)
 {
     void* mem = umalloc(cast(size_t)width * cast(size_t)height * 4);
@@ -95,6 +123,7 @@ bool renderInit(uint width, uint height)
 {
     renderCursorDrawn = false;
     haveCursor = loadCursor();
+    haveCloseButton = loadCloseButton();
     return renderAlloc(&renderScene, width, height) && renderAlloc(&renderScreen, width, height);
 }
 
@@ -102,6 +131,7 @@ bool renderInit(uint width, uint height)
 void renderRelease()
 {
     deleteCursor();
+    deleteCloseButton();
 }
 
 // Alpha blending of a cursor pixel (0xAARRGGBB, straight alpha) over a screen pixel.
@@ -120,6 +150,41 @@ private uint blendCursorPixel(uint src, uint dst) @nogc nothrow
     uint g = div255(((src >> 8) & 0xFF) * a + ((dst >> 8) & 0xFF) * ia);
     uint b = div255((src & 0xFF) * a + (dst & 0xFF) * ia);
     return (r << 16) | (g << 8) | b;
+}
+
+// Blends an image (0xAARRGGBB, straight alpha) onto `c` with its top left corner at x, y. Only the
+// part inside the rectangle clipX, clipY, clipW, clipH (and inside `c`) is drawn.
+private void renderBlendImage(Canvas* c, const(uint)* img, int iw, int ih, int x, int y,
+                              int clipX, int clipY, int clipW, int clipH)
+{
+    int x0 = x;
+    int y0 = y;
+    int x1 = x + iw;
+    int y1 = y + ih;
+    if (x0 < clipX) x0 = clipX;
+    if (y0 < clipY) y0 = clipY;
+    if (x1 > clipX + clipW) x1 = clipX + clipW;
+    if (y1 > clipY + clipH) y1 = clipY + clipH;
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > c.width) x1 = c.width;
+    if (y1 > c.height) y1 = c.height;
+    if (x0 >= x1 || y0 >= y1)
+        return;
+
+    for (int yy = y0; yy < y1; yy++)
+    {
+        const(uint)* src = img + cast(size_t)(yy - y) * cast(size_t)iw - x;
+        uint* dst = c.pixels + cast(size_t)yy * cast(size_t)c.stride;
+        for (int xx = x0; xx < x1; xx++)
+        {
+            uint pix = src[xx];
+            uint a = pix >> 24;
+            if (a == 0)
+                continue;
+            dst[xx] = (a == 255) ? (pix & 0x00FFFFFF) : blendCursorPixel(pix, dst[xx]);
+        }
+    }
 }
 
 // Draws the cursor into renderScreen: clip once, then walk rows (no per-pixel checks).
@@ -165,7 +230,8 @@ private void renderPresentRect(int x, int y, int w, int h)
     ugfxServerPresent(renderScreen.pixels, &r, 0);
 }
 
-// The frame of a window: border and title bar in one colour, a close button on the title bar.
+// The frame of a window: border and title bar in one colour, a close button on the title bar
+// (a picture from /etc/gfxd/win-close.tga if there is one, otherwise a red square with a cross).
 // `c` is a view of the scene that starts at rx, ry: coordinates are shifted by that.
 // A title (text) would go here, as soon as there is a font.
 private void renderDecoration(Canvas* c, const(WmWindow)* w, bool focused, int rx, int ry)
@@ -173,11 +239,24 @@ private void renderDecoration(Canvas* c, const(WmWindow)* w, bool focused, int r
     c.fillRect(wmFrameX(w) - rx, wmFrameY(w) - ry, wmFrameW(w), wmFrameH(w),
                focused ? COLOR_FRAME_FOCUS : COLOR_FRAME);
 
+    // The button is the WM_CLOSE_SIZE square that wmHitPart() reacts to
     int bx = wmCloseX(w) - rx;
-    int by = w.y - WM_TITLE_H - ry;
-    c.fillRect(bx + 2, by + 2, WM_TITLE_H - 4, WM_TITLE_H - 4, COLOR_CLOSE);
-    c.line(bx + 6, by + 6, bx + WM_TITLE_H - 7, by + WM_TITLE_H - 7, COLOR_CLOSE_X);
-    c.line(bx + WM_TITLE_H - 7, by + 6, bx + 6, by + WM_TITLE_H - 7, COLOR_CLOSE_X);
+    int by = wmCloseY(w) - ry;
+    if (haveCloseButton)
+    {
+        // The picture is centered in the square (and cut off by it if it is bigger)
+        int iw = cast(int)closeButton.width;
+        int ih = cast(int)closeButton.height;
+        renderBlendImage(c, cast(const(uint)*)closeButton.data.ptr, iw, ih,
+                         bx + (WM_CLOSE_SIZE - iw) / 2, by + (WM_CLOSE_SIZE - ih) / 2,
+                         bx, by, WM_CLOSE_SIZE, WM_CLOSE_SIZE);
+    }
+    else
+    {
+        c.fillRect(bx + 2, by + 2, WM_CLOSE_SIZE - 4, WM_CLOSE_SIZE - 4, COLOR_CLOSE);
+        c.line(bx + 6, by + 6, bx + WM_CLOSE_SIZE - 7, by + WM_CLOSE_SIZE - 7, COLOR_CLOSE_X);
+        c.line(bx + WM_CLOSE_SIZE - 7, by + 6, bx + 6, by + WM_CLOSE_SIZE - 7, COLOR_CLOSE_X);
+    }
 }
 
 // Recomposes the part rx, ry, rw, rh (inside the screen) of the scene: desktop first, then the

@@ -35,7 +35,7 @@ module wm;
  * the top left of the drawable area, so clients never see the decoration.
  *
  *        +---------------------------+   <- frame (WM_BORDER wide)
- *        | title bar            [ X ]|   <- WM_TITLE_H high; X = close button
+ *        | title bar            [ X ]|   <- WM_TITLE_H high; X = close button, WM_CLOSE_SIZE square
  *        +---------------------------+
  *        |                           |
  *        |   drawable area (x, y)    |
@@ -66,7 +66,8 @@ import ulib.dios;
 import ulib.gfx;
 
 enum int WM_MAX_WINDOWS = 32;
-enum int WM_TITLE_H = 20;               // title bar height; the close button is this wide, too
+enum int WM_TITLE_H = 22;               // title bar height
+enum int WM_CLOSE_SIZE = 20;            // the close button is a square this big, at the right end of the title bar
 enum int WM_BORDER = 2;
 
 // Which part of a window a point is on
@@ -149,8 +150,12 @@ int wmFrameY(const(WmWindow)* w) { return wmDecorated(w) ? w.y - WM_TITLE_H - WM
 int wmFrameW(const(WmWindow)* w) { return wmDecorated(w) ? w.canvas.width + 2 * WM_BORDER : w.canvas.width; }
 int wmFrameH(const(WmWindow)* w) { return wmDecorated(w) ? w.canvas.height + WM_TITLE_H + 2 * WM_BORDER : w.canvas.height; }
 
-/// Left edge of the close button (it sits at the right end of the title bar; top is w.y - WM_TITLE_H)
-int wmCloseX(const(WmWindow)* w) { return w.x + w.canvas.width - WM_TITLE_H; }
+/// Left edge of the close button: it ends at the right edge of the drawable area, with the border to its right
+int wmCloseX(const(WmWindow)* w) { return w.x + w.canvas.width - WM_CLOSE_SIZE; }
+
+/// Top edge of the close button. It is placed so that the frame colour above it (the border and
+/// whatever is left over in the title bar) is as thick as the one below it, between the button and the window.
+int wmCloseY(const(WmWindow)* w) { return w.y - WM_TITLE_H + (WM_TITLE_H - WM_CLOSE_SIZE - WM_BORDER) / 2; }
 
 /// The part of window `idx` at a screen position.
 int wmHitPart(int idx, int px, int py)
@@ -163,7 +168,8 @@ int wmHitPart(int idx, int px, int py)
     if (!wmDecorated(w))
         return WM_PART_NONE;                // the frame is the drawable area, which was tested above
     int cx = wmCloseX(w);
-    if (px >= cx && px < cx + WM_TITLE_H && py >= w.y - WM_TITLE_H && py < w.y)
+    int cy = wmCloseY(w);
+    if (px >= cx && px < cx + WM_CLOSE_SIZE && py >= cy && py < cy + WM_CLOSE_SIZE)
         return WM_PART_CLOSE;
     return WM_PART_TITLE;
 }
