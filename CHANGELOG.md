@@ -1,5 +1,7 @@
 DIOS 0.10.0 - TBD
 -----------------
+- **GFXD**:
+  - Window snapping
 - **Desktop**:
   - Desktop now shows a splash screen on startup.
 
@@ -14,7 +16,7 @@ DIOS 0.9.0 - 27 Nov, 2026
 - **ulib**:
   - New function `utaskfind`
   - New functions `windowSetHints`, `windowSetPosition`, `windowCreateDesktop`, `windowCreatePopup`
-- **GFXD**
+- **GFXD**:
   - Desktop and popup windows (`GFX_WIN_DESKTOP`, `GFX_WIN_POPUP`)
   - Updated window decoration, new close button
   - New anti-aliased cursor
