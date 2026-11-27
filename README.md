@@ -28,7 +28,10 @@ You can use DIOS as a basis for creating your own operating system! PRs implemen
 - I/O APIC, Local APIC
 - CMOS date-time
 - PCI enumeration
-- xHCI driver. USB keyboard and mouse; mass storage devices (FAT32, exFAT); USB hot-plug support; USB hubs support
+- Block device interface
+- FAT32 (read-write) and exFAT (read-only)
+- SATA driver
+- xHCI driver. USB keyboard and mouse; mass storage devices; USB hot-plug support; USB hubs support
 - PS/2 keyboard and mouse
 - A shell with built-in kernel commands
 - Basic multi-tasking userspace in Ring 3; system calls; a simple standard library for applications
