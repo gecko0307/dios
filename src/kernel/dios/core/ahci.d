@@ -1,0 +1,177 @@
+module dios.core.ahci;
+
+// Frame Information Structure
+
+enum ubyte SATA_FIS_TYPE_REG_H2D   = 0x27; // Register FIS - host to device
+enum ubyte SATA_FIS_TYPE_REG_D2H   = 0x34; // Register FIS - device to host
+enum ubyte SATA_FIS_TYPE_DMA_ACT   = 0x39; // DMA activate FIS - device to host
+enum ubyte SATA_FIS_TYPE_DMA_SETUP = 0x41; // DMA setup FIS - bidirectional
+enum ubyte SATA_FIS_TYPE_DATA      = 0x46; // Data FIS - bidirectional
+enum ubyte SATA_FIS_TYPE_BIST      = 0x58; // BIST activate FIS - bidirectional
+enum ubyte SATA_FIS_TYPE_PIO_SETUP = 0x5F; // PIO setup FIS - device to host
+enum ubyte SATA_FIS_TYPE_DEV_BITS  = 0xA1; // Set device bits FIS - device to host
+
+// TODO: other ATA commands + move to separate module ata.d
+enum ubyte ATA_CMD_IDENTIFY_DEVICE = 0xEC;
+
+// Host to device register FIS.
+// Used by the host to send command or control to a device.
+// It contains the IDE registers such as command, LBA, device, feature, count and control.
+// An ATA command is constructed in this structure and issued to the device.
+// All reserved fields should be cleared to zero.
+align(1) struct SATA_FIS_REG_H2D
+{
+   align(1):
+    // Word 0
+    ubyte fisType = SATA_FIS_TYPE_REG_H2D;
+    ubyte pmportc;    // Bits 0-3: port multiplier
+                      // bits 4-6: reserved
+                      // bit 7 (c): 1 = send command, 0 = update control register
+    ubyte command;    // ATA command register
+    ubyte featurel;   // Feature register low byte (bits 7:0)
+    
+    // Word 1
+    ubyte lba0;       // LBA low register (bits 7:0)
+    ubyte lba1;       // LBA mid register (bits 15:8)
+    ubyte lba2;       // LBA high register (bits 23:16)
+    ubyte device;     // Device register
+
+    // Word 2
+    ubyte lba3;       // LBA register (bits 31:24)
+    ubyte lba4;       // LBA register (bits 39:32)
+    ubyte lba5;       // LBA register (bits 47:40)
+    ubyte featureh;   // Feature register high byte (bits 15:8)
+
+    // Word 3
+    ubyte countl;     // Count register (bits 7:0)
+    ubyte counth;     // Count register (bits 15:8)
+    ubyte icc;        // Isochronous command completion (usually 0)
+    ubyte control;    // Device control register
+
+    // Word 4
+    ubyte[4] _reserved1;
+}
+
+// Device to host register FIS.
+// Used by the device to notify the host that some ATA register has changed.
+// It contains the updated task files such as status, error and other registers.
+align(1) struct SATA_FIS_REG_D2H
+{
+   align(1):
+    // Word 0
+    ubyte fisType = SATA_FIS_TYPE_REG_D2H;
+    ubyte pmporti;    // Bits 0-3: port multiplier
+                      // bits 4-5: reserved
+                      // bit 6 (i): interrupt bit
+                      // bit 7: reserved
+    ubyte status;     // Status register
+    ubyte error;      // Error register
+    
+    // Word 1
+    ubyte lba0;       // LBA low register (bits 7:0)
+    ubyte lba1;       // LBA mid register (bits 15:8)
+    ubyte lba2;       // LBA high register (bits 23:16)
+    ubyte device;     // Device register
+
+    // Word 2
+    ubyte lba3;       // LBA register (bits 31:24)
+    ubyte lba4;       // LBA register (bits 39:32)
+    ubyte lba5;       // LBA register (bits 47:40)
+    ubyte _reserved2;
+
+    // Word 3
+    ubyte countl;     // Count register (bits 7:0)
+    ubyte counth;     // Count register (bits 15:8)
+    ubyte[2] _reserved3;
+
+    // Word 4
+    ubyte[4] _reserved;
+}
+
+// Data FIS (bidirectional).
+// Used by the host or device to send data payload. The data size can be varied.
+align(1) struct SATA_FIS_DATA(alias size_t DataSize)
+{
+   align(1):
+    // Word 0
+    ubyte fisType = SATA_FIS_TYPE_DATA;
+    ubyte pmport;       // Bits 0-3: port multiplier
+                        // bits 4-7: reserved
+    ubyte[2] _reserved2;
+
+    // Words 1..N
+    ubyte[DataSize] data; // Payload
+}
+
+// PIO Setup (device to host).
+// Used by the device to tell the host that it’s about to send or ready to receive a PIO data payload.
+align(1) struct SATA_FIS_PIO_SETUP
+{
+   align(1):
+    // Word 0
+    ubyte fisType = SATA_FIS_TYPE_PIO_SETUP;
+    ubyte pmportdi;  // Bits 0-3: port multiplier
+                     // bit 4: reserved
+                     // bit 5 (d): data transfer direction, 1 = device to host
+                     // bit 6 (i): interrupt bit
+                     // bit 7: reserved
+    ubyte  status;   // Status register
+    ubyte  error;    // Error register
+
+    // Word 1
+    ubyte  lba0;     // LBA low register (bits 7:0)
+    ubyte  lba1;     // LBA mid register (bits 15:8)
+    ubyte  lba2;     // LBA high register (bits 23:16)
+    ubyte  device;   // Device register
+
+    // Word 2
+    ubyte  lba3;     // LBA register (bits 31:24)
+    ubyte  lba4;     // LBA register (bits 39:32)
+    ubyte  lba5;     // LBA register (bits 47:40)
+    ubyte  _reserved2;
+
+    // Word 3
+    ubyte  countl;   // Count register (bits 7:0)
+    ubyte  counth;   // Count register (bits 15:8)
+    ubyte  _reserved3;
+    ubyte  estatus;  // New value of status register
+
+    // Word 4
+    ushort tc;       // Transfer count
+    ubyte[2] _reserved4;
+}
+
+// DMA Setup (device to host)
+align(1) struct SATA_FIS_DMA_SETUP
+{
+   align(1):
+    // Word 0
+    ubyte fisType = SATA_FIS_TYPE_DMA_SETUP;
+    ubyte pmportdia; // Bits 0-3 - port multiplier
+                     // bit 4 - reserved
+                     // bit 5 (d) - data transfer direction, 1 = device to host
+                     // bit 6 (i) - interrupt bit
+                     // bit 7 (a) - auto-activate. Specifies if DMA Activate FIS is needed
+    ubyte[2] _reserved1;
+
+    // Words 1-2
+    ulong dmaBufferId;  // DMA Buffer Identifier. Used to Identify DMA buffer in host memory.
+                        // SATA Spec says host specific and not in Spec. Trying AHCI spec might work
+
+    // Word 3
+    uint _reserved2;
+
+    // Word 4
+    uint dmaBufOffset;  // Byte offset into buffer. First 2 bits must be 0
+
+    // Word 5
+    uint transferCount; // Number of bytes to transfer. Bit 0 must be 0
+
+    // Word 6
+    uint _reserved3;
+}
+
+static assert(SATA_FIS_REG_H2D.sizeof == 20);
+static assert(SATA_FIS_REG_D2H.sizeof == 20);
+static assert(SATA_FIS_PIO_SETUP.sizeof == 20);
+static assert(SATA_FIS_DMA_SETUP.sizeof == 28);

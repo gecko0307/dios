@@ -55,6 +55,17 @@ enum ushort PCI_CMD_IO = 0x1;
 enum ushort PCI_CMD_MEMORY = 0x2;
 enum ushort PCI_CMD_BUSMASTER = 0x4;
 
+enum ushort PCI_VENDOR_INTEL = 0x8086;
+enum ushort PCI_VENDOR_NVIDIA = 0x10DE;
+enum ushort PCI_VENDOR_AMD = 0x1022;
+enum ushort PCI_VENDOR_ATI = 0x1002;
+enum ushort PCI_VENDOR_BROADCOM = 0x14E4;
+enum ushort PCI_VENDOR_REALTEK = 0x10EC;
+enum ushort PCI_VENDOR_ASUS = 0x1043;
+enum ushort PCI_VENDOR_DELL = 0x1028;
+enum ushort PCI_VENDOR_HP = 0x103C;
+enum ushort PCI_VENDOR_VMWARE = 0x15AD;
+
 __gshared bool xhciFound = false;
 
 extern(C):
@@ -176,19 +187,8 @@ bool pciGetBar0(uint bus, uint device, uint func, ulong* outPhys, ulong* outSize
     return true;
 }
 
-void pciCheckFunction(uint bus, uint device, uint func) @nogc nothrow
+void pciInitUsb(uint bus, uint device, uint func, ushort vendorID, ushort deviceID) @nogc nothrow
 {
-    ushort vendorID = pciReadVendorID(bus, device, func);
-    if (vendorID == 0xFFFF)
-        return;
-
-    ushort deviceID = pciReadDeviceID(bus, device, func);
-    ubyte dClass = pciReadClass(bus, device, func);
-    ubyte dSubclass = pciReadSubclass(bus, device, func);
-
-    if (dClass != 0x0C || dSubclass != 0x03)
-        return;
-
     ubyte progIf = pciReadProgIF(bus, device, func);
     string progIfStr;
     if (progIf == 0x00) progIfStr = "UHCI";
@@ -228,6 +228,31 @@ void pciCheckFunction(uint bus, uint device, uint func) @nogc nothrow
         xhciFound = true;
     // The controller stays up even when it has nothing useful on it right now: devices
     // and hubs can be plugged in later (hot-plug, see xhciHotplugTick).
+}
+
+void pciInitAhci(uint bus, uint device, uint func, ushort vendorID, ushort deviceID) @nogc nothrow
+{
+    ubyte progIf = pciReadProgIF(bus, device, func);
+    kprintf("AHCI controller @ %u:%u.%u  %x:%x\n", bus, device, func,
+        cast(uint)vendorID, cast(uint)deviceID);
+    
+    // TODO
+}
+
+void pciCheckFunction(uint bus, uint device, uint func) @nogc nothrow
+{
+    ushort vendorID = pciReadVendorID(bus, device, func);
+    if (vendorID == 0xFFFF)
+        return;
+    ushort deviceID = pciReadDeviceID(bus, device, func);
+    
+    ubyte dClass = pciReadClass(bus, device, func);
+    ubyte dSubclass = pciReadSubclass(bus, device, func);
+
+    if (dClass == 0x0C && dSubclass == 0x03)
+        pciInitUsb(bus, device, func, vendorID, deviceID);
+    else if (dClass == 0x01 && dSubclass == 0x06)
+        pciInitAhci(bus, device, func, vendorID, deviceID);
 }
 
 void pciScan() @nogc nothrow
