@@ -141,6 +141,21 @@ bool windowCreateDesktop(Window* win, uint width, uint height, int x, int y) @no
     return true;
 }
 
+/**
+ * Opens a window for a popup menu or a tooltip: no frame, cannot be moved by the user, always
+ * above all other windows, at x, y on the screen. The window gets the keyboard focus when it
+ * appears, so GFX_EV_FOCUS with a == 0 is the moment to close a menu: the user clicked elsewhere.
+ *
+ * Returns false if the window could not be created, like windowCreate().
+ */
+bool windowCreatePopup(Window* win, uint width, uint height, int x, int y) @nogc nothrow
+{
+    if (!windowCreate(win, width, height))
+        return false;
+    windowSetHints(win, GFX_WIN_POPUP, x, y);
+    return true;
+}
+
 /// Tells the server that all of the window changed.
 void windowCommit(Window* win) @nogc nothrow
 {

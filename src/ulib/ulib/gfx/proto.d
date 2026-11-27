@@ -87,10 +87,14 @@ enum uint GFX_WIN_BORDERLESS = 1;       // no frame, no title bar, no close butt
 enum uint GFX_WIN_FIXED      = 2;       // the user cannot move it (it still can be given a position with GFX_WIN_POSITION)
 enum uint GFX_WIN_BOTTOM     = 4;       // always below all other windows; clicking it does not raise it above them
 enum uint GFX_WIN_POSITION   = 8;       // b, c are the screen position of the top left corner of the drawable area
-enum uint GFX_WIN_ALL        = 15;
+enum uint GFX_WIN_TOP        = 16;      // always above all other windows (popup menus, tooltips). Wins over GFX_WIN_BOTTOM
+enum uint GFX_WIN_ALL        = 31;
 
 // Desktop shell windows (a desktop background, taskbar, widgets) are BORDERLESS | FIXED | BOTTOM | POSITION.
 enum uint GFX_WIN_DESKTOP    = GFX_WIN_BORDERLESS | GFX_WIN_FIXED | GFX_WIN_BOTTOM | GFX_WIN_POSITION;
+
+// A popup menu or a tooltip is BORDERLESS | FIXED | TOP | POSITION.
+enum uint GFX_WIN_POPUP      = GFX_WIN_BORDERLESS | GFX_WIN_FIXED | GFX_WIN_TOP | GFX_WIN_POSITION;
 
 // GfxEvent.c of GFX_EV_KEY
 enum uint GFX_MOD_SHIFT = 1;

@@ -47,6 +47,7 @@ module wm;
  *   BOTTOM      the window stays below all windows that do not have the flag (it is its own layer:
  *               raising it only brings it to the front of the BOTTOM windows; it does not
  *               grab the keyboard when it appears)
+ *   TOP         the mirror image: always above everything else (popup menus, tooltips). Wins over BOTTOM
  *   POSITION    place the window at a given screen position
  * Together (GFX_WIN_DESKTOP) that is what a desktop background, a taskbar or a widget needs.
  *
@@ -57,7 +58,7 @@ module wm;
  * This module only decides; drawing is render.d. Changes to what is on screen are reported as
  * damage rectangles (wmTakeDamage), so that render.d redraws just those.
  *
- * Ideas to continue: an "always on top" layer (the mirror image of BOTTOM), resizing (a new surface + an event to the client), minimize, a taskbar,
+ * Ideas to continue: resizing (a new surface + an event to the client), minimize, a taskbar,
  * keyboard shortcuts (Alt+Tab needs a modifier the kernel does not report yet), snapping.
  */
 
@@ -80,7 +81,7 @@ struct WmWindow
     uint surface;       // kernel surface id
     uint owner;         // task id of the program that owns it (see `ps` in the shell)
     int x, y;           // screen position of the top left corner of the drawable area
-    uint flags;         // GFX_WIN_* (BORDERLESS, FIXED, BOTTOM), set by the client with GFX_EV_WM_HINTS
+    uint flags;         // GFX_WIN_* (BORDERLESS, FIXED, BOTTOM, TOP), set by the client with GFX_EV_WM_HINTS
     Canvas canvas;      // the client's pixels, mapped into this program. Read only for us, by convention
 }
 
@@ -129,6 +130,17 @@ void wmInit(int screenW, int screenH)
 /// Does the window have a frame (border, title bar, close button)? Borderless ones do not.
 bool wmDecorated(const(WmWindow)* w) { return (w.flags & GFX_WIN_BORDERLESS) == 0; }
 bool wmIsBottom(const(WmWindow)* w) { return (w.flags & GFX_WIN_BOTTOM) != 0; }
+
+/// The stacking layer of a set of flags: 0 = BOTTOM, 1 = ordinary, 2 = TOP. wmOrder is sorted by layer.
+int wmLayerOfFlags(uint flags)
+{
+    if ((flags & GFX_WIN_TOP) != 0)
+        return 2;
+    if ((flags & GFX_WIN_BOTTOM) != 0)
+        return 0;
+    return 1;
+}
+int wmLayer(const(WmWindow)* w) { return wmLayerOfFlags(w.flags); }
 bool wmIsFixed(const(WmWindow)* w) { return (w.flags & GFX_WIN_FIXED) != 0; }
 
 // The frame: the area including decoration. Without decoration it is the drawable area.
@@ -254,8 +266,8 @@ void wmSetFocus(int idx)
     }
 }
 
-/// Puts window `idx` at the front of its layer: BOTTOM windows are all behind the others, so a
-/// BOTTOM window goes behind the first ordinary one, an ordinary window in front of everything.
+/// Puts window `idx` at the front of its layer: wmOrder is sorted by layer (BOTTOM, ordinary, TOP),
+/// so it goes in front of every window of its own layer and of the ones below, but not of a higher one.
 /// `idx` may or may not be in wmOrder already. Does not report damage.
 private void wmRestack(int idx)
 {
@@ -265,13 +277,10 @@ private void wmRestack(int idx)
             wmOrder[j++] = wmOrder[i];
     wmCount = j;
 
-    int pos = wmCount;                      // ordinary: after everything
-    if (wmIsBottom(&wmWindows[idx]))
-    {
-        pos = 0;                            // the BOTTOM windows are a prefix of wmOrder
-        while (pos < wmCount && wmIsBottom(&wmWindows[wmOrder[pos]]))
-            pos++;
-    }
+    int layer = wmLayer(&wmWindows[idx]);
+    int pos = 0;
+    while (pos < wmCount && wmLayer(&wmWindows[wmOrder[pos]]) <= layer)
+        pos++;
     for (int i = wmCount; i > pos; i--)
         wmOrder[i] = wmOrder[i - 1];
     wmOrder[pos] = idx;
@@ -281,14 +290,11 @@ private void wmRestack(int idx)
 /// Moves window `idx` in front of all others of its layer (see wmRestack).
 void wmRaise(int idx)
 {
-    // Already in front? The last window of the layer is the last one overall, or the last BOTTOM one.
-    int last = wmCount - 1;
-    if (wmIsBottom(&wmWindows[idx]))
-    {
-        last = -1;
-        for (int i = 0; i < wmCount && wmIsBottom(&wmWindows[wmOrder[i]]); i++)
-            last = i;
-    }
+    // Already in front? Then it is the last window that is not in a higher layer.
+    int layer = wmLayer(&wmWindows[idx]);
+    int last = -1;
+    for (int i = 0; i < wmCount && wmLayer(&wmWindows[wmOrder[i]]) <= layer; i++)
+        last = i;
     if (last >= 0 && wmOrder[last] == idx)
         return;
     wmRestack(idx);
@@ -372,9 +378,11 @@ void wmSetHints(int idx, uint flags, int x, int y)
 {
     WmWindow* w = &wmWindows[idx];
     flags &= GFX_WIN_ALL;
+    if ((flags & GFX_WIN_TOP) != 0)
+        flags &= ~GFX_WIN_BOTTOM;           // both do not make sense: TOP wins
 
     wmDamageFrame(idx);                     // the frame as it was
-    bool layerChanged = wmIsBottom(w) != ((flags & GFX_WIN_BOTTOM) != 0);
+    bool layerChanged = wmLayer(w) != wmLayerOfFlags(flags);
     w.flags = flags;
 
     if ((flags & GFX_WIN_POSITION) != 0)

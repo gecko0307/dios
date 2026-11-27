@@ -76,6 +76,10 @@ Moves a window that has the `GFX_WIN_POSITION` hint (or gives it one) to x, y on
 
 Opens a window for a desktop shell (a background, a taskbar, a widget): no frame, cannot be moved by the user, always below all other windows, at x, y on the screen. The size of the screen is in `ugfxInfo`.
 
+`bool windowCreatePopup(Window* win, uint width, uint height, int x, int y)`
+
+Opens a window for a popup menu or a tooltip: no frame, cannot be moved by the user, always above all other windows, at x, y on the screen. The window gets the keyboard focus when it appears, so `GFX_EV_FOCUS` with a == 0 is the moment to close a menu: the user clicked elsewhere. Returns false if the window could not be created, like `windowCreate`.
+
 `void windowCommit(Window* win)`
 
 Tells the server that all of the window changed.
