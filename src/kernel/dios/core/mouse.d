@@ -52,6 +52,18 @@ void mouseInit(uint xBound, uint yBound) @nogc nothrow
     mouse.buttons = 0;
 }
 
+/// An absolute pointing device (tablet): the cursor is at x, y (screen pixels; limited to the screen).
+void mouseMoveTo(int x, int y, ubyte buttons) @nogc nothrow
+{
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+    if (x > cast(int)mouse.xBound) x = cast(int)mouse.xBound;
+    if (y > cast(int)mouse.yBound) y = cast(int)mouse.yBound;
+    mouse.x = x;
+    mouse.y = y;
+    mouse.buttons = buttons;
+}
+
 void mouseMove(int dx, int dy, ubyte buttons) @nogc nothrow
 {
     long nx = cast(long)mouse.x + dx;

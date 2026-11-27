@@ -4,6 +4,7 @@ DIOS 0.9.0 - TBD
   - Two different boot options: graphics mode and kernel shell
   - Add a bootloader wallpaper
 - **Kernel**:
+  - Non-boot HID support
   - New syscall `SYS_TASK_FIND`
 - **ulib**:
   - New function `utaskfind`

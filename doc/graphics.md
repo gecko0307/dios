@@ -64,6 +64,18 @@ TODO
 
 Opens a window of `width` x `height` pixels. Returns `false` if it could not be created (too big, too many windows, out of memory).
 
+`void windowSetHints(Window* win, uint flags, int x, int y)`
+
+Asks the window manager to treat the window in a special way: `flags` is a combination of `GFX_WIN_*` (0 = an ordinary window again). With `GFX_WIN_POSITION` the window is put at x, y on the screen (its top left drawable pixel); without it x and y are ignored and the window stays where it is.
+
+`void windowSetPosition(Window* win, int x, int y)`
+
+Moves a window that has the `GFX_WIN_POSITION` hint (or gives it one) to x, y on the screen.
+
+`bool windowCreateDesktop(Window* win, uint width, uint height, int x, int y)`
+
+Opens a window for a desktop shell (a background, a taskbar, a widget): no frame, cannot be moved by the user, always below all other windows, at x, y on the screen. The size of the screen is in `ugfxInfo`.
+
 `void windowCommit(Window* win)`
 
 Tells the server that all of the window changed.

@@ -145,11 +145,15 @@ struct HidField
     uint off;           // bit offset inside the report (after the report id byte, if any)
     uint size;          // size in bits
     bool isSigned;
+    bool absolute;      // a position (tablet) rather than a movement (mouse)
+    int logMin;         // range of the values (what an absolute field is scaled from)
+    int logMax;
 }
 
 struct HidMouseLayout
 {
     bool valid;         // X and Y were found
+    bool isPointerApp;  // the top level collection is a Mouse or a Pointer (and not, say, a gamepad)
     bool hasId;         // reports start with a report-id byte
     ubyte reportId;
     HidField x, y, wheel;
@@ -246,6 +250,7 @@ struct XhciUsbDevice
     uint  intMps;
     ubyte intInterval;
     bool  hasMouse;
+    bool  mouseNeedsDesc;       // the pointer is not a boot protocol mouse: only usable if its report descriptor says so
 
     // running mouse
     bool mouseActive;
@@ -425,6 +430,10 @@ void hidParseReportDescriptor(HidMouseLayout* L, ubyte* buf, uint len) @nogc not
 
     uint usagePage = 0;
     int logMin = 0;
+    int logMax = 0;
+    uint logMaxRaw = 0;                     // same, unsigned (when the range does not start below 0)
+    bool haveTop = false;                   // the first top level collection: what is this device?
+    uint topPage = 0, topUsage = 0;
     uint repSize = 0, repCount = 0, repId = 0;
     bool anyId = false;
     uint[16] usages;
@@ -465,6 +474,7 @@ void hidParseReportDescriptor(HidMouseLayout* L, ubyte* buf, uint len) @nogc not
         {
             if (tag == 0) usagePage = val;
             else if (tag == 1) logMin = sval;
+            else if (tag == 2) { logMax = sval; logMaxRaw = val; }
             else if (tag == 7) repSize = val;
             else if (tag == 8) { repId = val; anyId = true; offBits = 0; }
             else if (tag == 9) repCount = val;
@@ -515,6 +525,9 @@ void hidParseReportDescriptor(HidMouseLayout* L, ubyte* buf, uint len) @nogc not
                         f.off = offBits + n * repSize;
                         f.size = repSize;
                         f.isSigned = logMin < 0;
+                        f.absolute = (val & 4) == 0;        // Input item bit 2: 1 = relative, 0 = absolute
+                        f.logMin = logMin;
+                        f.logMax = (logMin >= 0) ? cast(int)logMaxRaw : logMax;
 
                         if (usage == 0x30 && !ridChosen)
                         {
@@ -531,6 +544,12 @@ void hidParseReportDescriptor(HidMouseLayout* L, ubyte* buf, uint len) @nogc not
                 }
                 offBits += repSize * repCount;
             }
+            else if (tag == 10 && val == 1 && !haveTop)     // Collection (Application)
+            {
+                haveTop = true;
+                topPage = usagePage;
+                topUsage = (nUsages > 0) ? usages[0] : 0;
+            }
             // every main item clears the local state
             nUsages = 0;
             usMin = 0;
@@ -542,6 +561,7 @@ void hidParseReportDescriptor(HidMouseLayout* L, ubyte* buf, uint len) @nogc not
     if (L.x.valid && L.y.valid)
     {
         L.valid = true;
+        L.isPointerApp = haveTop && topPage == 1 && (topUsage == 1 || topUsage == 2);   // Generic Desktop: Pointer, Mouse
         L.hasId = anyId;
         L.reportId = cast(ubyte)chosenRid;
         if (btnSeen && btnRid == chosenRid)
@@ -602,7 +622,21 @@ void xhciProcessReport(XhciUsbDevice* d, ubyte* rpt, uint got) @nogc nothrow
             if (bit < got * 8 && ((volatileLoad(rpt + (bit >> 3)) >> (bit & 7)) & 1))
                 btn |= cast(ubyte)(1 << i);
         }
-        mouseMove(dx, dy, btn & 0x07);
+        if (d.layout.x.absolute && d.layout.y.absolute)
+        {
+            // A tablet (VirtualBox, QEMU "usb-tablet"): the values are a position within a range,
+            // scaled to the screen. The host and the guest cursors are then always in the same place.
+            long rx = cast(long)d.layout.x.logMax - d.layout.x.logMin;
+            long ry = cast(long)d.layout.y.logMax - d.layout.y.logMin;
+            if (rx > 0 && ry > 0)
+            {
+                long px = (cast(long)dx - d.layout.x.logMin) * mouse.xBound / rx;
+                long py = (cast(long)dy - d.layout.y.logMin) * mouse.yBound / ry;
+                mouseMoveTo(cast(int)px, cast(int)py, btn & 0x07);
+            }
+        }
+        else
+            mouseMove(dx, dy, btn & 0x07);
         mouse.wheel += wh;
     }
     else if (got >= 3)
@@ -934,7 +968,25 @@ void xhciParseConfig(XhciUsbDevice* d, ubyte* buf, uint len) @nogc nothrow
             kprintf("  iface %u alt %u: class %u sub %u proto %u\n",
                     cast(uint)volatileLoad(buf + i + 2), cast(uint)alt,
                     cast(uint)cls, cast(uint)sub, cast(uint)prot);
-            inMouse = (alt == 0 && cls == 3 && sub == 1 && prot == 2 && !d.hasMouse);
+            // A boot protocol mouse is preferred. Any other HID interface (a tablet reports
+            // as sub 0, proto 0) is only a candidate: xhciSetupMouse() reads its report descriptor
+            // and gives up on it if it is not a pointer.
+            bool bootMouse = (alt == 0 && cls == 3 && sub == 1 && prot == 2);
+            bool otherHid = (alt == 0 && cls == 3 && sub == 0 && prot == 0);
+            inMouse = false;
+            if (bootMouse && (!d.hasMouse || d.mouseNeedsDesc))
+            {
+                inMouse = true;
+                d.mouseNeedsDesc = false;
+                d.hasMouse = false;         // replaces a candidate found earlier
+                d.hidReportLen = 0;
+            }
+            else if (otherHid && !d.hasMouse)
+            {
+                inMouse = true;
+                d.mouseNeedsDesc = true;
+                d.hidReportLen = 0;
+            }
             if (inMouse)
                 d.ifaceNum = volatileLoad(buf + i + 2);
             inKbd = (alt == 0 && cls == 3 && sub == 1 && prot == 1 && !d.kbd.found);
@@ -1060,12 +1112,23 @@ bool xhciSetupMouse(XhciUsbDevice* d) @nogc nothrow
             parsed = d.layout.valid;
         }
     }
+    if (d.mouseNeedsDesc && !(parsed && d.layout.isPointerApp))
+    {
+        // Some other kind of HID interface (media keys, a gamepad...): not ours
+        kprintf("  HID interface %u is not a mouse or tablet, ignoring\n", cast(uint)d.ifaceNum);
+        d.hasMouse = false;
+        return true;
+    }
     if (parsed)
     {
         kprintf("  HID layout: id %u%s, X %u@%u Y %u@%u wheel %u, %u buttons\n",
                 cast(uint)d.layout.reportId, d.layout.hasId ? "".ptr : " (none)".ptr,
                 d.layout.x.size, d.layout.x.off, d.layout.y.size, d.layout.y.off,
                 d.layout.wheel.valid ? d.layout.wheel.size : 0u, d.layout.btnCount);
+        if (d.layout.x.absolute && d.layout.y.absolute)
+            kprintf("  absolute pointer (tablet): X %u..%u, Y %u..%u\n",
+                    cast(uint)d.layout.x.logMin, cast(uint)d.layout.x.logMax,
+                    cast(uint)d.layout.y.logMin, cast(uint)d.layout.y.logMax);
     }
     else
     {
@@ -1680,10 +1743,14 @@ bool xhciInitDevice(XhciUsbDevice* d) @nogc nothrow
     bool ok = true;
     if (d.hasMouse)
     {
-        kprintf("  HID boot mouse: iface %u, ep %x, mps %u, interval %u\n",
+        kprintf(d.mouseNeedsDesc ? "  HID pointer candidate: iface %u, ep %x, mps %u, interval %u\n"
+                                 : "  HID boot mouse: iface %u, ep %x, mps %u, interval %u\n",
                 cast(uint)d.ifaceNum, cast(uint)d.intEpAddr, d.intMps, cast(uint)d.intInterval);
         if (xhciSetupMouse(d))
-            kprintf("  mouse running\n");
+        {
+            if (d.mouseActive)
+                kprintf("  mouse running\n");
+        }
         else
         {
             kprintf("  mouse setup failed\n");
