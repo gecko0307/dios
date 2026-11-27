@@ -11,6 +11,7 @@ DIOS 0.9.0 - 27 Nov, 2026
   - New functions `windowSetHints`, `windowSetPosition`, `windowCreateDesktop`, `windowCreatePopup`
 - **GFXD**
   - Desktop and popup windows (`GFX_WIN_DESKTOP`, `GFX_WIN_POPUP`)
+  - New anti-aliased cursor
 - **Desktop**:
   - New built-in program `desktop.elf` - a basic desktop manager. It is automatically started by the graphics server.
 - **Blackboard**:
