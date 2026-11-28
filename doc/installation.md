@@ -49,9 +49,17 @@ sudo mkdir /media/tim/DIOS
 sudo mount -o rw,uid=$(id -u),gid=$(id -g),umask=0022 /dev/sdb1 /media/tim/DIOS
 ```
 
-Now copy DIOS files to the partition.
-
 ## Part 2. Preparing the OS
+
+Copy DIOS files - contents of both `cdroot` and `rootfs` folders - to the primary partition.
+
+Make sure that the following files exist:
+
+- `/boot/kernel64.bin` - the DIOS kernel
+- `/boot/rootfs.tar` - RAM filesystem image
+- `/boot/limine.conf` - bootloader config
+- `/boot/limine-bios.sys` - bootloader binary for BIOS
+- `/EFI/BOOT/BOOTX64.EFI` - bootloader binary for UEFI.
 
 At startup, DIOS kernel mounts a bootloader-provided RAM FS image to the filesystem root. To use the system installed on disk, it must mount a volume to the root, for example:
 
@@ -59,4 +67,4 @@ At startup, DIOS kernel mounts a bootloader-provided RAM FS image to the filesys
 rmount /mnt/sata0p1 rw
 ```
 
-Doing this manually each time is not very convenient, so the kernel allows to automate this process. Add this command to `rootfs/kernel/init.ss` - it is a kernel shell script that is executed after successfull initializatoin. Then rebuild `rootfs.tar` by running `python build.py rootfs`. Put it on the primary partition as `/boot/rootfs.tar`.
+Doing this manually each time is not very convenient, so the kernel allows to automate this process. Add this command to `rootfs/kernel/init.ss`, a kernel shell script that is executed after successfull initializatoin. Then rebuild `rootfs.tar` by running `python build.py rootfs` and put it on the primary partition as `/boot/rootfs.tar`.
