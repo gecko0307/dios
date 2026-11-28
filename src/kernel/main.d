@@ -302,7 +302,8 @@ void run() @nogc nothrow
     procInit();
     gfxsrvInit(); // graphics server support: system calls 16..26, Ctrl+F1/F2/F3
     shellInit();
-    shellRunScript("/kernel/init.ss");
+    if (!shellRunScript("/kernel/init.ss"))
+        kprintf("No such script: %s\n", "/kernel/init.ss".ptr);
 
     // Kernel argument "gfx": come up with the graphics server and a terminal window
     if (bootArgHas(bootInfo.arguments, "gfx".ptr))

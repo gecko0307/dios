@@ -53,10 +53,10 @@ import dios.core.xhci;
 enum size_t SHELL_LINE_CAPACITY = 128;
 enum size_t SHELL_HISTORY_CAPACITY = 16;
 
-immutable string[39] SHELL_COMMANDS = [
+immutable string[40] SHELL_COMMANDS = [
     "help", "mem", "clock", "irq", "pci", "history", "poweroff", "shutdown",
     "reboot", "clear", "cpuinfo", "acpi", "irqstat",
-    "sleep", "hexdump", "crash", "run", "memmap",
+    "sleep", "hexdump", "crash", "run", "exec", "memmap",
     "programs", "disk", "mount", "cd", "cat", "dmesg", "usb",
     "ps", "kill", "fg", "gfx", "umount",
     "sync", "remount", "rmount",
@@ -669,13 +669,15 @@ void shellUmount(const(char)* args) @nogc nothrow
     int slot = (*args == 0) ? -1 : fsFindMount(args);
     if (slot < 0)
     {
-        cprintf("Usage: umount NAME   (mounted now:");
+        // Unmount everything
         for (uint i = 0; i < FS_MAX_MOUNTS; i++)
+        {
             if (mounts[i].mounted)
-                cprintf(" %s", mounts[i].name.ptr);
-        if (fsMountCount() == 0)
-            cprintf(" none");
-        cprintf(")\n");
+            {
+                cprintf("Umounted /mnt/%s\n", mounts[i].name.ptr);
+                fsUnmount(i);
+            }
+        }
         return;
     }
     if (slot == fsRootSlot)
@@ -834,15 +836,15 @@ void shellRmount(const(char)* args) @nogc nothrow
 }
 
 // Run a shell script from a file, if it exists.
-void shellRunScript(const(char)* path) @nogc nothrow
+bool shellRunScript(const(char)* path) @nogc nothrow
 {
     ExfatEntry e;
     int slot;
     bool found = fsStat(path, &e, &slot) && !e.isDir;
     if (!found)
     {
-        cprintf("No such script: %s.\n", path);
-        return;
+        //cprintf("No such script: %s.\n", path);
+        return false;
     }
     
     // Allocate a buffer
@@ -852,7 +854,7 @@ void shellRunScript(const(char)* path) @nogc nothrow
     if (phys == 0)
     {
         cprintf("Out of memory.\n");
-        return;
+        return false;
     }
     scope(exit) pmmFreePages(phys, pages);
     char* buf = cast(char*)pmmPhysToVirt(phys);
@@ -894,16 +896,17 @@ void shellRunScript(const(char)* path) @nogc nothrow
             {
                 char savedChar = buf[lineEnd];
                 buf[lineEnd] = '\0';
-
                 char[] lineSlice = buf[lineStart .. lineEnd];
+                //cprintf("%s\n", lineSlice.ptr);
                 shellExecuteStr(lineSlice, len);
-
                 buf[lineEnd] = savedChar;
             }
 
             lineStart = i + 1;
         }
     }
+    
+    return true;
 }
 
 // Run an ELF file from the mounted volume. Tries `path`, then `path.elf`.
@@ -1100,6 +1103,7 @@ void shellExecuteStr(char[] shellLine, size_t shellLineLength) @nogc nothrow
         cprintf("  cd [DIR]            Change the current directory\n");
         cprintf("  cat PATH            Print a text file\n");
         cprintf("  run NAME [ARGS] [&] Run a program (& = run in background); plain NAME works too\n");
+        cprintf("  exec NAME           Execute a script\n");
         cprintf("  ps                  List running programs\n");
         cprintf("  kill ID             Kill a program\n");
         cprintf("  fg [ID]             Bring a background program to the foreground\n");
@@ -1319,11 +1323,24 @@ void shellExecuteStr(char[] shellLine, size_t shellLineLength) @nogc nothrow
             {
                 char[FS_PATH_MAX] file;
                 if (shellResolveProgram(name.ptr, file.ptr))
-                    shellRunFile(file.ptr, p, bg);      // /bin/NAME, or a path on any mounted volume
+                    shellRunFile(file.ptr, p, bg); // /bin/NAME, or a path on any mounted volume
                 else
                     cprintf("No such program: %s\n", name.ptr);
             }
         }
+    }
+    else if (shellEquals(shellLine.ptr, "exec"))
+    {
+        // First word of the arguments is the program name, the rest is passed on.
+        char[FS_PATH_MAX] name;
+        uint n = 0;
+        const(char)* p = args;
+        while (*p != 0 && *p != ' ' && *p != '\t' && n + 1 < FS_PATH_MAX)
+            name[n++] = *p++;
+        name[n] = 0;
+        
+        if (!shellRunScript(name.ptr))
+            cprintf("No such script: %s\n", name.ptr);
     }
     else if (shellEquals(shellLine.ptr, "poweroff") || shellEquals(shellLine.ptr, "shutdown"))
     {
