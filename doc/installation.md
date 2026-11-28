@@ -1,6 +1,6 @@
 # DIOS Installation
 
-DIOS can be installed on a SATA disk. The disk should have a primary partition formatted to FAT32, and a BIOS boot partition for the bootloader. The following step-by-step guide describes the process under Linux, assuming the disk is `/dev/sdb`.
+DIOS can be installed on a SATA disk. The disk should have a primary system partition formatted to FAT32, and a BIOS boot partition for the second stage of the bootloader. The following step-by-step guide describes the process under Linux, assuming the disk is `/dev/sdb`.
 
 **Warning! Install DIOS at your own risk! The system is experimental and unstable.**
 
@@ -36,7 +36,7 @@ Format the first partition to FAT32:
 sudo mkfs.fat -F 32 -n "DIOS" /dev/sdb1
 ```
 
-Install the Limine MBR/Stage1.5 bootloader:
+Write the Master Boot Record (source for the `limine` utility is provided):
 
 ```
 sudo ./limine bios-install /dev/sdb
