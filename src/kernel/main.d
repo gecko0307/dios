@@ -279,11 +279,12 @@ void run() @nogc nothrow
     
     pciScan(); // this also brings up the xHCI controller(s)
     usbStorageProbe();
-    fsInit();           // root file system (rootfs.tar), then the disks below /mnt
+    fsInit(); // root file system (rootfs.tar), then the disks below /mnt
     fsAutoMount();
     procInit();
     gfxsrvInit(); // graphics server support: system calls 16..26, Ctrl+F1/F2/F3
     shellInit();
+    shellRunScript("/kernel/init.ss");
 
     // Kernel argument "gfx": come up with the graphics server and a terminal window
     if (bootArgHas(bootInfo.arguments, "gfx".ptr))

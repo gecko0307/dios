@@ -656,7 +656,7 @@ void shellRemount(const(char)* args) @nogc nothrow
 void shellUmount(const(char)* args) @nogc nothrow
 {
     if (args[0] == '/' && args[1] == 'm' && args[2] == 'n' && args[3] == 't' && args[4] == '/')
-        args += 5;                  // "umount /mnt/usb0p1" is fine too
+        args += 5; // "umount /mnt/usb0p1" is fine too
     int slot = (*args == 0) ? -1 : fsFindMount(args);
     if (slot < 0)
     {
@@ -678,10 +678,12 @@ void shellUmount(const(char)* args) @nogc nothrow
     fsUnmount(slot);
 }
 
-// rmount                  show the root
-// rmount ramfs            the initial RAM file system is the root again
-// rmount N|NAME [rw|ro]   N: partition number from 'disk' (mounted first if it is not yet);
-//                         NAME: a volume that is already mounted as /mnt/NAME
+/*
+ * rmount                  show the root
+ * rmount ramfs            the initial RAM file system is the root again
+ * rmount N|NAME [rw|ro]   N: partition number from 'disk' (mounted first if it is not yet);
+ *                         NAME: a volume that is already mounted as /mnt/NAME
+ */
 void shellRmount(const(char)* args) @nogc nothrow
 {
     char* rest = cast(char*)args;
@@ -791,206 +793,20 @@ void shellRmount(const(char)* args) @nogc nothrow
         cprintf("Note: there is no /bin here, so programs cannot be started by name.\n");
 }
 
-/*
-void shellFsError(const(char)* what, const(char)* path, int err) @nogc nothrow
+// Run a shell script from a file, if it exists.
+void shellRunScript(const(char)* path) @nogc nothrow
 {
-    cprintf("%s: %s: %s\n", what, path, fsErrorText(err));
-}
-
-// If `dst` is an existing directory, make it "dst/name-of-src" in `out_`; otherwise copy dst.
-void shellTargetPath(const(char)* src, const(char)* dst, char* out_) @nogc nothrow
-{
-    uint n = 0;
-    while (dst[n] != 0 && n + 1 < FS_PATH_MAX)
-    {
-        out_[n] = dst[n];
-        n++;
-    }
-    out_[n] = 0;
-
     ExfatEntry e;
-    if (!fsStat(dst, &e) || !e.isDir)
-        return;
-    uint s = 0;
-    uint base = 0;
-    while (src[s] != 0)
-    {
-        if (src[s] == '/' && src[s + 1] != 0)
-            base = s + 1;
-        s++;
-    }
-    if (n > 0 && out_[n - 1] != '/' && n + 1 < FS_PATH_MAX)
-        out_[n++] = '/';
-    while (src[base] != 0 && src[base] != '/' && n + 1 < FS_PATH_MAX)
-        out_[n++] = src[base++];
-    out_[n] = 0;
-}
-
-void shellTouch(const(char)* path) @nogc nothrow
-{
-    if (path[0] == 0)
-    {
-        cprintf("Usage: touch FILE\n");
-        return;
-    }
-    ExfatEntry e;
-    if (fsStat(path, &e))
-        return; // exists (changing the time is not supported)
-    int r = fsCreate(path, false);
-    if (r != FW_OK)
-        shellFsError("touch", path, r);
-}
-
-void shellMkdir(const(char)* path) @nogc nothrow
-{
-    if (path[0] == 0)
-    {
-        cprintf("Usage: mkdir DIR\n");
-        return;
-    }
-    int r = fsCreate(path, true);
-    if (r != FW_OK)
-        shellFsError("mkdir", path, r);
-}
-
-void shellRmdir(const(char)* path) @nogc nothrow
-{
-    if (path[0] == 0)
-    {
-        cprintf("Usage: rmdir DIR\n");
-        return;
-    }
-    int r = fsRmdir(path);
-    if (r != FW_OK)
-        shellFsError("rmdir", path, r);
-}
-
-void shellRm(const(char)* path) @nogc nothrow
-{
-    if (path[0] == 0)
-    {
-        cprintf("Usage: rm FILE\n");
-        return;
-    }
-    int r = fsUnlink(path);
-    if (r != FW_OK)
-        shellFsError("rm", path, r);
-}
-
-void shellMv(const(char)* args) @nogc nothrow
-{
-    char* rest = cast(char*)args;
-    char* src = shellNextWord(&rest);
-    char* dst = shellNextWord(&rest);
-    if (src is null || dst is null)
-    {
-        cprintf("Usage: mv SOURCE DEST   (DEST may be a directory)\n");
-        return;
-    }
-    char[FS_PATH_MAX] target;
-    shellTargetPath(src, dst, target.ptr);
-    int r = fsRename(src, target.ptr);
-    if (r != FW_OK)
-        shellFsError("mv", dst, r);
-}
-
-// write FILE TEXT: replace the file's content by TEXT and a newline; append: add to the end.
-void shellWriteText(const(char)* args, bool append) @nogc nothrow
-{
-    char* rest = cast(char*)args;
-    char* file = shellNextWord(&rest);
-    if (file is null)
-    {
-        cprintf(append ? "Usage: append FILE TEXT\n" : "Usage: write FILE TEXT\n");
-        return;
-    }
-    while (*rest == ' ' || *rest == '\t')
-        rest++;
-
-    ulong len = 0;
-    while (rest[len] != 0 && len + 2 < shellIo.length)
-    {
-        shellIo[len] = cast(ubyte)rest[len];
-        len++;
-    }
-    shellIo[len++] = '\n';
-
     int slot;
-    ExfatEntry e;
-    FwFile wf;
-    int r = fsOpenWrite(file, FS_O_CREATE | (append ? 0 : FS_O_TRUNC), &slot, &e, &wf);
-    if (r != FW_OK)
+    bool found = fsStat(path, &e, &slot) && !e.isDir;
+    if (!found)
     {
-        shellFsError(append ? "append" : "write", file, r);
+        cprintf("No such script: %s\n", path);
         return;
     }
-    long w = fsWriteFile(slot, &wf, wf.size, shellIo.ptr, len);
-    if (w != cast(long)len)
-        shellFsError(append ? "append" : "write", file, w < 0 ? cast(int)w : FW_ERR_NO_SPACE);
+    
+    // TODO: read the file and execute line by line
 }
-
-void shellCp(const(char)* args) @nogc nothrow
-{
-    char* rest = cast(char*)args;
-    char* src = shellNextWord(&rest);
-    char* dst = shellNextWord(&rest);
-    if (src is null || dst is null)
-    {
-        cprintf("Usage: cp SOURCE DEST   (DEST may be a directory)\n");
-        return;
-    }
-    char[FS_PATH_MAX] target;
-    shellTargetPath(src, dst, target.ptr);
-
-    ExfatEntry se;
-    int sslot;
-    if (!fsStat(src, &se, &sslot) || se.isDir)
-    {
-        cprintf("cp: %s: not a file\n", src);
-        return;
-    }
-    char[FS_PATH_MAX] a;
-    char[FS_PATH_MAX] b;
-    if (fsResolve(src, a.ptr) && fsResolve(target.ptr, b.ptr) && fsNameEq(a.ptr, b.ptr))
-    {
-        cprintf("cp: %s and %s are the same file\n", src, target.ptr);
-        return;
-    }
-
-    int dslot;
-    ExfatEntry de;
-    FwFile wf;
-    int r = fsOpenWrite(target.ptr, FS_O_CREATE | FS_O_TRUNC, &dslot, &de, &wf);
-    if (r != FW_OK)
-    {
-        shellFsError("cp", target.ptr, r);
-        return;
-    }
-
-    ExfatFile f;
-    exfatOpen(&f, &se);
-    ulong off = 0;
-    while (off < se.size)
-    {
-        ulong want = se.size - off;
-        if (want > shellIo.length)
-            want = shellIo.length;
-        ulong got = fsRead(sslot, &f, off, shellIo.ptr, want);
-        if (got == 0)
-        {
-            cprintf("cp: read error in %s\n", src);
-            return;
-        }
-        long w = fsWriteFile(dslot, &wf, off, shellIo.ptr, got);
-        if (w != cast(long)got)
-        {
-            shellFsError("cp", target.ptr, w < 0 ? cast(int)w : FW_ERR_NO_SPACE);
-            return;
-        }
-        off += got;
-    }
-}
-*/
 
 // Run an ELF file from the mounted volume. Tries `path`, then `path.elf`.
 void shellRunFile(const(char)* path, const(char)* args, bool background) @nogc nothrow
@@ -1128,6 +944,12 @@ void shellDmesg(const(char)* args) @nogc nothrow
 }
 
 void shellExecute() @nogc nothrow
+{
+    shellExecuteStr(shellLine, shellLineLength);
+}
+
+// TODO: use const(char)[]
+void shellExecuteStr(char[] shellLine, size_t shellLineLength) @nogc nothrow
 {
     // Split command and arguments in-place. Quoting is intentionally not
     // supported yet; these first built-ins only need a simple argument tail.
