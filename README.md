@@ -7,7 +7,7 @@ DIOS does not replicate either Unix or Windows. While some parts of the system a
 You can use DIOS as a basis for creating your own operating system! PRs implementing new features are welcome. The code is a bit messy but readable.
 
 [![Screenshot8](media/screenshot8.jpg?raw=true)](media/screenshot8.jpg?raw=true)
-[![Screenshot7](media/screenshot7.jpg?raw=true)](media/screenshot7.jpg?raw=true)
+[![Screenshot9](media/screenshot9.jpg?raw=true)](media/screenshot9.jpg?raw=true)
 
 ## Notes
 
