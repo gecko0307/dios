@@ -1,5 +1,5 @@
-DIOS 0.10.0 - TBD
------------------
+DIOS 0.10.0 - 28 Nov, 2026
+--------------------------
 - **Bootloader**:
   - Upgrade to Limine 12.11.2
 - **Kernel**:
