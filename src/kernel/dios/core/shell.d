@@ -833,7 +833,7 @@ void shellRunScript(const(char)* path) @nogc nothrow
     
     buf[off] = '\0';
     
-    //cprintf("%s\n", buf);
+    cprintf("Running script %s...\n", path);
     
     size_t lineStart = 0;
     for (size_t i = 0; i <= off; i++)
