@@ -4,7 +4,7 @@ pack_iso = true
 debug = false
 ulib_out = "rootfs/lib/libulib.a"
 user_out = "rootfs/bin"
-kernel_out = "cdroot/kernel64.bin"
+kernel_out = "cdroot/boot/kernel64.bin"
 iso_out = "dios64.iso"
 
 [flags]

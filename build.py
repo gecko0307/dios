@@ -390,7 +390,7 @@ def build_rootfs():
     """Pack the folder rootfs/ into cdroot/rootfs.tar (plain ustar, read by src/kernel/dios/core/ramfs.d)."""
     if not ROOTFS.is_dir():
         raise RuntimeError(f"rootfs folder not found: {ROOTFS}")
-    out = CDROOT / "rootfs.tar"
+    out = CDROOT / "boot" / "rootfs.tar"
     out.parent.mkdir(parents=True, exist_ok=True)
     entries = []
     for path in sorted(ROOTFS.rglob("*")):

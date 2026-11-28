@@ -15,7 +15,7 @@ You can use DIOS as a basis for creating your own operating system! PRs implemen
 - DIOS is now 64-bit only, x86 support was dropped
 - DIOS is planned as a graphical OS, but there's no built-in GUI toolkit yet. Graphical features are work-in-progress
 - DIOS is an ELF kernel that requires a bootloader to run. Currently only [Limine](https://github.com/limine-bootloader/limine) boot protocol is supported
-- Default setup in this repo assumes booting from the CD-ROM, but you can also make a bootable USB stick with the DIOS ISO image using [Ventoy](https://www.ventoy.net/en/index.html). Simply copy the `dios-X.X.X-x86_64.iso` file onto the flash drive that has Ventoy installed. It is theoretically possible to install DIOS on a SATA disk, but this wasn't tested on hardware and the process is not streamlined, DIOS doesn't have an automatic installer yet.
+- Default setup in this repo assumes booting from the CD-ROM, but you can also make a bootable USB stick with the DIOS ISO image using [Ventoy](https://www.ventoy.net/en/index.html). Simply copy the `dios-X.X.X-x86_64.iso` file onto the flash drive that has Ventoy installed. It is theoretically possible to install DIOS on a SATA disk, but this wasn't tested on hardware and the process is not streamlined; DIOS doesn't have an automatic installer yet. See [installation.md](doc/installation.md) for details.
 
 ## Features
 
