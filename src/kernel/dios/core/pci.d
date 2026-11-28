@@ -56,6 +56,7 @@ enum ubyte PCI_CONFIG_BAR5 = 0x24;
 enum ushort PCI_CMD_IO = 0x1;
 enum ushort PCI_CMD_MEMORY = 0x2;
 enum ushort PCI_CMD_BUSMASTER = 0x4;
+enum ushort PCI_CMD_INTX_OFF = 0x400;       // bit 10: the device may not raise its INTx line
 
 enum ushort PCI_VENDOR_INTEL = 0x8086;
 enum ushort PCI_VENDOR_NVIDIA = 0x10DE;
@@ -307,9 +308,10 @@ void pciInitAhci(uint bus, uint device, uint func, ushort vendorID, ushort devic
     }
     kprintf("  ABAR phys %llx size %llu\n", abarPhys, abarSize);
     
-    // Memory decode + bus mastering (the controller DMAs into our rings).
+    // Memory decode + bus mastering (the controller DMAs into our command lists). The driver
+    // polls, so the interrupt line is switched off: nothing handles it.
     pciWriteCommand(bus, device, func,
-        cast(ushort)(pciReadCommand(bus, device, func) | PCI_CMD_MEMORY | PCI_CMD_BUSMASTER));
+        cast(ushort)(pciReadCommand(bus, device, func) | PCI_CMD_MEMORY | PCI_CMD_BUSMASTER | PCI_CMD_INTX_OFF));
     
     void* regs = vmemMapMMIO(abarPhys, abarSize);
     if (regs is null)

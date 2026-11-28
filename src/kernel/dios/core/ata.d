@@ -155,17 +155,23 @@ bool ataParseIdentify(const(ubyte)* data, AtaDeviceInfo* info) @nogc nothrow
     ushort w82  = ataIdWord(data, 82);
     ushort w83  = ataIdWord(data, 83);
     ushort w85  = ataIdWord(data, 85);
+    ushort w87  = ataIdWord(data, 87);
     ushort w106 = ataIdWord(data, 106);
 
     if (!(w49 & (1 << 9)))
         return false; // LBA not supported
 
+    // Words 82-84 hold supported features and are valid when word 83 has bits 15:14 = 01;
+    // words 85-87 hold the enabled ones, valid when word 87 says so.
     bool valid83 = (w83 & 0xC000) == 0x4000;
+    bool valid87 = (w87 & 0xC000) == 0x4000;
 
     info.lba48 = valid83 && (w83 & (1 << 10));
-    info.writeCacheSupported = (w82 & (1 << 5)) != 0;
-    info.writeCacheEnabled = (w85 & (1 << 5)) != 0;
-    info.flushCacheSupported = (w82 & (1 << 12)) != 0;
+    info.writeCacheSupported = valid83 && (w82 & (1 << 5)) != 0;
+    // Without the "enabled" words assume the cache is on if the drive has one: flushing a
+    // drive that does not need it costs nothing, not flushing one that does loses data.
+    info.writeCacheEnabled = valid87 ? (w85 & (1 << 5)) != 0 : info.writeCacheSupported;
+    info.flushCacheSupported = valid83 && (w83 & (1 << 12)) != 0;   // word 83, not 82 (82 bit 12 is WRITE BUFFER)
     info.flushCacheExt = valid83 && (w83 & (1 << 13));
 
     info.logicalSectorSize = 512;

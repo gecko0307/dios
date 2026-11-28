@@ -35,8 +35,8 @@ module dios.core.blockdev;
  * miss reads the whole group in one transfer - a cheap read-ahead for slow USB disks - and
  * the small repeated reads of the file system code (FAT entries, directory sectors,
  * partition tables) are served from memory. Big reads (more than 16 KiB) skip the cache.
- * The disks are read-only, so there is nothing to write back; a disk's lines are dropped
- * when it is registered or unplugged.
+ * Writes go straight to the device (write through) and drop the lines they touch; a disk's
+ * lines are also dropped when it is registered or unplugged.
  *
  * Partition tables: GPT (when LBA 0 holds a protective MBR) and classic MBR
  * (primary partitions). A disk without a partition table - a "superfloppy" whose
@@ -46,8 +46,8 @@ module dios.core.blockdev;
 import dios.core.mem;
 import dios.core.stdio;
 
-enum uint BLK_MAX_DEVICES = 4;
-enum uint BLK_MAX_PARTS = 16;
+enum uint BLK_MAX_DEVICES = 8;
+enum uint BLK_MAX_PARTS = 32;
 
 enum uint BLK_CACHE_LINES = 64;
 enum uint BLK_CACHE_LINE_BYTES = 4096;      // one line = one aligned group of sectors

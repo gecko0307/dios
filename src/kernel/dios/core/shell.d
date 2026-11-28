@@ -504,7 +504,7 @@ void shellDisk() @nogc nothrow
 {
     if (blockDevCount == 0)
     {
-        cprintf("No disks. Only USB mass storage is supported; plug a stick in (see 'usb').\n");
+        cprintf("No disks found (USB mass storage and AHCI/SATA are supported; see 'usb').\n");
         return;
     }
     for (uint d = 0; d < blockDevCount; d++)
@@ -1159,7 +1159,7 @@ void shellExecute() @nogc nothrow
         cprintf("  programs            List the programs in /bin\n");
         cprintf("  dmesg [N [SKIP]]    Kernel log (last N lines, SKIP lines before the end)\n");
         cprintf("  usb                 List the USB devices (hubs, keyboards, disks...)\n");
-        cprintf("  disk                Show USB disks and partitions\n");
+        cprintf("  disk                Show disks (USB, SATA) and partitions\n");
         cprintf("  mount [N [NAME] [rw]]  Mount partition N as /mnt/NAME, read-only unless 'rw' (FAT32 only);\n");
         cprintf("                      no args: mount all volumes found (read-only)\n");
         cprintf("  remount NAME rw|ro  Switch a mounted volume between read-write and read-only\n");

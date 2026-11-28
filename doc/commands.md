@@ -15,10 +15,11 @@
 - `programs` - list the programs in `/bin`
 - `dmesg [N [SKIP]]` - kernel log (last N lines, SKIP lines before the end)
 - `usb` - list USB devices (hubs, keyboards, removable disks...)
-- `disk` - show USB disks and partitions
+- `disk` - show disks and partitions
 - `mount [N [NAME] [rw]]` - mount partition `N` as `/mnt/NAME`, read-only unless 'rw' (FAT32 only); no args: mount all volumes found (read-only)
 - `remount NAME rw|ro` - switch a mounted volume between read-write and read-only
 - `umount NAME` - unmount `/NAME`
+- `rmount N|NAME [rw|ro]` - makes partition N (mounted if needed) or /mnt/NAME the filesystem root. `rmount ramfs` reverts back to the initial RAM FS root. If called without parameters, shows the current root
 - `sync` - flush read-write volumes to the disk
 - `cat PATH` - print a text file
 - `append PATH TEXT` - add a line to the file

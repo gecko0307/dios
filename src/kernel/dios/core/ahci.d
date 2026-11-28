@@ -31,8 +31,7 @@ import dios.core.mem;
 import dios.core.paging;
 import dios.core.ata;
 import dios.core.blockdev;
-
-enum uint AHCI_MAX_CONTROLLERS = 4;
+import dios.core.clock;
 
 // HBA memory registers
 align(1) struct HBA_MEM
@@ -93,8 +92,6 @@ enum ubyte SATA_FIS_TYPE_BIST      = 0x58; // BIST activate FIS - bidirectional
 enum ubyte SATA_FIS_TYPE_PIO_SETUP = 0x5F; // PIO setup FIS - device to host
 enum ubyte SATA_FIS_TYPE_DEV_BITS  = 0xA1; // Set device bits FIS - device to host
 
-// TODO: other ATA commands + move to separate module ata.d
-enum ubyte ATA_CMD_IDENTIFY_DEVICE = 0xEC;
 
 // Host to device register FIS.
 // Used by the host to send command or control to a device.
@@ -290,36 +287,78 @@ static assert(HBA_CMD_HEADER.sizeof == 32);
 static assert(HBA_PRDT_ENTRY.sizeof == 16);
 static assert(HBA_CMD_TBL.sizeof == 144);
 
-enum uint AHCI_PXCMD_ST  = 1 << 0;
-enum uint AHCI_PXCMD_FRE = 1 << 4;
-enum uint AHCI_PXCMD_FR  = 1 << 14;
-enum uint AHCI_PXCMD_CR  = 1 << 15;
+// HBA registers (offsets from ABAR)
+enum size_t HBA_CAP  = 0x00;
+enum size_t HBA_GHC  = 0x04;
+enum size_t HBA_IS   = 0x08;
+enum size_t HBA_PI   = 0x0C;
+enum size_t HBA_VS   = 0x10;
+enum size_t HBA_CAP2 = 0x24;
+enum size_t HBA_BOHC = 0x28;
 
-enum uint AHCI_PXIS_TFES = 1 << 30;
+enum uint HBA_CAP_SCLO = 1u << 24;      // command list override supported
+enum uint HBA_GHC_IE   = 1u << 1;
+enum uint HBA_GHC_AE   = 1u << 31;
+enum uint HBA_CAP2_BOH = 1u << 0;       // BIOS/OS handoff supported
+enum uint HBA_BOHC_BOS = 1u << 0;       // BIOS owns the controller
+enum uint HBA_BOHC_OOS = 1u << 1;       // OS owns the controller
+enum uint HBA_BOHC_BB  = 1u << 4;       // BIOS busy
 
-enum uint AHCI_MAX_TRANSFER_BYTES = 1024 * 1024;
+// Port registers (offsets from the port's register block)
+enum size_t PX_CLB  = 0x00;
+enum size_t PX_CLBU = 0x04;
+enum size_t PX_FB   = 0x08;
+enum size_t PX_FBU  = 0x0C;
+enum size_t PX_IS   = 0x10;
+enum size_t PX_IE   = 0x14;
+enum size_t PX_CMD  = 0x18;
+enum size_t PX_TFD  = 0x20;
+enum size_t PX_SIG  = 0x24;
+enum size_t PX_SSTS = 0x28;
+enum size_t PX_SCTL = 0x2C;
+enum size_t PX_SERR = 0x30;
+enum size_t PX_SACT = 0x34;
+enum size_t PX_CI   = 0x38;
 
-////
+enum uint AHCI_PXCMD_ST  = 1u << 0;
+enum uint AHCI_PXCMD_CLO = 1u << 3;
+enum uint AHCI_PXCMD_FRE = 1u << 4;
+enum uint AHCI_PXCMD_FR  = 1u << 14;
+enum uint AHCI_PXCMD_CR  = 1u << 15;
 
-__gshared uint ahciCount;
-__gshared void* hbaMem;
-__gshared void* hbaPort0;
+enum uint AHCI_TFD_ERR = 0x01;
+enum uint AHCI_TFD_DRQ = 0x08;
+enum uint AHCI_TFD_DF  = 0x20;
+enum uint AHCI_TFD_BSY = 0x80;
 
-__gshared HBA_CMD_HEADER* ahciCmdList;
-__gshared HBA_CMD_TBL* ahciCmdTable;
+// PxIS bits that abort the command: task file error, host bus fatal / data error,
+// interface fatal error, overflow
+enum uint AHCI_PXIS_ERRORS = (1u << 30) | (1u << 29) | (1u << 28) | (1u << 27) | (1u << 24);
 
-__gshared void* ahciFisBuffer;
-__gshared void* ahciIdentifyBuffer;
+enum uint AHCI_SIG_ATA = 0x00000101;    // plain SATA disk (ATAPI is 0xEB140101, port multiplier 0x96690101)
 
-__gshared ulong ahciCmdListPhys;
-__gshared ulong ahciCmdTablePhys;
-__gshared ulong ahciFisBufferPhys;
-__gshared ulong ahciIdentifyBufferPhys;
+enum uint AHCI_MAX_PORTS = 8;           // disks driven in total (the block layer has fewer slots anyway)
+enum uint AHCI_BOUNCE_BYTES = 256 * 1024;   // data buffer of a port: one command moves at most this much
 
-__gshared void* ahciReadBuffer;
-__gshared ulong ahciReadBufferPhys;
+// One SATA disk behind one port of one controller. This is the `ctx` of its block device.
+struct AhciPort
+{
+    bool used;
+    void* hba;                  // controller registers (ABAR)
+    void* regs;                 // this port's registers
+    uint number;                // port number on the controller
+    char[8] name;               // "sata0"
+    ulong pagePhys;             // command list + received FIS + command table (one page)
+    HBA_CMD_HEADER* cmdList;
+    HBA_CMD_TBL* cmdTable;
+    ulong cmdTablePhys;
+    void* bounce;               // DMA data buffer (also receives IDENTIFY)
+    ulong bouncePhys;
+    AtaDeviceInfo info;
+}
 
-__gshared AtaDeviceInfo[AHCI_MAX_CONTROLLERS] ahciDevices;
+__gshared AhciPort[AHCI_MAX_PORTS] ahciPorts;
+__gshared uint ahciCount;       // entries of ahciPorts in use
 
 extern(C):
 
@@ -331,6 +370,11 @@ uint ahciRd32(void* base, size_t off) @nogc nothrow
 void ahciWr32(void* base, size_t off, uint v) @nogc nothrow
 {
     volatileStore(cast(uint*)(base + off), v);
+}
+
+void ahciFence() @nogc nothrow
+{
+    asm @nogc nothrow { mfence; }
 }
 
 // Zeroed, physically contiguous AHCI DMA memory below 4 GiB.
@@ -346,861 +390,451 @@ void* ahciDmaAlloc(ulong size, ulong* phys) @nogc nothrow
     return pmmPhysToVirt(p);
 }
 
-void ahciMemZero(void* ptr, size_t size) @nogc nothrow
+/// Wait (at most `ms` milliseconds) until (register & mask) == 0.
+bool ahciWaitClear(void* base, size_t offset, uint mask, uint ms) @nogc nothrow
 {
-    ubyte* p = cast(ubyte*)ptr;
-    foreach (i; 0..size)
-        p[i] = 0;
-}
-
-bool ahciWaitClear(void* port, size_t offset, uint mask) @nogc nothrow
-{
-    foreach (i; 0..10_000_000)
+    ulong deadline = clockDeadlineMs(ms);
+    for (;;)
     {
-        if ((ahciRd32(port, offset) & mask) == 0)
+        if ((ahciRd32(base, offset) & mask) == 0)
             return true;
+        if (clockNowNs() >= deadline)
+            return false;
     }
-    return false;
 }
 
-bool ahciWaitSet(void* port, size_t offset, uint mask) @nogc nothrow
+/// Wait (at most `ms` milliseconds) until (register & mask) == mask.
+bool ahciWaitSet(void* base, size_t offset, uint mask, uint ms) @nogc nothrow
 {
-    foreach (i; 0..10_000_000)
+    ulong deadline = clockDeadlineMs(ms);
+    for (;;)
     {
-        if ((ahciRd32(port, offset) & mask) == mask)
+        if ((ahciRd32(base, offset) & mask) == mask)
             return true;
+        if (clockNowNs() >= deadline)
+            return false;
     }
-    return false;
 }
 
+/// Stop command processing and FIS reception (the port may then be reprogrammed).
 bool ahciPortStop(void* port) @nogc nothrow
 {
-    uint cmd = ahciRd32(port, 0x18);
-
-    // Stop command processing.
-    ahciWr32(port, 0x18, cmd & ~AHCI_PXCMD_ST);
-
-    if (!ahciWaitClear(port, 0x18, AHCI_PXCMD_CR))
-        return false;
-
-    // Stop FIS receive.
-    cmd = ahciRd32(port, 0x18);
-    ahciWr32(port, 0x18, cmd & ~AHCI_PXCMD_FRE);
-
-    if (!ahciWaitClear(port, 0x18, AHCI_PXCMD_FR))
-        return false;
-
-    return true;
-}
-
-bool ahciPortStart(void* port) @nogc nothrow
-{
-    uint cmd = ahciRd32(port, 0x18);
-
-    // Enable FIS receive.
-    ahciWr32(port, 0x18, cmd | AHCI_PXCMD_FRE);
-
-    if (!ahciWaitSet(port, 0x18, AHCI_PXCMD_FR))
-        return false;
-
-    // Enable command processing.
-    cmd = ahciRd32(port, 0x18);
-    ahciWr32(port, 0x18, cmd | AHCI_PXCMD_ST);
-
-    return true;
-}
-
-bool ahciIdentifyPort0(void* port, AtaDeviceInfo* info) @nogc nothrow
-{
-    if (port is null || info is null)
-        return false;
-
-    // Check device signature
-    if (ahciRd32(port, 0x24) != 0x00000101)
-        return false;
-
-    uint ssts = ahciRd32(port, 0x28);
-
-    // DET = 3, IPM = 1.
-    if ((ssts & 0x0F) != 3 || ((ssts >> 8) & 0x0F) != 1)
-        return false;
-
-    // Stop port engine before changing DMA addresses
-    if (!ahciPortStop(port))
+    uint cmd = ahciRd32(port, PX_CMD);
+    if (cmd & (AHCI_PXCMD_ST | AHCI_PXCMD_CR))
     {
-        kprintf("AHCI: cannot stop port engine\n");
-        return false;
-    }
-
-    // Allocate DMA buffers
-    if (ahciCmdList is null)
-        ahciCmdList = cast(HBA_CMD_HEADER*)
-            ahciDmaAlloc(1024, &ahciCmdListPhys);
-
-    if (ahciFisBuffer is null)
-        ahciFisBuffer =
-            ahciDmaAlloc(256, &ahciFisBufferPhys);
-
-    if (ahciCmdTable is null)
-        ahciCmdTable = cast(HBA_CMD_TBL*)
-            ahciDmaAlloc(HBA_CMD_TBL.sizeof, &ahciCmdTablePhys);
-
-    if (ahciIdentifyBuffer is null)
-        ahciIdentifyBuffer =
-            ahciDmaAlloc(512, &ahciIdentifyBufferPhys);
-
-    if (ahciCmdList is null ||
-        ahciFisBuffer is null ||
-        ahciCmdTable is null ||
-        ahciIdentifyBuffer is null)
-    {
-        kprintf("AHCI: DMA allocation failed\n");
-        return false;
-    }
-
-    // Check physical alignment
-    if ((ahciCmdListPhys & 1023) ||
-        (ahciFisBufferPhys & 255) ||
-        (ahciCmdTablePhys & 127) ||
-        (ahciIdentifyBufferPhys & 1))
-    {
-        kprintf("AHCI: invalid DMA alignment\n");
-        return false;
-    }
-
-    // Check 64-bit DMA capability
-    uint cap = ahciRd32(hbaMem, 0x00);
-
-    if (!(cap & (1u << 31)))
-    {
-        if ((ahciCmdListPhys >> 32) ||
-            (ahciFisBufferPhys >> 32) ||
-            (ahciCmdTablePhys >> 32) ||
-            (ahciIdentifyBufferPhys >> 32))
-        {
-            kprintf("AHCI: 64-bit DMA unavailable\n");
+        ahciWr32(port, PX_CMD, cmd & ~AHCI_PXCMD_ST);
+        if (!ahciWaitClear(port, PX_CMD, AHCI_PXCMD_CR, 500))
             return false;
-        }
     }
-
-    // Clear all DMA buffers
-    ahciMemZero(ahciCmdList, 1024);
-    ahciMemZero(ahciFisBuffer, 256);
-    ahciMemZero(ahciCmdTable, HBA_CMD_TBL.sizeof);
-    ahciMemZero(ahciIdentifyBuffer, 512);
-
-    // Configure command list base address
-    ahciWr32(port, 0x00, cast(uint)ahciCmdListPhys);
-    ahciWr32(port, 0x04, cast(uint)(ahciCmdListPhys >> 32));
-
-    // Configure received FIS base address
-    ahciWr32(port, 0x08, cast(uint)ahciFisBufferPhys);
-    ahciWr32(port, 0x0C, cast(uint)(ahciFisBufferPhys >> 32));
-
-    // Clear pending interrupt and SATA error status
-    ahciWr32(port, 0x10, 0xFFFFFFFF);
-    ahciWr32(port, 0x30, 0xFFFFFFFF);
-
-    // Enable FIS reception and command processing
-    if (!ahciPortStart(port))
+    cmd = ahciRd32(port, PX_CMD);
+    if (cmd & (AHCI_PXCMD_FRE | AHCI_PXCMD_FR))
     {
-        kprintf("AHCI: cannot start port engine\n");
+        ahciWr32(port, PX_CMD, cmd & ~AHCI_PXCMD_FRE);
+        if (!ahciWaitClear(port, PX_CMD, AHCI_PXCMD_FR, 500))
+            return false;
+    }
+    return true;
+}
+
+void ahciPortStart(void* port) @nogc nothrow
+{
+    ahciWaitClear(port, PX_CMD, AHCI_PXCMD_CR, 500);
+    uint cmd = ahciRd32(port, PX_CMD) | AHCI_PXCMD_FRE;
+    ahciWr32(port, PX_CMD, cmd);
+    ahciWr32(port, PX_CMD, cmd | AHCI_PXCMD_ST);
+}
+
+/// COMRESET: restart the SATA link. The port must be stopped.
+void ahciComReset(void* port) @nogc nothrow
+{
+    uint sctl = ahciRd32(port, PX_SCTL);
+    ahciWr32(port, PX_SCTL, (sctl & ~0xFu) | 1);    // DET = 1: start the reset
+    clockDelayMs(2);
+    ahciWr32(port, PX_SCTL, sctl & ~0xFu);          // DET = 0: let the link come up
+    ulong deadline = clockDeadlineMs(1000);
+    while ((ahciRd32(port, PX_SSTS) & 0xF) != 3 && clockNowNs() < deadline) {}
+    ahciWr32(port, PX_SERR, 0xFFFFFFFF);
+}
+
+/// Bring a port that is in an error state (or stuck on a command) back to life: stop it,
+/// clear the errors, free a busy device (command list override, else COMRESET), start it
+/// again. After a task file error the engine has to be restarted like this, or every later
+/// command fails.
+bool ahciPortRecover(AhciPort* p) @nogc nothrow
+{
+    void* r = p.regs;
+    kprintf("AHCI: %s: restarting the port\n", p.name.ptr);
+
+    bool stopped = ahciPortStop(r);
+    if (!stopped)
+    {
+        ahciComReset(r);
+        stopped = ahciPortStop(r);
+    }
+    if (!stopped)
         return false;
-    }
 
-    // Wait until device is ready
-    bool ready = false;
+    ahciWr32(r, PX_SERR, 0xFFFFFFFF);
+    ahciWr32(r, PX_IS, 0xFFFFFFFF);
 
-    foreach (i; 0..10_000_000)
+    if (ahciRd32(r, PX_TFD) & (AHCI_TFD_BSY | AHCI_TFD_DRQ))
     {
-        uint tfd = ahciRd32(port, 0x20);
-        if (!(tfd & 0x88))
+        if (ahciRd32(p.hba, HBA_CAP) & HBA_CAP_SCLO)
         {
-            ready = true;
-            break;
+            ahciWr32(r, PX_CMD, ahciRd32(r, PX_CMD) | AHCI_PXCMD_CLO);
+            ahciWaitClear(r, PX_CMD, AHCI_PXCMD_CLO, 500);
         }
+        if (ahciRd32(r, PX_TFD) & (AHCI_TFD_BSY | AHCI_TFD_DRQ))
+            ahciComReset(r);
     }
 
-    if (!ready)
+    ahciPortStart(r);
+    return ahciWaitClear(r, PX_TFD, AHCI_TFD_BSY | AHCI_TFD_DRQ, 3000);
+}
+
+/// Run one ATA command through command slot 0 and wait for it. `bytes` of data go through the
+/// port's bounce buffer (`write` = host to device). `ext`: 48-bit LBA command. On any failure
+/// the port is restarted (see ahciPortRecover), so the next command has a clean start.
+bool ahciCommand(AhciPort* p, ubyte command, bool ext, ulong lba, uint count, bool write,
+                 uint bytes, uint timeoutMs) @nogc nothrow
+{
+    void* r = p.regs;
+
+    // Ready, with nothing left over from an earlier command?
+    if (!ahciWaitClear(r, PX_TFD, AHCI_TFD_BSY | AHCI_TFD_DRQ, 1000) && !ahciPortRecover(p))
     {
-        kprintf("AHCI: device busy\n");
+        kprintf("AHCI: %s: device busy\n", p.name.ptr);
+        return false;
+    }
+    if (((ahciRd32(r, PX_CI) | ahciRd32(r, PX_SACT)) & 1) && !ahciPortRecover(p))
+    {
+        kprintf("AHCI: %s: command slot 0 stuck\n", p.name.ptr);
         return false;
     }
 
-    // Prepare command table
-    HBA_CMD_TBL* tbl = ahciCmdTable;
+    // Command table: the register FIS and one PRD entry
+    HBA_CMD_TBL* tbl = p.cmdTable;
+    memset(tbl, 0, HBA_CMD_TBL.sizeof);
 
-    // Register H2D FIS
     SATA_FIS_REG_H2D* fis = cast(SATA_FIS_REG_H2D*)tbl.cfis.ptr;
-
     fis.fisType = SATA_FIS_TYPE_REG_H2D;
-    fis.pmportc = 1 << 7; // Command bit
-    fis.command = ATA_CMD_IDENTIFY_DEVICE;
-    fis.device = 0;
-
-    // PRDT entry
-    tbl.prdt[0].dba = ahciIdentifyBufferPhys;
-    tbl.prdt[0]._reserved = 0;
-    tbl.prdt[0].dbc = 511; // 512 bytes - 1
-
-    // Prepare command header (slot 0)
-    HBA_CMD_HEADER* header = &ahciCmdList[0];
-
-    header.flags = 5; // FIS length: 5 words
-    header.prdtl = 1;
-    header.prdbc = 0;
-    header.ctba = cast(uint)ahciCmdTablePhys;
-    header.ctbau = cast(uint)(ahciCmdTablePhys >> 32);
-
-    // Make sure slot 0 is available
-    if (ahciRd32(port, 0x38) & 1)
-    {
-        kprintf("AHCI: command slot 0 busy\n");
-        return false;
-    }
-
-    // Clear previous command errors
-    ahciWr32(port, 0x10, 0xFFFFFFFF);
-
-    // Issue IDENTIFY DEVICE
-    ahciWr32(port, 0x38, 1);
-
-    // Wait for completion
-    bool completed = false;
-
-    foreach (i; 0..10_000_000)
-    {
-        uint stat = ahciRd32(port, 0x10);
-
-        if (stat & AHCI_PXIS_TFES)
-        {
-            kprintf("AHCI: IDENTIFY command failed\n");
-            return false;
-        }
-
-        if (!(ahciRd32(port, 0x38) & 1))
-        {
-            completed = true;
-            break;
-        }
-    }
-
-    if (!completed)
-    {
-        kprintf("AHCI: IDENTIFY timeout\n");
-        return false;
-    }
-
-    // Check final task file status
-    if (ahciRd32(port, 0x20) & 1)
-    {
-        kprintf("AHCI: device reported command error\n");
-        return false;
-    }
-
-    // Check transferred byte count
-    if (header.prdbc != 512)
-    {
-        kprintf("AHCI: invalid transfer size %u\n", header.prdbc);
-        return false;
-    }
-
-    // Parse IDENTIFY data
-    if (!ataParseIdentify(cast(const(ubyte)*)ahciIdentifyBuffer, info))
-    {
-        kprintf("AHCI: invalid IDENTIFY data\n");
-        return false;
-    }
-
-    return true;
-}
-
-bool ahciReadSectors(ulong lba, uint count, void* buffer) @nogc nothrow
-{
-    if (buffer is null ||
-        hbaPort0 is null ||
-        ahciCmdList is null ||
-        ahciCmdTable is null)
-        return false;
-
-    if (count == 0)
-        return false;
-
-    AtaDeviceInfo* info = &ahciDevices[0];
-
-    uint sectorSize = info.logicalSectorSize;
-
-    if (sectorSize == 0)
-        return false;
-
-    // Calculate transfer size.
-    ulong bytes64 = cast(ulong)count * sectorSize;
-
-    if (bytes64 > AHCI_MAX_TRANSFER_BYTES)
-    {
-        kprintf("AHCI: transfer too large\n");
-        return false;
-    }
-
-    size_t bytes = cast(size_t)bytes64;
-
-    // Check device capacity.
-    if (lba >= info.sectorCount ||
-        cast(ulong)count > info.sectorCount - lba)
-    {
-        kprintf("AHCI: LBA range out of bounds\n");
-        return false;
-    }
-
-    // READ DMA EXT uses a 16-bit sector count.
-    if (count > 65535)
-        return false;
-
-    // Allocate reusable DMA buffer.
-    if (ahciReadBuffer is null)
-    {
-        ahciReadBuffer = ahciDmaAlloc(
-            AHCI_MAX_TRANSFER_BYTES,
-            &ahciReadBufferPhys
-        );
-
-        if (ahciReadBuffer is null)
-        {
-            kprintf("AHCI: read buffer allocation failed\n");
-            return false;
-        }
-    }
-
-    // Wait until device is ready.
-    if (!ahciWaitClear(hbaPort0, 0x20, 0x88))
-    {
-        kprintf("AHCI: device busy\n");
-        return false;
-    }
-
-    // Command slot 0 must be available.
-    if ((ahciRd32(hbaPort0, 0x38) & 1) ||
-        (ahciRd32(hbaPort0, 0x34) & 1))
-    {
-        kprintf("AHCI: command slot 0 busy\n");
-        return false;
-    }
-
-    // Clear DMA buffer.
-    ahciMemZero(ahciReadBuffer, bytes);
-
-    // Prepare command table.
-    HBA_CMD_TBL* tbl = ahciCmdTable;
-    ahciMemZero(tbl, HBA_CMD_TBL.sizeof);
-
-    // Register H2D FIS.
-    SATA_FIS_REG_H2D* fis =
-        cast(SATA_FIS_REG_H2D*)tbl.cfis.ptr;
-
-    fis.fisType = SATA_FIS_TYPE_REG_H2D;
-    fis.pmportc = 1 << 7;
-    fis.command = ATA_CMD_READ_DMA_EXT;
-
-    // 48-bit LBA.
-    fis.lba0 = cast(ubyte)(lba);
-    fis.lba1 = cast(ubyte)(lba >> 8);
-    fis.lba2 = cast(ubyte)(lba >> 16);
-    fis.lba3 = cast(ubyte)(lba >> 24);
-    fis.lba4 = cast(ubyte)(lba >> 32);
-    fis.lba5 = cast(ubyte)(lba >> 40);
-
-    // LBA mode.
-    fis.device = 1 << 6;
-
-    // Sector count.
-    fis.countl = cast(ubyte)count;
-    fis.counth = cast(ubyte)(count >> 8);
-
-    // PRDT.
-    tbl.prdt[0].dba = ahciReadBufferPhys;
-    tbl.prdt[0]._reserved = 0;
-    tbl.prdt[0].dbc = cast(uint)(bytes - 1);
-
-    // Command header.
-    HBA_CMD_HEADER* header = &ahciCmdList[0];
-
-    header.flags = 5;
-    header.prdtl = 1;
-    header.prdbc = 0;
-    header.ctba = cast(uint)ahciCmdTablePhys;
-    header.ctbau = cast(uint)(ahciCmdTablePhys >> 32);
-
-    // Clear previous errors.
-    ahciWr32(hbaPort0, 0x10, 0xFFFFFFFF);
-    ahciWr32(hbaPort0, 0x30, 0xFFFFFFFF);
-
-    // Issue READ DMA EXT.
-    ahciWr32(hbaPort0, 0x38, 1);
-
-    // Wait for completion.
-    bool completed = false;
-
-    foreach (i; 0..10_000_000)
-    {
-        uint stat = ahciRd32(hbaPort0, 0x10);
-
-        if (stat & AHCI_PXIS_TFES)
-        {
-            kprintf("AHCI: READ DMA EXT failed\n");
-            kprintf("  PxTFD  = %x\n", ahciRd32(hbaPort0, 0x20));
-            kprintf("  PxSERR = %x\n", ahciRd32(hbaPort0, 0x30));
-            return false;
-        }
-
-        if (!(ahciRd32(hbaPort0, 0x38) & 1))
-        {
-            completed = true;
-            break;
-        }
-    }
-
-    if (!completed)
-    {
-        kprintf("AHCI: READ DMA EXT timeout\n");
-        return false;
-    }
-
-    // Check device status.
-    if (ahciRd32(hbaPort0, 0x20) & 1)
-    {
-        kprintf("AHCI: device reported read error\n");
-        return false;
-    }
-
-    // Verify transfer size.
-    if (header.prdbc != bytes)
-    {
-        kprintf("AHCI: invalid transfer size %u, expected %u\n",
-            header.prdbc, cast(uint)bytes);
-        return false;
-    }
-
-    // Copy DMA buffer into destination.
-    ubyte* src = cast(ubyte*)ahciReadBuffer;
-    ubyte* dst = cast(ubyte*)buffer;
-
-    foreach (i; 0..bytes)
-        dst[i] = src[i];
-
-    return true;
-}
-
-bool ahciReadSector(ulong lba, void* buffer) @nogc nothrow
-{
-    return ahciReadSectors(lba, 1, buffer);
-}
-
-bool ahciWriteSectors(ulong lba, uint count, const(void)* buffer) @nogc nothrow
-{
-    if (buffer is null ||
-        hbaPort0 is null ||
-        ahciCmdList is null ||
-        ahciCmdTable is null ||
-        ahciCount == 0)
-        return false;
-
-    if (count == 0)
-        return false;
-
-    AtaDeviceInfo* info = &ahciDevices[0];
-
-    if (!info.lba48)
-    {
-        kprintf("AHCI: LBA48 required for WRITE DMA EXT\n");
-        return false;
-    }
-
-    uint sectorSize = info.logicalSectorSize;
-
-    if (sectorSize == 0)
-        return false;
-
-    ulong bytes64 = cast(ulong)count * sectorSize;
-
-    if (bytes64 > AHCI_MAX_TRANSFER_BYTES)
-    {
-        kprintf("AHCI: write transfer too large\n");
-        return false;
-    }
-
-    size_t bytes = cast(size_t)bytes64;
-
-    if (lba >= info.sectorCount ||
-        cast(ulong)count > info.sectorCount - lba)
-    {
-        kprintf("AHCI: write LBA out of bounds\n");
-        return false;
-    }
-
-    if (count > 65535)
-        return false;
-
-    // Allocate reusable DMA buffer.
-    if (ahciReadBuffer is null)
-    {
-        ahciReadBuffer = ahciDmaAlloc(
-            AHCI_MAX_TRANSFER_BYTES,
-            &ahciReadBufferPhys
-        );
-
-        if (ahciReadBuffer is null)
-        {
-            kprintf("AHCI: DMA buffer allocation failed\n");
-            return false;
-        }
-    }
-
-    // Wait until device is ready.
-    if (!ahciWaitClear(hbaPort0, 0x20, 0x88))
-    {
-        kprintf("AHCI: device busy before write\n");
-        return false;
-    }
-
-    // Command slot 0 must be available.
-    if ((ahciRd32(hbaPort0, 0x38) & 1) ||
-        (ahciRd32(hbaPort0, 0x34) & 1))
-    {
-        kprintf("AHCI: command slot 0 busy\n");
-        return false;
-    }
-
-    // Copy source data into DMA buffer.
-    ubyte* dst = cast(ubyte*)ahciReadBuffer;
-    const(ubyte)* src = cast(const(ubyte)*)buffer;
-
-    foreach (i; 0..bytes)
-        dst[i] = src[i];
-
-    // Prepare command table.
-    HBA_CMD_TBL* tbl = ahciCmdTable;
-    ahciMemZero(tbl, HBA_CMD_TBL.sizeof);
-
-    // Register H2D FIS.
-    SATA_FIS_REG_H2D* fis =
-        cast(SATA_FIS_REG_H2D*)tbl.cfis.ptr;
-
-    fis.fisType = SATA_FIS_TYPE_REG_H2D;
-    fis.pmportc = 1 << 7;
-    fis.command = ATA_CMD_WRITE_DMA_EXT;
-
-    // 48-bit LBA.
+    fis.pmportc = 1 << 7;                       // a command, not a control update
+    fis.command = command;
     fis.lba0 = cast(ubyte)lba;
     fis.lba1 = cast(ubyte)(lba >> 8);
     fis.lba2 = cast(ubyte)(lba >> 16);
-    fis.lba3 = cast(ubyte)(lba >> 24);
-    fis.lba4 = cast(ubyte)(lba >> 32);
-    fis.lba5 = cast(ubyte)(lba >> 40);
-
-    fis.device = ATA_DEVICE_LBA;
-
-    // Sector count.
+    if (ext)
+    {
+        fis.device = ATA_DEVICE_LBA;
+        fis.lba3 = cast(ubyte)(lba >> 24);
+        fis.lba4 = cast(ubyte)(lba >> 32);
+        fis.lba5 = cast(ubyte)(lba >> 40);
+    }
+    else
+        fis.device = cast(ubyte)(ATA_DEVICE_LBA | ((lba >> 24) & 0x0F));    // 28-bit LBA: top bits live here
+    if (command == ATA_CMD_IDENTIFY_DEVICE)
+        fis.device = 0;
     fis.countl = cast(ubyte)count;
     fis.counth = cast(ubyte)(count >> 8);
 
-    // PRDT.
-    tbl.prdt[0].dba = ahciReadBufferPhys;
-    tbl.prdt[0]._reserved = 0;
-    tbl.prdt[0].dbc = cast(uint)(bytes - 1);
-
-    // Command header.
-    HBA_CMD_HEADER* header = &ahciCmdList[0];
-
-    header.flags = 5 | (1 << 6); // CFL=5, W=1
-    header.prdtl = 1;
-    header.prdbc = 0;
-    header.ctba = cast(uint)ahciCmdTablePhys;
-    header.ctbau = cast(uint)(ahciCmdTablePhys >> 32);
-
-    // Clear previous errors.
-    ahciWr32(hbaPort0, 0x10, 0xFFFFFFFF);
-    ahciWr32(hbaPort0, 0x30, 0xFFFFFFFF);
-
-    // Issue WRITE DMA EXT.
-    ahciWr32(hbaPort0, 0x38, 1);
-
-    // Wait for completion.
-    bool completed = false;
-
-    foreach (i; 0..10_000_000)
+    if (bytes != 0)
     {
-        uint stat = ahciRd32(hbaPort0, 0x10);
+        tbl.prdt[0].dba = p.bouncePhys;
+        tbl.prdt[0].dbc = bytes - 1;            // byte count minus one
+    }
 
-        if (stat & AHCI_PXIS_TFES)
+    HBA_CMD_HEADER* h = &p.cmdList[0];
+    h.flags = cast(ushort)(5 | (write ? (1 << 6) : 0));     // CFL = 5 words, W
+    h.prdtl = cast(ushort)(bytes != 0 ? 1 : 0);
+    h.prdbc = 0;
+    h.ctba = cast(uint)p.cmdTablePhys;
+    h.ctbau = cast(uint)(p.cmdTablePhys >> 32);
+
+    ahciWr32(r, PX_IS, 0xFFFFFFFF);
+    ahciWr32(r, PX_SERR, 0xFFFFFFFF);
+    ahciFence();                                // the tables are in memory before the HBA is told
+    ahciWr32(r, PX_CI, 1);
+
+    ulong deadline = clockDeadlineMs(timeoutMs);
+    for (;;)
+    {
+        uint stat = ahciRd32(r, PX_IS);
+        if (stat & AHCI_PXIS_ERRORS)
         {
-            kprintf("AHCI: WRITE DMA EXT failed\n");
-            kprintf("  PxTFD  = %x\n", ahciRd32(hbaPort0, 0x20));
-            kprintf("  PxSERR = %x\n", ahciRd32(hbaPort0, 0x30));
+            kprintf("AHCI: %s: command %x failed: IS=%x TFD=%x SERR=%x\n", p.name.ptr, cast(uint)command,
+                    stat, ahciRd32(r, PX_TFD), ahciRd32(r, PX_SERR));
+            ahciPortRecover(p);
             return false;
         }
-
-        if (!(ahciRd32(hbaPort0, 0x38) & 1))
-        {
-            completed = true;
+        if (!(ahciRd32(r, PX_CI) & 1))
             break;
+        if (clockNowNs() >= deadline)
+        {
+            kprintf("AHCI: %s: command %x timed out\n", p.name.ptr, cast(uint)command);
+            ahciPortRecover(p);
+            return false;
         }
     }
+    ahciFence();                                // the data (and prdbc) are in memory now
 
-    if (!completed)
+    uint tfd = ahciRd32(r, PX_TFD);
+    if (tfd & (AHCI_TFD_ERR | AHCI_TFD_DF))
     {
-        kprintf("AHCI: WRITE DMA EXT timeout\n");
+        kprintf("AHCI: %s: command %x reported an error: TFD=%x\n", p.name.ptr, cast(uint)command, tfd);
         return false;
     }
-
-    // Check device status.
-    if (ahciRd32(hbaPort0, 0x20) & 1)
+    if (bytes != 0 && h.prdbc != bytes)
     {
-        kprintf("AHCI: device reported write error\n");
+        kprintf("AHCI: %s: command %x moved %u of %u bytes\n", p.name.ptr, cast(uint)command, h.prdbc, bytes);
         return false;
     }
-
-    // Verify transferred byte count.
-    if (header.prdbc != bytes)
-    {
-        kprintf("AHCI: invalid write size %u, expected %u\n",
-            header.prdbc, cast(uint)bytes);
-        return false;
-    }
-
     return true;
+}
+
+/// Most sectors one command may carry.
+uint ahciMaxSectors(AhciPort* p) @nogc nothrow
+{
+    uint m = AHCI_BOUNCE_BYTES / p.info.logicalSectorSize;
+    uint limit = p.info.lba48 ? 65535 : 255;    // 28-bit commands: 8-bit count (0 would mean 256)
+    return m < limit ? m : limit;
 }
 
 bool ahciBlockRead(void* ctx, ulong lba, uint count, void* dst) @nogc nothrow
 {
-    if (dst is null || count == 0 || ahciCount == 0)
+    AhciPort* p = cast(AhciPort*)ctx;
+    if (p is null || !p.used || dst is null || count == 0)
+        return false;
+    if (lba >= p.info.sectorCount || cast(ulong)count > p.info.sectorCount - lba)
         return false;
 
-    AtaDeviceInfo* info = &ahciDevices[0];
-
-    uint sectorSize = info.logicalSectorSize;
-    if (sectorSize == 0)
-        return false;
-
-    uint maxSectors = AHCI_MAX_TRANSFER_BYTES / sectorSize;
-    if (maxSectors == 0)
-        return false;
-
+    uint ss = p.info.logicalSectorSize;
+    uint maxSectors = ahciMaxSectors(p);
+    bool ext = p.info.lba48;
     ubyte* out_ = cast(ubyte*)dst;
 
     while (count != 0)
     {
-        uint n = count;
-        if (n > maxSectors)
-            n = maxSectors;
-
-        if (!ahciReadSectors(lba, n, out_))
+        uint n = count < maxSectors ? count : maxSectors;
+        if (!ahciCommand(p, ext ? ATA_CMD_READ_DMA_EXT : ATA_CMD_READ_DMA, ext, lba, n, false, n * ss, 10_000))
             return false;
-
-        ulong bytes = cast(ulong)n * sectorSize;
-
+        memcpy(out_, p.bounce, n * ss);
         lba += n;
         count -= n;
-        out_ += bytes;
+        out_ += n * ss;
     }
-
     return true;
 }
 
 bool ahciBlockWrite(void* ctx, ulong lba, uint count, const(void)* src) @nogc nothrow
 {
-    if (src is null || count == 0 || ahciCount == 0)
+    AhciPort* p = cast(AhciPort*)ctx;
+    if (p is null || !p.used || src is null || count == 0)
+        return false;
+    if (lba >= p.info.sectorCount || cast(ulong)count > p.info.sectorCount - lba)
         return false;
 
-    AtaDeviceInfo* info = &ahciDevices[0];
-
-    uint sectorSize = info.logicalSectorSize;
-    if (sectorSize == 0)
-        return false;
-
-    uint maxSectors = AHCI_MAX_TRANSFER_BYTES / sectorSize;
-    if (maxSectors == 0)
-        return false;
-
+    uint ss = p.info.logicalSectorSize;
+    uint maxSectors = ahciMaxSectors(p);
+    bool ext = p.info.lba48;
     const(ubyte)* in_ = cast(const(ubyte)*)src;
 
     while (count != 0)
     {
-        uint n = count;
-
-        if (n > maxSectors)
-            n = maxSectors;
-
-        if (!ahciWriteSectors(lba, n, in_))
+        uint n = count < maxSectors ? count : maxSectors;
+        memcpy(p.bounce, in_, n * ss);
+        if (!ahciCommand(p, ext ? ATA_CMD_WRITE_DMA_EXT : ATA_CMD_WRITE_DMA, ext, lba, n, true, n * ss, 10_000))
             return false;
-
-        ulong bytes = cast(ulong)n * sectorSize;
-
         lba += n;
         count -= n;
-        in_ += bytes;
+        in_ += n * ss;
     }
-
     return true;
 }
 
 bool ahciBlockFlush(void* ctx) @nogc nothrow
 {
-    if (ahciCount == 0 ||
-        hbaPort0 is null ||
-        ahciCmdList is null ||
-        ahciCmdTable is null)
+    AhciPort* p = cast(AhciPort*)ctx;
+    if (p is null || !p.used)
         return false;
 
-    AtaDeviceInfo* info = &ahciDevices[0];
-
     // No enabled write cache: nothing to flush.
-    if (!info.writeCacheEnabled)
+    if (!p.info.writeCacheEnabled)
         return true;
 
     ubyte command;
-
-    if (info.flushCacheExt)
+    if (p.info.flushCacheExt)
         command = ATA_CMD_FLUSH_CACHE_EXT;
-    else if (info.flushCacheSupported)
+    else if (p.info.flushCacheSupported)
         command = ATA_CMD_FLUSH_CACHE;
     else
     {
-        kprintf("AHCI: device has no supported cache flush command\n");
+        kprintf("AHCI: %s: device has no supported cache flush command\n", p.name.ptr);
         return false;
     }
-
-    // Wait until device is ready.
-    if (!ahciWaitClear(hbaPort0, 0x20, 0x88))
-    {
-        kprintf("AHCI: device busy before flush\n");
-        return false;
-    }
-
-    // Command slot 0 must be available.
-    if ((ahciRd32(hbaPort0, 0x38) & 1) ||
-        (ahciRd32(hbaPort0, 0x34) & 1))
-    {
-        kprintf("AHCI: command slot 0 busy\n");
-        return false;
-    }
-
-    // Prepare command table.
-    HBA_CMD_TBL* tbl = ahciCmdTable;
-    ahciMemZero(tbl, HBA_CMD_TBL.sizeof);
-
-    SATA_FIS_REG_H2D* fis =
-        cast(SATA_FIS_REG_H2D*)tbl.cfis.ptr;
-
-    fis.fisType = SATA_FIS_TYPE_REG_H2D;
-    fis.pmportc = 1 << 7;
-    fis.command = command;
-
-    // Command header: no data transfer.
-    HBA_CMD_HEADER* header = &ahciCmdList[0];
-
-    header.flags = 5;
-    header.prdtl = 0;
-    header.prdbc = 0;
-    header.ctba = cast(uint)ahciCmdTablePhys;
-    header.ctbau = cast(uint)(ahciCmdTablePhys >> 32);
-
-    // Clear previous errors.
-    ahciWr32(hbaPort0, 0x10, 0xFFFFFFFF);
-    ahciWr32(hbaPort0, 0x30, 0xFFFFFFFF);
-
-    // Issue FLUSH CACHE.
-    ahciWr32(hbaPort0, 0x38, 1);
-
-    bool completed = false;
-
-    foreach (i; 0..10_000_000)
-    {
-        uint stat = ahciRd32(hbaPort0, 0x10);
-
-        if (stat & AHCI_PXIS_TFES)
-        {
-            kprintf("AHCI: FLUSH CACHE failed\n");
-            kprintf("  PxTFD  = %x\n", ahciRd32(hbaPort0, 0x20));
-            kprintf("  PxSERR = %x\n", ahciRd32(hbaPort0, 0x30));
-            return false;
-        }
-
-        if (!(ahciRd32(hbaPort0, 0x38) & 1))
-        {
-            completed = true;
-            break;
-        }
-    }
-
-    if (!completed)
-    {
-        kprintf("AHCI: FLUSH CACHE timeout\n");
-        return false;
-    }
-
-    if (ahciRd32(hbaPort0, 0x20) & 1)
-    {
-        kprintf("AHCI: device reported flush error\n");
-        return false;
-    }
-
-    return true;
+    return ahciCommand(p, command, false, 0, 0, false, 0, 30_000);
 }
 
-bool ahciInit(void* abar) @nogc nothrow
+// Give up on a port that was being set up: stop it and return its memory.
+void ahciPortAbandon(AhciPort* p) @nogc nothrow
 {
-    if (abar is null || ahciCount >= AHCI_MAX_CONTROLLERS)
+    ahciPortStop(p.regs);
+    if (p.pagePhys != 0)
+        pmmFreePages(p.pagePhys, 1);
+    if (p.bouncePhys != 0)
+        pmmFreePages(p.bouncePhys, AHCI_BOUNCE_BYTES / MEM_PAGE_SIZE);
+    *p = AhciPort.init;
+}
+
+/// Look at port `number` of the controller; if a SATA disk sits on it, set it up and register
+/// it as a block device. True if a disk was found and registered.
+bool ahciInitPort(void* hba, uint number) @nogc nothrow
+{
+    void* regs = hba + 0x100 + number * 0x80;
+
+    // A device must be present with an established link (DET = 3, IPM = active)
+    uint ssts = ahciRd32(regs, PX_SSTS);
+    if ((ssts & 0xF) != 3 || ((ssts >> 8) & 0xF) != 1)
         return false;
-    
-    hbaMem = abar;
-    hbaPort0 = abar + 0x100;
-    
-    kprintf("AHCI Port 0:\n");
-    kprintf("  CMD  %x\n", ahciRd32(hbaPort0, 0x18));
-    kprintf("  TFD  %x\n", ahciRd32(hbaPort0, 0x20));
-    kprintf("  SIG  %x\n", ahciRd32(hbaPort0, 0x24));
-    kprintf("  SSTS %x\n", ahciRd32(hbaPort0, 0x28));
-    kprintf("  SCTL %x\n", ahciRd32(hbaPort0, 0x2C));
-    kprintf("  SERR %x\n", ahciRd32(hbaPort0, 0x30));
-    kprintf("  CI   %x\n", ahciRd32(hbaPort0, 0x38));
-    
-    AtaDeviceInfo* info = &ahciDevices[ahciCount];
-    if (!ahciIdentifyPort0(hbaPort0, info))
+
+    uint sig = ahciRd32(regs, PX_SIG);
+    if (sig != AHCI_SIG_ATA)
     {
-        kprintf("AHCI: IDENTIFY DEVICE failed\n");
+        kprintf("AHCI: port %u: signature %x is not a SATA disk, skipped\n", number, sig);
+        return false;
+    }
+    if (ahciCount >= AHCI_MAX_PORTS)
+    {
+        kprintf("AHCI: port %u: too many disks\n", number);
+        return false;
+    }
+
+    AhciPort* p = &ahciPorts[ahciCount];
+    *p = AhciPort.init;
+    p.hba = hba;
+    p.regs = regs;
+    p.number = number;
+    p.name[0] = 's';
+    p.name[1] = 'a';
+    p.name[2] = 't';
+    p.name[3] = 'a';
+    p.name[4] = cast(char)('0' + ahciCount % 10);
+    p.name[5] = 0;
+
+    // One page holds the command list (1 KiB), the received FIS area (256 B) and the command table
+    void* page = ahciDmaAlloc(MEM_PAGE_SIZE, &p.pagePhys);
+    p.bounce = ahciDmaAlloc(AHCI_BOUNCE_BYTES, &p.bouncePhys);
+    if (page is null || p.bounce is null)
+    {
+        kprintf("AHCI: port %u: DMA allocation failed\n", number);
+        ahciPortAbandon(p);
+        return false;
+    }
+    p.cmdList = cast(HBA_CMD_HEADER*)page;
+    p.cmdTable = cast(HBA_CMD_TBL*)(page + 0x500);      // 128-byte aligned
+    p.cmdTablePhys = p.pagePhys + 0x500;
+    ulong fisPhys = p.pagePhys + 0x400;                 // 256-byte aligned
+
+    // The engine must be stopped while its DMA addresses change
+    if (!ahciPortStop(regs))
+    {
+        kprintf("AHCI: port %u: cannot stop the port engine\n", number);
+        ahciPortAbandon(p);
+        return false;
+    }
+    ahciWr32(regs, PX_CLB, cast(uint)p.pagePhys);
+    ahciWr32(regs, PX_CLBU, cast(uint)(p.pagePhys >> 32));
+    ahciWr32(regs, PX_FB, cast(uint)fisPhys);
+    ahciWr32(regs, PX_FBU, cast(uint)(fisPhys >> 32));
+    ahciWr32(regs, PX_SERR, 0xFFFFFFFF);
+    ahciWr32(regs, PX_IS, 0xFFFFFFFF);
+    ahciWr32(regs, PX_IE, 0);                           // polled: no interrupts from this port
+    ahciPortStart(regs);
+
+    if (!ahciWaitClear(regs, PX_TFD, AHCI_TFD_BSY | AHCI_TFD_DRQ, 1000) && !ahciPortRecover(p))
+    {
+        kprintf("AHCI: port %u: device does not become ready\n", number);
+        ahciPortAbandon(p);
+        return false;
+    }
+
+    p.used = true;          // the command helpers refuse unused ports
+    if (!ahciCommand(p, ATA_CMD_IDENTIFY_DEVICE, false, 0, 0, false, 512, 5000) ||
+        !ataParseIdentify(cast(const(ubyte)*)p.bounce, &p.info))
+    {
+        kprintf("AHCI: port %u: IDENTIFY DEVICE failed\n", number);
+        ahciPortAbandon(p);
+        return false;
+    }
+
+    uint ss = p.info.logicalSectorSize;
+    if (ss < 512 || ss > 4096 || (ss & (ss - 1)) != 0)
+    {
+        kprintf("AHCI: port %u: unsupported sector size %u\n", number, ss);
+        ahciPortAbandon(p);
+        return false;
+    }
+
+    kprintf("AHCI port %u: %s\n", number, p.info.model.ptr);
+    kprintf("  Serial: %s  Firmware: %s\n", p.info.serial.ptr, p.info.firmware.ptr);
+    kprintf("  Sectors: %llu  Logical sector: %u  Physical sector: %u  LBA48: %s\n", p.info.sectorCount,
+            p.info.logicalSectorSize, p.info.physicalSectorSize, p.info.lba48 ? "yes".ptr : "no".ptr);
+
+    BlockDev* dev = blockRegister(p.name.ptr, p.info.model.ptr, p.info.sectorCount, ss,
+                                  &ahciBlockRead, &ahciBlockWrite, &ahciBlockFlush, p);
+    if (dev is null)
+    {
+        kprintf("AHCI: port %u: block device registration failed\n", number);
+        ahciPortAbandon(p);
         return false;
     }
     ahciCount++;
+    kprintf("AHCI: registered as %s\n", dev.name.ptr);
+    blockScanPartitions(dev);
+    return true;
+}
 
-    kprintf("AHCI device detected:\n");
-    kprintf("  Model: %s\n", info.model.ptr);
-    kprintf("  Serial: %s\n", info.serial.ptr);
-    kprintf("  Firmware: %s\n", info.firmware.ptr);
-    kprintf("  Sectors: %llu\n", info.sectorCount);
-    kprintf("  Logical sector: %u\n", info.logicalSectorSize);
-    kprintf("  Physical sector: %u\n", info.physicalSectorSize);
-    
-    BlockDev* dev = blockRegister(
-        "sata0".ptr,
-        info.model.ptr,
-        info.sectorCount,
-        info.logicalSectorSize,
-        &ahciBlockRead,
-        &ahciBlockWrite,
-        &ahciBlockFlush,
-        null
-    );
-
-    if (dev is null)
+/// Take the controller from the firmware: BIOS/OS handoff, AHCI mode on, interrupts off.
+bool ahciTakeOver(void* hba) @nogc nothrow
+{
+    if (ahciRd32(hba, HBA_CAP2) & HBA_CAP2_BOH)
     {
-        kprintf("AHCI: block device registration failed\n");
-        ahciCount--;
-        return false;
+        uint bohc = ahciRd32(hba, HBA_BOHC);
+        if (bohc & HBA_BOHC_BOS)
+        {
+            ahciWr32(hba, HBA_BOHC, bohc | HBA_BOHC_OOS);
+            if (!ahciWaitClear(hba, HBA_BOHC, HBA_BOHC_BOS | HBA_BOHC_BB, 2000))
+                kprintf("AHCI: the BIOS did not hand the controller over, continuing anyway\n");
+        }
     }
 
-    kprintf("AHCI: registered as %s\n", dev.name.ptr);
-
-    blockScanPartitions(dev);
-    
+    uint ghc = ahciRd32(hba, HBA_GHC);
+    ahciWr32(hba, HBA_GHC, (ghc | HBA_GHC_AE) & ~HBA_GHC_IE);
+    if (!(ahciRd32(hba, HBA_GHC) & HBA_GHC_AE))
+    {
+        kprintf("AHCI: cannot switch the controller to AHCI mode\n");
+        return false;
+    }
+    ahciWr32(hba, HBA_IS, 0xFFFFFFFF);
     return true;
+}
+
+/// Set up one AHCI controller (`abar`: its mapped registers) and every SATA disk on its ports.
+/// True if at least one disk was registered.
+bool ahciInit(void* abar) @nogc nothrow
+{
+    if (abar is null)
+        return false;
+
+    uint pi = ahciRd32(abar, HBA_PI);
+    kprintf("AHCI: version %x, ports implemented: %x\n", ahciRd32(abar, HBA_VS), pi);
+    if (!ahciTakeOver(abar))
+        return false;
+
+    uint found = 0;
+    for (uint n = 0; n < 32; n++)
+        if ((pi & (1u << n)) && ahciInitPort(abar, n))
+            found++;
+    if (found == 0)
+        kprintf("AHCI: no SATA disk found\n");
+    return found != 0;
 }
