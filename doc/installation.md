@@ -2,11 +2,9 @@
 
 DIOS can be installed on a SATA disk in live mode (under a system booted from Live CD/USB). This is currently a complex manual task that is not meant for beginners. Don't try it unless you fully understand what you are doing!
 
-If you prefer to install the system in a familiar environment such as Linux, follow the [offline installation guide](offline_installation.md).
-
 **Warning! Install DIOS at your own risk! The system is experimental and unstable.**
 
-**Warning! This process may change in the future!**
+**Warning! This process may change in the future.**
 
 ## Part 1. Preparing the Disk
 
