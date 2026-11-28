@@ -74,3 +74,5 @@ Remove the boot media (CD/USB) and reboot:
 ```
 reboot
 ```
+
+Enter the BIOS/UEFI options and set the disk as the first boot device.
