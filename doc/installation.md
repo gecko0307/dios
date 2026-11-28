@@ -12,7 +12,7 @@ Completely wipe old partition tables and create a new GPT:
 sudo sgdisk --zap-all /dev/sdb
 ```
 
-Partition 1 (`sata0p1` is DIOS) - primary system partition + ESP in FAT32 (starting at sector 2048):
+Partition 1 (`sata0p1` in DIOS) - primary system partition + ESP in FAT32 (starting at sector 2048):
 
 ```
 sudo sgdisk -n 1:2048:0 -t 1:ef00 -c 1:"DIOS" /dev/sdb
@@ -45,8 +45,8 @@ sudo ./limine bios-install /dev/sdb
 Mount the primary system partition:
 
 ```
-sudo mkdir /media/tim/DIOS
-sudo mount -o rw,uid=$(id -u),gid=$(id -g),umask=0022 /dev/sdb1 /media/tim/DIOS
+sudo mkdir -p /mnt/dios
+sudo mount -o rw,uid=$(id -u),gid=$(id -g),umask=0022 /dev/sdb1 /mnt/dios
 ```
 
 ## Part 2. Preparing the OS
@@ -67,4 +67,4 @@ At startup, DIOS kernel mounts a bootloader-provided RAM FS image to the filesys
 rmount /mnt/sata0p1 rw
 ```
 
-Doing this manually each time is not very convenient, so the kernel allows to automate this process. Add this command to `rootfs/kernel/init.ss`, a kernel shell script that is executed after successfull initializatoin. Then rebuild `rootfs.tar` by running `python build.py rootfs` and put it on the primary partition as `/boot/rootfs.tar`.
+Doing this manually each time is not very convenient, so the kernel allows to automate this process. Add this command to `rootfs/kernel/init.ss`, a kernel shell script that is executed after successful initialization. Then rebuild `rootfs.tar` by running `python build.py rootfs` and put it on the primary partition as `/boot/rootfs.tar`.
