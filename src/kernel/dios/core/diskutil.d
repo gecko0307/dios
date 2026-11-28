@@ -48,7 +48,7 @@ module dios.core.diskutil;
  *   ramcopy NAME                copy the whole initial RAM file system (all of "/", except /mnt) into
  *                               the FAT32 volume mounted as /mnt/NAME (mounted with 'rw')
  *
- *   biosinstall DISK [N] yes    Limine BIOS boot code (what "limine bios-install" does): boot
+ *   makebootable DISK [N] yes   Limine BIOS boot code (what "limine bios-install" does): boot
  *                               sector in sector 0, stage 1.5 in the BIOS boot partition (GPT) or
  *                               in the gap after the MBR. The code is the boot module
  *                               limine-bios-hdd.bin (the file Limine embeds in its own tool).
@@ -1461,8 +1461,8 @@ void duMkfs(const(char)* args) @nogc nothrow
             clusterBytes, idText.ptr, n, idText.ptr);
 }
 
-// biosinstall DISK [N] yes
-void duBiosInstall(const(char)* args) @nogc nothrow
+// makebootable DISK [N] yes
+void duMakeBootable(const(char)* args) @nogc nothrow
 {
     char* rest = duCopyArgs(args);
     char* disk = duNextWord(&rest);
@@ -1489,7 +1489,7 @@ void duBiosInstall(const(char)* args) @nogc nothrow
     }
     if (!ok)
     {
-        cprintf("Usage: biosinstall DISK [N] yes   (N: the BIOS boot partition from 'disk'; default: the first one)\n");
+        cprintf("Usage: makebootable DISK [N] yes   (N: the BIOS boot partition from 'disk'; default: the first one)\n");
         return;
     }
     BlockDev* b = duFindDisk(disk);
@@ -1502,7 +1502,7 @@ void duBiosInstall(const(char)* args) @nogc nothrow
     const(ubyte)* img = duFindBiosBlob(&size);
     if (img is null)
     {
-        cprintf("biosinstall: %s\n", duErrorText(DU_ERR_BAD_BLOB));
+        cprintf("makebootable: %s\n", duErrorText(DU_ERR_BAD_BLOB));
         return;
     }
     if (!confirmed)
@@ -1516,7 +1516,7 @@ void duBiosInstall(const(char)* args) @nogc nothrow
     int r = duInstallBiosBoot(b, part, img, size, &loc);
     if (r != DU_OK)
     {
-        cprintf("biosinstall: %s\n", duErrorText(r));
+        cprintf("makebootable: %s\n", duErrorText(r));
         return;
     }
     cprintf("Limine BIOS boot code installed on %s, stage 1.5 at byte offset %llu.\n", b.name.ptr, loc);

@@ -1,3 +1,9 @@
+DIOS 0.11.0 - TBD
+-----------------
+- **Kernel**:
+  - Kernel disk tools (`ptable`, `padd`, `pdel`, `ramcopy`, `makebootable`, `mkfs`)
+  - Installer script (experimental). In live mode, run `exec install.ss` to install the system on the SATA disk. **Warning: not recommended for beginners!** For testing purposes, do it only on a virtual machine.
+
 DIOS 0.10.0 - 28 Nov, 2026
 --------------------------
 - **Bootloader**:

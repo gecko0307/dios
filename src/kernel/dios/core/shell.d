@@ -60,7 +60,7 @@ immutable string[40] SHELL_COMMANDS = [
     "programs", "disk", "mount", "cd", "cat", "dmesg", "usb",
     "ps", "kill", "fg", "gfx", "umount",
     "sync", "remount", "rmount",
-    "ptable", "padd", "pdel", "mkfs", "biosinstall", "ramcopy"
+    "ptable", "padd", "pdel", "mkfs", "makebootable", "ramcopy"
 ];
 
 __gshared char[SHELL_LINE_CAPACITY] shellLine;
@@ -1097,7 +1097,7 @@ void shellExecuteStr(char[] shellLine, size_t shellLineLength) @nogc nothrow
         cprintf("  padd DISK SIZE|rest [esp|data]  Add a partition (SIZE in MiB);  padd DISK bios: BIOS boot partition\n");
         cprintf("  pdel N yes          Delete partition N\n");
         cprintf("  ramcopy NAME        Copy the whole RAM file system into the FAT32 volume /mnt/NAME (mounted rw)\n");
-        cprintf("  biosinstall DISK [N] yes  Install Limine BIOS boot code (module limine-bios-hdd.bin)\n");
+        cprintf("  makebootable DISK [N] yes  Install Limine BIOS boot code (module limine-bios-hdd.bin)\n");
         cprintf("  mkfs N [LABEL] yes  Format partition N as FAT32\n");
         cprintf("  sync                Flush read-write volumes to the disk\n");
         cprintf("  cd [DIR]            Change the current directory\n");
@@ -1288,8 +1288,8 @@ void shellExecuteStr(char[] shellLine, size_t shellLineLength) @nogc nothrow
         duPdel(args);
     else if (shellEquals(shellLine.ptr, "mkfs"))
         duMkfs(args);
-    else if (shellEquals(shellLine.ptr, "biosinstall"))
-        duBiosInstall(args);
+    else if (shellEquals(shellLine.ptr, "makebootable"))
+        duMakeBootable(args);
     else if (shellEquals(shellLine.ptr, "ramcopy"))
         duRamcopy(args);
     else if (shellEquals(shellLine.ptr, "cd"))

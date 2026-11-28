@@ -31,7 +31,7 @@ mkfs 1 DIOS yes
 Install the BIOS bootloader to the boot partition:
 
 ```
-biosinstall sata0 yes
+makebootable sata0 yes
 ```
 
 ## Part 2. Copying the System
