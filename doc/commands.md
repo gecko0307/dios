@@ -19,7 +19,11 @@
 - `mount [N [NAME] [rw]]` - mount partition `N` as `/mnt/NAME`, read-only unless 'rw' (FAT32 only); no args: mount all volumes found (read-only)
 - `remount NAME rw|ro` - switch a mounted volume between read-write and read-only
 - `umount NAME` - unmount `/NAME`
-- `rmount N|NAME [rw|ro]` - makes partition N (mounted if needed) or /mnt/NAME the filesystem root. `rmount ramfs` reverts back to the initial RAM FS root. If called without parameters, shows the current root
+- `rmount N|NAME|id=ID [rw|ro]` - make partition N (mounted if needed), or /mnt/NAME, or the volume with the given ID the filesystem root. `rmount ramfs` reverts back to the initial RAM FS root. If called without parameters, shows the current root
+- `ptable DISK gpt|mbr yes` - new empty partition table (erases the disk's partitions)
+- `padd DISK SIZE|rest [esp|data]` - add a partition (SIZE in MiB)
+- `pdel N yes` - delete partition N
+- `mkfs N [LABEL] yes` - format partition N as FAT32
 - `sync` - flush read-write volumes to the disk
 - `cat PATH` - print a text file
 - `append PATH TEXT` - add a line to the file

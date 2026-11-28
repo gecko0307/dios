@@ -32,6 +32,7 @@ import dios.core.console;
 import dios.core.cpu;
 import dios.core.blockdev;
 import dios.core.diag;
+import dios.core.diskutil;
 import dios.core.exfat;
 import dios.core.fat32w;
 import dios.core.fs;
@@ -52,13 +53,14 @@ import dios.core.xhci;
 enum size_t SHELL_LINE_CAPACITY = 128;
 enum size_t SHELL_HISTORY_CAPACITY = 16;
 
-immutable string[33] SHELL_COMMANDS = [
+immutable string[37] SHELL_COMMANDS = [
     "help", "mem", "clock", "irq", "pci", "history", "poweroff", "shutdown",
     "reboot", "clear", "cpuinfo", "acpi", "irqstat",
     "sleep", "hexdump", "crash", "run", "memmap",
     "programs", "disk", "mount", "cd", "cat", "dmesg", "usb",
     "ps", "kill", "fg", "gfx", "umount",
-    "sync", "remount", "rmount"
+    "sync", "remount", "rmount",
+    "ptable", "padd", "pdel", "mkfs"
 ];
 
 __gshared char[SHELL_LINE_CAPACITY] shellLine;
@@ -1088,6 +1090,10 @@ void shellExecuteStr(char[] shellLine, size_t shellLineLength) @nogc nothrow
         cprintf("  umount NAME         Unmount /mnt/NAME (flushes a read-write volume)\n");
         cprintf("  rmount N|NAME|id=ID [rw|ro]  Make partition N, /mnt/NAME or the volume with this ID (1A2B-3C4D) the root \"/\"\n");
         cprintf("  rmount ramfs        Back to the initial RAM root;  rmount: show the current root\n");
+        cprintf("  ptable DISK gpt|mbr yes   New empty partition table (erases the disk's partitions)\n");
+        cprintf("  padd DISK SIZE|rest [esp|data]  Add a partition (SIZE in MiB);  padd DISK bios: BIOS boot partition\n");
+        cprintf("  pdel N yes          Delete partition N\n");
+        cprintf("  mkfs N [LABEL] yes  Format partition N as FAT32\n");
         cprintf("  sync                Flush read-write volumes to the disk\n");
         cprintf("  cd [DIR]            Change the current directory\n");
         cprintf("  cat PATH            Print a text file\n");
@@ -1268,6 +1274,14 @@ void shellExecuteStr(char[] shellLine, size_t shellLineLength) @nogc nothrow
         shellRemount(args);
     else if (shellEquals(shellLine.ptr, "rmount"))
         shellRmount(args);
+    else if (shellEquals(shellLine.ptr, "ptable"))
+        duPtable(args);
+    else if (shellEquals(shellLine.ptr, "padd"))
+        duPadd(args);
+    else if (shellEquals(shellLine.ptr, "pdel"))
+        duPdel(args);
+    else if (shellEquals(shellLine.ptr, "mkfs"))
+        duMkfs(args);
     else if (shellEquals(shellLine.ptr, "cd"))
     {
         // Built in, not a program: the current directory belongs to the shell, and a program
