@@ -354,6 +354,7 @@ void procCwdCopy(char* dst, const(char)* src) @nogc nothrow
 
 // Mount `slot` goes away: tasks whose current directory is inside it go back to "/". (The
 // running task's own was already dealt with by fsCwdLeave; it is not in Task.cwd right now.)
+// FS_CWD_ALL: the root itself was swapped (rmount), so no old directory means anything: all go to "/".
 extern(C) void procCwdLeave(int slot) @nogc nothrow
 {
     for (uint i = 0; i < TASK_MAX; i++)
@@ -362,7 +363,7 @@ extern(C) void procCwdLeave(int slot) @nogc nothrow
         const(char)* rest;
         if (t is cur || t.state == TaskState.Free)
             continue;
-        if (fsMountOfPath(t.cwd.ptr, &rest) == slot)
+        if (slot == FS_CWD_ALL || fsMountOfPath(t.cwd.ptr, &rest) == slot)
         {
             t.cwd[0] = '/';
             t.cwd[1] = 0;

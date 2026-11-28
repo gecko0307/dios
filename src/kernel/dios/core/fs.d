@@ -13,6 +13,13 @@ module dios.core.fs;
  * or unmounting one volume invalidates only the open files that live on it. The root
  * itself can never go away.
  *
+ * The root can be moved to a volume with `rmount` (fsSetRoot): "/" is then the root directory of
+ * that volume and the initial RAM file system is only reachable again through `rmount ramfs`.
+ * /mnt stays the kernel's own directory whatever the root is: it lists the mount points, and a
+ * "mnt" directory on the root volume is hidden behind it. The root volume is an ordinary mount,
+ * so it also shows up as /mnt/NAME, but paths are always normalised to the short form ("/a", never
+ * "/mnt/NAME/a"), so one file never has two names.
+ *
  * Volumes are mounted read-only. A FAT32 volume can be mounted (or remounted) for writing;
  * the root file system and exFAT volumes are always read-only. The write calls below
  * (fsOpenWrite, fsCreate, fsUnlink, ...) return FW_OK or one of the FW_ERR_* codes.
@@ -28,7 +35,10 @@ enum uint FS_PATH_MAX = 256;
 enum uint FS_MAX_MOUNTS = 8;
 enum uint FS_NAME_MAX = 32;
 
-enum int FS_ROOT = -1;                  // "mount index" of files in the root file system (ramfs)
+enum int FS_ROOT = -1;                  // "mount index" of files in the initial RAM file system (ramfs)
+enum int FS_NONE = -2;                  // fsLocate(): below /mnt, but no such mount: nothing lives there
+enum int FS_CWD_ALL = -100;             // for FsCwdLeaveHook: every task goes back to "/" (the root changed)
+enum uint FS_MNT_CLUSTER = 0xFFFFFFFF;  // firstCluster of the virtual /mnt of a volume root (never a real cluster)
 
 // Results of fsMountPartition()
 enum int FS_ERR_UNREADABLE = -1;        // not an exFAT or FAT32 volume
@@ -39,6 +49,7 @@ enum int FS_ERR_BAD_NAME = -5;          // empty, too long, or contains '/'
 enum int FS_ERR_NAME_TAKEN = -6;
 enum int FS_ERR_NO_WRITE = -7;          // only FAT32 volumes can be mounted for writing
 enum int FS_ERR_IO = -8;
+enum int FS_ERR_NOT_MOUNTED = -9;       // fsSetRoot(): that mount slot is not in use
 
 // open flags (Linux values, as in ulib): access mode in the low bits
 enum uint FS_O_ACCMODE = 3;             // 0 = read only, 1 = write only, 2 = read/write
@@ -70,6 +81,9 @@ struct Mount
 }
 
 __gshared Mount[FS_MAX_MOUNTS] mounts;
+// What "/" is: FS_ROOT = the initial RAM file system (ramfs.d), otherwise the mount slot of the
+// volume that was made the root with fsSetRoot().
+__gshared int fsRootSlot = FS_ROOT;
 // The current directory of the RUNNING task: absolute, "/" when empty (see fsInitCwd). Every task has
 // its own (Task.cwd in proc.d); the scheduler swaps them in and out when it switches tasks.
 __gshared char[FS_PATH_MAX] fsCwd;
@@ -78,6 +92,14 @@ __gshared char[FS_PATH_MAX] fsCwd;
 /// send the tasks whose current directory is inside it back to "/".
 alias FsCwdLeaveHook = extern(C) void function(int slot) @nogc nothrow;
 __gshared FsCwdLeaveHook fsCwdLeaveHook;
+
+// Lists the root directory of the root volume with its own "mnt" replaced by the virtual one.
+struct MntShim
+{
+    ExfatDirFn fn;
+    void* ctx;
+    bool stopped;
+}
 
 extern(C):
 
@@ -271,6 +293,121 @@ int fsMountOfPath(const(char)* full, const(char)** rest) @nogc nothrow
     return slot;
 }
 
+/// Where does the absolute path `full` sit relative to the kernel's /mnt directory?
+/// 0 = outside it, 1 = it is /mnt itself, 2 = below it.
+uint fsMntClass(const(char)* full) @nogc nothrow
+{
+    if (!(full[0] == '/' && full[1] == 'm' && full[2] == 'n' && full[3] == 't'))
+        return 0;
+    if (full[4] == 0)
+        return 1;
+    return full[4] == '/' ? 2 : 0;
+}
+
+/// Which file system holds the absolute, normalised path `full`? Returns the mount slot of a
+/// volume (`rest` = the path inside that volume: "" for its root directory, else "/a/b"), FS_ROOT
+/// for the initial RAM file system, or FS_NONE for a place below /mnt that is no mount.
+int fsLocate(const(char)* full, const(char)** rest) @nogc nothrow
+{
+    int slot = fsMountOfPath(full, rest);
+    if (slot >= 0)
+        return slot;
+    if (fsRootSlot == FS_ROOT)
+        return FS_ROOT;
+    if (fsMntClass(full) != 0)
+        return FS_NONE;                 // /mnt belongs to the kernel, not to the root volume
+    *rest = (full[1] == 0) ? full + 1 : full;   // "/" -> ""
+    return fsRootSlot;
+}
+
+/// The root volume is also mounted as /mnt/NAME. Both spellings name the same files, so make
+/// the short one the only one ("/mnt/NAME/a/b" -> "/a/b"): code that compares paths (cd out of
+/// a directory that is being removed, moving a directory into itself) keeps working.
+void fsCanonRoot(char* path) @nogc nothrow
+{
+    if (fsRootSlot < 0)
+        return;
+    const(char)* rest;
+    if (fsMountOfPath(path, &rest) != fsRootSlot)
+        return;
+    if (*rest == 0)
+    {
+        path[0] = '/';
+        path[1] = 0;
+        return;
+    }
+    uint n = 0;
+    while (rest[n] != 0)                // rest lies inside path, ahead of what is written: copying forward is safe
+    {
+        path[n] = rest[n];
+        n++;
+    }
+    path[n] = 0;
+}
+
+/// The directory entry of the virtual /mnt of a volume root.
+void fsVirtualMntEntry(ExfatEntry* e) @nogc nothrow
+{
+    *e = ExfatEntry.init;
+    e.name[0] = 'm';
+    e.name[1] = 'n';
+    e.name[2] = 't';
+    e.name[3] = 0;
+    e.isDir = true;
+    e.attrs = EXFAT_ATTR_DIR;
+    e.firstCluster = FS_MNT_CLUSTER;
+}
+
+bool fsIsMntName(const(char)* name) @nogc nothrow
+{
+    // FAT names are not case sensitive
+    return (name[0] | 0x20) == 'm' && (name[1] | 0x20) == 'n' && (name[2] | 0x20) == 't' && name[3] == 0;
+}
+
+extern(C) bool fsMntShimCb(const(ExfatEntry)* e, void* ctx) @nogc nothrow
+{
+    MntShim* s = cast(MntShim*)ctx;
+    if (fsIsMntName(e.name.ptr))
+        return true;                    // hidden behind the virtual /mnt
+    if (!s.fn(e, s.ctx))
+    {
+        s.stopped = true;
+        return false;
+    }
+    return true;
+}
+
+/// Make mount slot `slot` (or, with FS_ROOT, the initial RAM file system) the root directory.
+/// Open files stay open (they remember their own volume). The old current directories mean
+/// nothing in the new tree, so every task goes back to "/". Returns `slot` or an FS_ERR_*.
+int fsSetRoot(int slot) @nogc nothrow
+{
+    if (slot != FS_ROOT && (slot < 0 || slot >= cast(int)FS_MAX_MOUNTS || !mounts[slot].mounted))
+        return FS_ERR_NOT_MOUNTED;
+    fsRootSlot = slot;
+    fsCwd[0] = '/';
+    fsCwd[1] = 0;
+    if (fsCwdLeaveHook !is null)
+        fsCwdLeaveHook(FS_CWD_ALL);
+    return slot;
+}
+
+const(char)* fsMountErrorText(int err) @nogc nothrow
+{
+    switch (err)
+    {
+        case FS_ERR_ALREADY: return "that partition is already mounted";
+        case FS_ERR_NO_SLOT: return "too many mounts (use 'umount NAME' first)";
+        case FS_ERR_BAD_NAME: return "bad mount name";
+        case FS_ERR_NAME_TAKEN: return "that mount name is already in use";
+        case FS_ERR_BAD_PARTITION: return "no such partition";
+        case FS_ERR_NO_WRITE: return "only FAT32 volumes can be mounted read-write";
+        case FS_ERR_IO: return "I/O error while preparing the volume for writing";
+        case FS_ERR_NOT_MOUNTED: return "that volume is not mounted";
+        default: return "not a readable exFAT or FAT32 volume";
+    }
+}
+
 /// If the current directory (of this task and of every other) is inside mount `slot`, go back to "/".
 void fsCwdLeave(int slot) @nogc nothrow
 {
@@ -289,6 +426,13 @@ void fsUnmount(int slot) @nogc nothrow
 {
     if (slot < 0 || slot >= cast(int)FS_MAX_MOUNTS || !mounts[slot].mounted)
         return;
+    if (slot == fsRootSlot)
+    {
+        // The root volume is going away (unplugged): fall back to the initial RAM file system.
+        // (The `umount` command refuses this; it only happens when the disk itself vanishes.)
+        kprintf("Root volume /mnt/%s is gone; the root is the initial RAM file system again\n", mounts[slot].name.ptr);
+        fsSetRoot(FS_ROOT);
+    }
     fsCwdLeave(slot);           // before the name is gone
     if (mounts[slot].vol.writable)
     {
@@ -386,6 +530,7 @@ bool fsResolve(const(char)* path, char* out_) @nogc nothrow
     if (len == 0)
         out_[len++] = '/';
     out_[len] = 0;
+    fsCanonRoot(out_);
     return true;
 }
 
@@ -397,8 +542,19 @@ bool fsStat(const(char)* path, ExfatEntry* e, int* mountOut = null) @nogc nothro
     if (!fsResolve(path, full.ptr))
         return false;
 
+    // With a volume as the root, /mnt is still the kernel's: it lists the mount points.
+    if (fsRootSlot >= 0 && fsMntClass(full.ptr) == 1)
+    {
+        fsVirtualMntEntry(e);
+        if (mountOut !is null)
+            *mountOut = fsRootSlot;
+        return true;
+    }
+
     const(char)* rest;
-    int slot = fsMountOfPath(full.ptr, &rest);
+    int slot = fsLocate(full.ptr, &rest);
+    if (slot == FS_NONE)
+        return false;
     if (slot >= 0)
     {
         if (!exfatLookup(&mounts[slot].vol, rest, e))
@@ -452,6 +608,30 @@ bool fsIterate(int slot, const(ExfatEntry)* dir, ExfatDirFn fn, void* ctx) @nogc
     }
     if (slot < 0 || slot >= cast(int)FS_MAX_MOUNTS || !mounts[slot].mounted)
         return false;
+    if (slot == fsRootSlot)
+    {
+        if (dir.firstCluster == FS_MNT_CLUSTER)
+        {
+            fsIterateMounts(fn, ctx);       // the virtual /mnt
+            return true;
+        }
+        if (dir.firstCluster == mounts[slot].vol.rootCluster)
+        {
+            // "/" of the root volume: its entries, with /mnt (virtual) in place of any "mnt" of its own
+            MntShim shim;
+            shim.fn = fn;
+            shim.ctx = ctx;
+            shim.stopped = false;
+            bool ok = exfatIterate(&mounts[slot].vol, dir, &fsMntShimCb, &shim);
+            if (ok && !shim.stopped)
+            {
+                ExfatEntry m;
+                fsVirtualMntEntry(&m);
+                fn(&m, ctx);
+            }
+            return ok;
+        }
+    }
     return exfatIterate(&mounts[slot].vol, dir, fn, ctx);
 }
 
@@ -515,10 +695,12 @@ int fsPrepare(const(char)* path, int* slotOut, uint* parentFirst, char* leaf) @n
         return FW_ERR_BAD_NAME;
 
     const(char)* rest;
-    int slot = fsMountOfPath(full.ptr, &rest);
-    if (slot < 0)
+    int slot = fsLocate(full.ptr, &rest);
+    if (slot == FS_NONE)
+        return FW_ERR_RO;                       // /mnt is the kernel's own directory (see fsSetRoot)
+    if (slot == FS_ROOT)
     {
-        // the root file system: only /home can be changed
+        // the initial RAM file system: only /home can be changed
         if (!ramfsWritablePath(full.ptr))
             return FW_ERR_RO;
         uint n = 0;

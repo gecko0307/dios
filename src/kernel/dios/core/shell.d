@@ -58,7 +58,7 @@ immutable string[33] SHELL_COMMANDS = [
     "sleep", "hexdump", "crash", "run", "memmap",
     "programs", "disk", "mount", "cd", "cat", "dmesg", "usb",
     "ps", "kill", "fg", "gfx", "umount",
-    "sync", "remount"
+    "sync", "remount", "rmount"
 ];
 
 __gshared char[SHELL_LINE_CAPACITY] shellLine;
@@ -524,8 +524,9 @@ void shellDisk() @nogc nothrow
             cprintf("  [%u] partition %u: start %llu, %llu MiB, %s", i, cast(uint)p.number,
                     p.startLba, (p.sectors * b.sectorSize) >> 20, p.kind.ptr);
             if (ms >= 0)
-                cprintf("   <- mounted as /mnt/%s%s", mounts[ms].name.ptr,
-                        mounts[ms].vol.writable ? " (read-write)".ptr : "".ptr);
+                cprintf("   <- mounted as /mnt/%s%s%s", mounts[ms].name.ptr,
+                        mounts[ms].vol.writable ? " (read-write)".ptr : "".ptr,
+                        ms == fsRootSlot ? " (root)".ptr : "".ptr);
             cprintf("\n");
             shown++;
         }
@@ -668,8 +669,126 @@ void shellUmount(const(char)* args) @nogc nothrow
         cprintf(")\n");
         return;
     }
+    if (slot == fsRootSlot)
+    {
+        cprintf("/mnt/%s is the root file system. 'rmount ramfs' first, then unmount it.\n", mounts[slot].name.ptr);
+        return;
+    }
     cprintf("Unmounted /mnt/%s\n", mounts[slot].name.ptr);
     fsUnmount(slot);
+}
+
+// rmount                  show the root
+// rmount ramfs            the initial RAM file system is the root again
+// rmount N|NAME [rw|ro]   N: partition number from 'disk' (mounted first if it is not yet);
+//                         NAME: a volume that is already mounted as /mnt/NAME
+void shellRmount(const(char)* args) @nogc nothrow
+{
+    char* rest = cast(char*)args;
+    char* target = shellNextWord(&rest);
+    if (target is null)
+    {
+        if (fsRootSlot == FS_ROOT)
+            cprintf("Root: the initial RAM file system\n");
+        else
+            cprintf("Root: volume '%s' (/mnt/%s)%s\n", mounts[fsRootSlot].vol.label.ptr, mounts[fsRootSlot].name.ptr,
+                    mounts[fsRootSlot].vol.writable ? ", read-write".ptr : ", read-only".ptr);
+        cprintf("Usage: rmount N|NAME [rw|ro]   or   rmount ramfs\n");
+        return;
+    }
+
+    bool modeGiven = false;
+    bool writable = false;
+    for (char* w = shellNextWord(&rest); w !is null; w = shellNextWord(&rest))
+    {
+        if (!modeGiven && (shellEquals(w, "rw") || shellEquals(w, "ro")))
+        {
+            modeGiven = true;
+            writable = shellEquals(w, "rw");
+        }
+        else
+        {
+            cprintf("Usage: rmount N|NAME [rw|ro]   or   rmount ramfs\n");
+            return;
+        }
+    }
+
+    int slot;
+    if (shellEquals(target, "ramfs") || shellEquals(target, "-"))
+        slot = FS_ROOT;
+    else
+    {
+        ulong n;
+        const(char)* end = diagParseNumber(target, &n);
+        if (end !is null && *end == 0)
+        {
+            // a partition number, as in 'mount N'; a volume called "5" is reached as /mnt/5
+            if (n >= partitionCount)
+            {
+                cprintf("No such partition: %llu\n", n);
+                return;
+            }
+            slot = fsMountOfPartition(cast(uint)n);
+            if (slot < 0)
+            {
+                slot = fsMountPartition(cast(uint)n, null, writable);
+                if (slot < 0)
+                {
+                    cprintf("Cannot mount partition %llu: %s.\n", n, fsMountErrorText(slot));
+                    return;
+                }
+            }
+            else if (modeGiven && writable != mounts[slot].vol.writable)
+            {
+                int r = fsRemount(slot, writable);
+                if (r < 0)
+                {
+                    cprintf("Cannot remount /mnt/%s: %s.\n", mounts[slot].name.ptr, fsMountErrorText(r));
+                    return;
+                }
+            }
+        }
+        else
+        {
+            const(char)* name = target;
+            if (name[0] == '/' && name[1] == 'm' && name[2] == 'n' && name[3] == 't' && name[4] == '/')
+                name += 5;
+            slot = fsFindMount(name);
+            if (slot < 0)
+            {
+                cprintf("No such mount: %s ('disk' lists the partitions, 'mount N' mounts one)\n", target);
+                return;
+            }
+            if (modeGiven && writable != mounts[slot].vol.writable)
+            {
+                int r = fsRemount(slot, writable);
+                if (r < 0)
+                {
+                    cprintf("Cannot remount /mnt/%s: %s.\n", mounts[slot].name.ptr, fsMountErrorText(r));
+                    return;
+                }
+            }
+        }
+    }
+
+    if (slot == fsRootSlot)
+    {
+        cprintf("That is already the root.\n");
+        return;
+    }
+    fsSetRoot(slot);
+
+    if (slot == FS_ROOT)
+    {
+        cprintf("Root is the initial RAM file system again.\n");
+        return;
+    }
+    cprintf("Root is now %s volume '%s' (/mnt/%s)%s.\n", mounts[slot].vol.fat32 ? "FAT32".ptr : "exFAT".ptr,
+            mounts[slot].vol.label.ptr, mounts[slot].name.ptr, mounts[slot].vol.writable ? ", read-write".ptr : ", read-only".ptr);
+    cprintf("Every program now starts in \"/\"; the old root is back with 'rmount ramfs'.\n");
+    ExfatEntry bin;
+    if (!fsStat("/bin", &bin) || !bin.isDir)
+        cprintf("Note: there is no /bin here, so programs cannot be started by name.\n");
 }
 
 /*
@@ -1045,6 +1164,8 @@ void shellExecute() @nogc nothrow
         cprintf("                      no args: mount all volumes found (read-only)\n");
         cprintf("  remount NAME rw|ro  Switch a mounted volume between read-write and read-only\n");
         cprintf("  umount NAME         Unmount /mnt/NAME (flushes a read-write volume)\n");
+        cprintf("  rmount N|NAME [rw|ro]  Make partition N (mounted if needed) or /mnt/NAME the root \"/\"\n");
+        cprintf("  rmount ramfs        Back to the initial RAM root;  rmount: show the current root\n");
         cprintf("  sync                Flush read-write volumes to the disk\n");
         cprintf("  cd [DIR]            Change the current directory\n");
         cprintf("  cat PATH            Print a text file\n");
@@ -1223,6 +1344,8 @@ void shellExecute() @nogc nothrow
     }
     else if (shellEquals(shellLine.ptr, "remount"))
         shellRemount(args);
+    else if (shellEquals(shellLine.ptr, "rmount"))
+        shellRmount(args);
     else if (shellEquals(shellLine.ptr, "cd"))
     {
         // Built in, not a program: the current directory belongs to the shell, and a program
