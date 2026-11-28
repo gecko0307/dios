@@ -806,7 +806,8 @@ void shellRunScript(const(char)* path) @nogc nothrow
     }
     
     // Allocate a buffer
-    ulong pages = (e.size + 4095) / 4096;
+    // (adding an extra byte for a null terminator, in case the file size is a multiple of 4096)
+    ulong pages = (e.size + 1 + 4095) / 4096;
     ulong phys = pmmAllocContiguousZeroed(pages, 1, 0);
     if (phys == 0)
     {
