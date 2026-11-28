@@ -1092,3 +1092,26 @@ int fsRemount(int slot, bool writable) @nogc nothrow
     }
     return slot;
 }
+
+enum int FS_ROOT_NOT_FOUND = -1;
+
+/// Find the first mounted partition containing an empty /boot/dios.here marker.
+/// Returns the mount slot or FS_ROOT_NOT_FOUND.
+int fsFindInstalledRoot() @nogc nothrow
+{
+    for (int i = 0; i < FS_MAX_MOUNTS; i++)
+    {
+        if (!mounts[i].mounted)
+            continue;
+
+        ExfatEntry e;
+
+        if (exfatLookup(&mounts[i].vol, "/boot/dios.here", &e) &&
+            !e.isDir && e.size == 0)
+        {
+            return i;
+        }
+    }
+
+    return FS_ROOT_NOT_FOUND;
+}

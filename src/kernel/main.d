@@ -281,6 +281,24 @@ void run() @nogc nothrow
     usbStorageProbe();
     fsInit(); // root file system (rootfs.tar), then the disks below /mnt
     fsAutoMount();
+    if (!bootArgHas(bootInfo.arguments, "livecd".ptr))
+    {
+        int rootSlot = fsFindInstalledRoot();
+        if (rootSlot != FS_ROOT_NOT_FOUND)
+        {
+            fsRemount(rootSlot, true);
+            fsSetRoot(rootSlot);
+            kprintf("Root is now %s volume '%s' (/mnt/%s)%s.\n",
+                mounts[rootSlot].vol.fat32 ? "FAT32".ptr : "exFAT".ptr,
+                mounts[rootSlot].vol.label.ptr,
+                mounts[rootSlot].name.ptr,
+                mounts[rootSlot].vol.writable ? ", read-write".ptr : ", read-only".ptr);
+        }
+        else
+        {
+            kprintf("Cannot remount root: primary DIOS partition is not found\n");
+        }
+    }
     procInit();
     gfxsrvInit(); // graphics server support: system calls 16..26, Ctrl+F1/F2/F3
     shellInit();
