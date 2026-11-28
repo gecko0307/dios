@@ -1,8 +1,11 @@
 DIOS 0.10.0 - TBD
 -----------------
+- **Bootloader**:
+  - Upgrade to Limine 12.11.2
 - **Kernel**:
   - AHCI driver. SATA disks are mounted as /mnt/sataNpM where N is the disk number, M is the partition number
   - Any detected volume can be mounted as the filesystem root with `rmount` kernel command
+  - It is now possible to install DIOS on a SATA disk
 - **GFXD**:
   - Window snapping
 - **Desktop**:

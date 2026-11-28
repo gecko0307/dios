@@ -1,6 +1,6 @@
 # DIOS Installation
 
-DIOS can be installed to a SATA disk. It should have a primary partition formatted to FAT32, and a BIOS boot partition for bootloader installation. The following step-by-step guide instructs how to do it under Linux, assuming the disk is `/dev/sdb`.
+DIOS can be installed to a SATA disk. The disk should have a primary partition formatted to FAT32, and a BIOS boot partition for the bootloader. The following step-by-step describes the process under Linux, assuming the disk is `/dev/sdb`.
 
 **Warning! Install DIOS at your own risk! The system is experimental and unstable.**
 
