@@ -4,6 +4,8 @@ DIOS can be installed on a SATA disk under another host operating system, typica
 
 **Warning! Install DIOS at your own risk! The system is experimental and unstable.**
 
+**Warning! This process may change in the future!**
+
 ## Part 1. Preparing the Disk
 
 Completely wipe old partition tables and create a new GPT:

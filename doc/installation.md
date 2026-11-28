@@ -6,6 +6,8 @@ If you prefer to install the system in a familiar environment such as Linux, fol
 
 **Warning! Install DIOS at your own risk! The system is experimental and unstable.**
 
+**Warning! This process may change in the future!**
+
 ## Part 1. Preparing the Disk
 
 If the disk is already in use, unmount it:
