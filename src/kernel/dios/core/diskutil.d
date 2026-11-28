@@ -44,7 +44,13 @@ module dios.core.diskutil;
  * backup of both at 6 and 7, two FAT copies, the root directory in cluster 2, and the
  * cluster size picked by volume size like Windows does. The boot sector is written last,
  * so an interrupted format never leaves a volume that looks valid.
+ *
+ *   biosinstall DISK [N] yes    Limine BIOS boot code (what "limine bios-install" does): boot
+ *                               sector in sector 0, stage 1.5 in the BIOS boot partition (GPT) or
+ *                               in the gap after the MBR. The code is the boot module
+ *                               limine-bios-hdd.bin (the file Limine embeds in its own tool).
  */
+import dios.bootloader.limine;
 import dios.core.blockdev;
 import dios.core.clock;
 import dios.core.cpu;
@@ -71,6 +77,11 @@ enum int DU_ERR_NO_PART = -12;          // no such partition
 enum int DU_ERR_VERIFY = -13;           // the new volume does not mount
 enum int DU_ERR_BAD_LABEL = -14;
 enum int DU_ERR_LIST_FULL = -15;        // the kernel's partition list is full
+enum int DU_ERR_BAD_BLOB = -16;         // the boot code image is not what it should be
+enum int DU_ERR_NO_BIOS_PART = -17;     // GPT without a (suitable) BIOS boot partition
+enum int DU_ERR_HAS_FS = -18;           // the target area holds a file system
+enum int DU_ERR_MBR_LOW = -19;          // an MBR partition starts below LBA 63
+enum int DU_ERR_NO_ROOM = -20;          // the boot code does not fit where it has to go
 
 enum uint DU_ALIGN_BYTES = 1024 * 1024;
 enum uint DU_GPT_ENTRIES = 128;
@@ -90,6 +101,8 @@ struct DuRange
 
 __gshared ubyte[4096] duSector;         // one sector of the disk
 __gshared ubyte[DU_GPT_BYTES] duEntries;    // the GPT entry array
+__gshared ubyte[4096] duBoot;            // sector 0 as found
+__gshared ubyte[4096] duProbe;
 __gshared ubyte[65536] duZero;          // stays all zero
 __gshared DuRange[DU_GPT_ENTRIES + 2] duRanges;
 __gshared uint[256] duCrcTable;
@@ -117,6 +130,11 @@ const(char)* duErrorText(int err) @nogc nothrow
         case DU_ERR_VERIFY: return "the new volume does not mount: something is wrong with the layout written";
         case DU_ERR_BAD_LABEL: return "bad label: up to 11 characters of A-Z 0-9 space - _";
         case DU_ERR_LIST_FULL: return "the kernel's partition list is full";
+        case DU_ERR_BAD_BLOB: return "no usable limine-bios-hdd.bin boot module (add 'module_path: boot():/limine-bios-hdd.bin' to limine.conf)";
+        case DU_ERR_NO_BIOS_PART: return "no BIOS boot partition on this GPT disk ('padd DISK bios' makes one)";
+        case DU_ERR_HAS_FS: return "the place for the boot code looks like a file system, not touching it";
+        case DU_ERR_MBR_LOW: return "an MBR partition starts below sector 63: no room for the boot code";
+        case DU_ERR_NO_ROOM: return "the boot code does not fit in the BIOS boot partition / the MBR gap";
         default: return "unknown error";
     }
 }
@@ -497,7 +515,7 @@ int duCreateTable(BlockDev* b, uint type) @nogc nothrow
 }
 
 /// BIOS boot partition GUID (21686148-6449-6E6F-744E-656564454649), for Limine/GRUB stage 2 on GPT.
-immutable ubyte[16] DU_GUID_BIOS_BOOT = [0x48, 0x61, 0x68, 0x21, 0x49, 0x64, 0x6F, 0x6E, 0x4E, 0x74, 0x65, 0x65, 0x64, 0x45, 0x49, 0x46];
+immutable ubyte[16] DU_GUID_BIOS_BOOT = [0x48, 0x61, 0x68, 0x21, 0x49, 0x64, 0x6F, 0x6E, 0x74, 0x4E, 0x65, 0x65, 0x64, 0x45, 0x46, 0x49];
 
 /// Add a partition of `sizeMiB` MiB (0 = the biggest free area). `esp`: EFI system partition,
 /// else a data partition (what FAT32 lives in). Returns the new partition's number
@@ -884,6 +902,177 @@ int duFormatFat32(uint index, const(char)* label, uint* clustersOut, uint* clust
 }
 
 // ---------------------------------------------------------------------------
+// Limine BIOS boot code
+// ---------------------------------------------------------------------------
+
+bool duMemEq(const(ubyte)* a, const(ubyte)* b, uint n) @nogc nothrow
+{
+    for (uint i = 0; i < n; i++)
+        if (a[i] != b[i])
+            return false;
+    return true;
+}
+
+/// The boot code image among the boot modules: limine-bios-hdd.bin = 512-byte boot sector
+/// followed by stage 1.5.
+const(ubyte)* duFindBiosBlob(ulong* size) @nogc nothrow
+{
+    if (moduleRequest.response is null)
+        return null;
+    ulong n = moduleRequest.response.module_count;
+    for (ulong i = 0; i < n; i++)
+    {
+        LimineFile* f = moduleRequest.response.modules[i];
+        if (f is null || f.address is null || f.path is null || !limineIsBiosBlobPath(f.path))
+            continue;
+        *size = f.size;
+        return cast(const(ubyte)*)f.address;
+    }
+    return null;
+}
+
+/// 1: the sector at `lba` starts like a file system, 0: no, -1: read error.
+int duLooksLikeFs(BlockDev* b, ulong lba) @nogc nothrow
+{
+    uint ss = b.sectorSize;
+    uint n = (1082 + ss - 1) / ss;
+    if (!blockRead(b, lba, n, duProbe.ptr))
+        return -1;
+    const(ubyte)* s = duProbe.ptr;
+    if (duMemEq(s + 3, cast(const(ubyte)*)"NTFS".ptr, 4) || duMemEq(s + 3, cast(const(ubyte)*)"EXFAT".ptr, 5) ||
+        duMemEq(s + 54, cast(const(ubyte)*)"FAT".ptr, 3) || duMemEq(s + 82, cast(const(ubyte)*)"FAT".ptr, 3))
+        return 1;
+    if (s[1080] == 0x53 && s[1081] == 0xEF)             // ext2/3/4 magic 0xEF53
+        return 1;
+    return 0;
+}
+
+/// Install Limine's BIOS boot code, like "limine bios-install". `img` is limine-bios-hdd.bin.
+/// GPT: stage 1.5 goes to the start of the BIOS boot partition (`partIndex`: its number in
+/// 'disk', or -1 to take the first one). MBR: to byte 4096, in the gap before the first
+/// partition. The boot sector is written last, with the partition table and disk ID of the
+/// disk kept; *locOut gets the byte offset of stage 1.5.
+int duInstallBiosBoot(BlockDev* b, int partIndex, const(ubyte)* img, ulong imgSize, ulong* locOut) @nogc nothrow
+{
+    if (b is null || !b.present)
+        return DU_ERR_NO_DISK;
+    if (b.write is null)
+        return DU_ERR_READONLY;
+    uint ss = b.sectorSize;
+    if (ss < 512 || ss > 4096)
+        return DU_ERR_BAD_ARG;
+    if (img is null || imgSize <= 512 || imgSize > 1024UL * 1024 || img[510] != 0x55 || img[511] != 0xAA)
+        return DU_ERR_BAD_BLOB;
+    if (duDiskIsWhole(b))
+        return DU_ERR_NO_TABLE;
+
+    uint kind = duTableKind(b);
+    if (kind == DU_TABLE_NONE)
+        return DU_ERR_NO_TABLE;
+    if (!blockRead(b, 0, 1, duBoot.ptr))
+        return DU_ERR_IO;
+
+    ulong loc;
+    ulong room;
+    if (kind == DU_TABLE_GPT)
+    {
+        ulong firstUsable, lastUsable;
+        ubyte[16] guid;
+        int r = duReadGpt(b, &firstUsable, &lastUsable, guid.ptr);
+        if (r != DU_OK)
+            return r;
+        if (partIndex >= 0)
+        {
+            if (cast(uint)partIndex >= partitionCount || !partitions[partIndex].valid ||
+                partitions[partIndex].dev != blockDevIndex(b))
+                return DU_ERR_NO_PART;
+        }
+        bool found = false;
+        ulong first = 0;
+        ulong last = 0;
+        for (uint i = 0; i < DU_GPT_ENTRIES && !found; i++)
+        {
+            const(ubyte)* e = duEntries.ptr + i * DU_GPT_ENTRY_SIZE;
+            if (!duMemEq(e, DU_GUID_BIOS_BOOT.ptr, 16))
+                continue;
+            first = blkLe64(e + 32);
+            last = blkLe64(e + 40);
+            if (partIndex < 0 || partitions[partIndex].startLba == first)
+                found = true;
+        }
+        if (!found)
+            return DU_ERR_NO_BIOS_PART;
+        if (last < first || first < firstUsable || last > lastUsable || first < 2 + DU_GPT_BYTES / ss)
+            return DU_ERR_GPT_BAD;
+        room = (last - first + 1) * ss;
+        if (room < 32768)
+            return DU_ERR_NO_ROOM;
+        loc = first * ss;
+    }
+    else
+    {
+        bool anyActive = false;
+        int firstUsed = -1;
+        for (uint i = 0; i < 4; i++)
+        {
+            const(ubyte)* e = duBoot.ptr + 446 + i * 16;
+            if (e[0] & 0x80)
+                anyActive = true;
+            if (e[4] != 0)
+            {
+                if (blkLe32(e + 8) < 63)
+                    return DU_ERR_MBR_LOW;
+                if (firstUsed < 0)
+                    firstUsed = cast(int)i;
+            }
+        }
+        if (!anyActive && firstUsed >= 0)
+            duBoot[446 + cast(uint)firstUsed * 16] = 0x80;      // some BIOSes refuse to boot a disk without one
+        loc = 4096;
+        room = 63 * 512 - 4096;
+    }
+
+    if (imgSize - 512 > room)
+        return DU_ERR_NO_ROOM;
+    int hasFs = duLooksLikeFs(b, loc / ss);
+    if (hasFs < 0)
+        return DU_ERR_IO;
+    if (hasFs > 0)
+        return DU_ERR_HAS_FS;
+
+    // stage 1.5 first, padded to whole sectors
+    ulong left = imgSize - 512;
+    const(ubyte)* src = img + 512;
+    ulong lba = loc / ss;
+    while (left != 0)
+    {
+        uint n = left < DU_GPT_BYTES ? cast(uint)left : DU_GPT_BYTES;
+        uint sectors = (n + ss - 1) / ss;
+        memcpy(duEntries.ptr, src, n);
+        if (n < sectors * ss)
+            memset(duEntries.ptr + n, 0, sectors * ss - n);
+        if (!blockWrite(b, lba, sectors, duEntries.ptr))
+            return DU_ERR_IO;
+        src += n;
+        left -= n;
+        lba += sectors;
+    }
+
+    // then sector 0: the boot code over the old one, keeping the timestamp (218..223) and
+    // disk ID / partition table (440..509) of the disk; the location of stage 1.5 goes in at 0x1A4
+    memcpy(duSector.ptr, duBoot.ptr, ss);
+    memcpy(duSector.ptr, img, 512);
+    memcpy(duSector.ptr + 218, duBoot.ptr + 218, 6);
+    memcpy(duSector.ptr + 440, duBoot.ptr + 440, 70);
+    duPut64(duSector.ptr + 0x1A4, loc);
+    if (!blockWrite(b, 0, 1, duSector.ptr))
+        return DU_ERR_IO;
+    blockFlush(b);
+    *locOut = loc;
+    return DU_OK;
+}
+
+// ---------------------------------------------------------------------------
 // shell commands
 // ---------------------------------------------------------------------------
 
@@ -1014,8 +1203,12 @@ void duPadd(const(char)* args) @nogc nothrow
         return;
     }
     Partition* p = &partitions[cast(uint)r];
-    cprintf("Created partition [%d] on %s: start %llu, %llu MiB, %s. 'mkfs %d' formats it.\n", r, b.name.ptr, p.startLba,
-            (p.sectors * b.sectorSize) >> 20, p.kind.ptr, r);
+    ulong bytes = p.sectors * b.sectorSize;
+    if (bytes < (1UL << 20))
+        cprintf("Created partition [%d] on %s: start %llu, %llu KiB, %s.\n", r, b.name.ptr, p.startLba, bytes >> 10, p.kind.ptr);
+    else
+        cprintf("Created partition [%d] on %s: start %llu, %llu MiB, %s. 'mkfs %d' formats it.\n", r, b.name.ptr, p.startLba,
+                bytes >> 20, p.kind.ptr, r);
 }
 
 // pdel N yes
@@ -1104,4 +1297,66 @@ void duMkfs(const(char)* args) @nogc nothrow
     fsFormatVolumeId(volId, idText.ptr);
     cprintf("FAT32 volume ready: %u clusters of %u bytes, ID %s. 'mount %llu rw' or 'rmount id=%s rw' uses it.\n", clusters,
             clusterBytes, idText.ptr, n, idText.ptr);
+}
+
+// biosinstall DISK [N] yes
+void duBiosInstall(const(char)* args) @nogc nothrow
+{
+    char* rest = duCopyArgs(args);
+    char* disk = duNextWord(&rest);
+    char* second = duNextWord(&rest);
+    char* third = duNextWord(&rest);
+    int part = -1;
+    bool confirmed = false;
+    bool ok = disk !is null;
+    if (ok && second !is null)
+    {
+        if (duWordIs(second, "yes") && third is null)
+            confirmed = true;
+        else
+        {
+            ulong n;
+            ok = duParseDecimal(second, &n) && n < BLK_MAX_PARTS;
+            part = cast(int)n;
+            if (ok && third !is null)
+            {
+                confirmed = duWordIs(third, "yes");
+                ok = confirmed && duNextWord(&rest) is null;
+            }
+        }
+    }
+    if (!ok)
+    {
+        cprintf("Usage: biosinstall DISK [N] yes   (N: the BIOS boot partition from 'disk'; default: the first one)\n");
+        return;
+    }
+    BlockDev* b = duFindDisk(disk);
+    if (b is null)
+    {
+        cprintf("No such disk: %s ('disk' lists them)\n", disk);
+        return;
+    }
+    ulong size;
+    const(ubyte)* img = duFindBiosBlob(&size);
+    if (img is null)
+    {
+        cprintf("biosinstall: %s\n", duErrorText(DU_ERR_BAD_BLOB));
+        return;
+    }
+    if (!confirmed)
+    {
+        cprintf("This replaces the boot code of %s (%s) with Limine's (%llu bytes), keeping its partitions.\n", b.name.ptr,
+                b.model.ptr, size);
+        cprintf("Run the command again with 'yes' at the end to do it.\n");
+        return;
+    }
+    ulong loc;
+    int r = duInstallBiosBoot(b, part, img, size, &loc);
+    if (r != DU_OK)
+    {
+        cprintf("biosinstall: %s\n", duErrorText(r));
+        return;
+    }
+    cprintf("Limine BIOS boot code installed on %s, stage 1.5 at byte offset %llu.\n", b.name.ptr, loc);
+    cprintf("Boot still needs limine-bios.sys and limine.conf on a partition of the disk.\n");
 }

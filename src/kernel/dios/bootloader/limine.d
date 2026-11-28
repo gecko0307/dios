@@ -299,3 +299,18 @@ __gshared ulong[4] limineRequestsStart = [0xf6b8f4b39de7d1ae, 0xfab91a6940fcb9cf
 
 @(section(".limine_requests_end"))
 __gshared ulong[2] limineRequestsEnd = [0xadc0e0531bb10d03, 0x9572709f31764c62];
+
+bool limineIsBiosBlobPath(const(char)* path) @nogc nothrow
+{
+    const(char)* tail = "limine-bios-hdd.bin";
+    enum uint TAIL = 19;
+    uint n = 0;
+    while (path[n] != 0)
+        n++;
+    if (n < TAIL)
+        return false;
+    for (uint i = 0; i < TAIL; i++)
+        if (path[n - TAIL + i] != tail[i])
+            return false;
+    return n == TAIL || path[n - TAIL - 1] == '/' || path[n - TAIL - 1] == ':';
+}
