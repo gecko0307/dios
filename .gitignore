@@ -7,5 +7,6 @@
 *.iso
 *.img
 *.tar
+*.bat
 OVMF.fd
 disk
