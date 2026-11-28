@@ -801,11 +801,68 @@ void shellRunScript(const(char)* path) @nogc nothrow
     bool found = fsStat(path, &e, &slot) && !e.isDir;
     if (!found)
     {
-        cprintf("No such script: %s\n", path);
+        cprintf("No such script: %s.\n", path);
         return;
     }
     
-    // TODO: read the file and execute line by line
+    // Allocate a buffer
+    ulong pages = (e.size + 4095) / 4096;
+    ulong phys = pmmAllocContiguousZeroed(pages, 1, 0);
+    if (phys == 0)
+    {
+        cprintf("Out of memory.\n");
+        return;
+    }
+    scope(exit) pmmFreePages(phys, pages);
+    char* buf = cast(char*)pmmPhysToVirt(phys);
+    
+    // Read the file
+    ExfatFile f;
+    exfatOpen(&f, &e);
+    ulong off = 0;
+    while (off < e.size)
+    {
+        ulong want = e.size - off;
+        if (want > 65536)
+            want = 65536;
+        ulong got = fsRead(slot, &f, off, buf + off, want);
+        if (got == 0)
+            break;
+        off += got;
+    }
+    
+    buf[off] = '\0';
+    
+    //cprintf("%s\n", buf);
+    
+    size_t lineStart = 0;
+    for (size_t i = 0; i <= off; i++)
+    {
+        if (buf[i] == '\n' || i == off)
+        {
+            size_t lineEnd = i;
+            if (lineEnd > lineStart && buf[lineEnd - 1] == '\r')
+                lineEnd--;
+
+            while (lineStart < lineEnd && (buf[lineStart] == ' ' || buf[lineStart] == '\t'))
+                lineStart++;
+
+            size_t len = lineEnd - lineStart;
+
+            if (len > 0 && buf[lineStart] != '#')
+            {
+                char savedChar = buf[lineEnd];
+                buf[lineEnd] = '\0';
+
+                char[] lineSlice = buf[lineStart .. lineEnd];
+                shellExecuteStr(lineSlice, len);
+
+                buf[lineEnd] = savedChar;
+            }
+
+            lineStart = i + 1;
+        }
+    }
 }
 
 // Run an ELF file from the mounted volume. Tries `path`, then `path.elf`.
@@ -946,6 +1003,10 @@ void shellDmesg(const(char)* args) @nogc nothrow
 void shellExecute() @nogc nothrow
 {
     shellExecuteStr(shellLine, shellLineLength);
+    
+    shellClearLine();
+    if (!procHasForeground())
+        shellPrompt();      // otherwise shellTaskExited() prints it when the program ends
 }
 
 // TODO: use const(char)[]
@@ -1252,7 +1313,7 @@ void shellExecuteStr(char[] shellLine, size_t shellLineLength) @nogc nothrow
             char[FS_PATH_MAX] file;
             if (shellResolveProgram(shellLine.ptr, file.ptr))
             {
-                shellRunFile(file.ptr, args, bg);           // "hello" (= /bin/hello.elf), "./hello", "/mnt/usb0p1/hello"
+                shellRunFile(file.ptr, args, bg); // "hello" (= /bin/hello.elf), "./hello", "/mnt/usb0p1/hello"
             }
             else
             {
@@ -1261,10 +1322,6 @@ void shellExecuteStr(char[] shellLine, size_t shellLineLength) @nogc nothrow
             }
         }
     }
-
-    shellClearLine();
-    if (!procHasForeground())
-        shellPrompt();      // otherwise shellTaskExited() prints it when the program ends
 }
 
 void shellComplete() @nogc nothrow
