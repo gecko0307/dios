@@ -2,6 +2,7 @@ DIOS 0.10.0 - TBD
 -----------------
 - **Kernel**:
   - AHCI driver. SATA disks are mounted as /mnt/sataNpM where N is the disk number, M is the partition number
+  - Any detected volume can be mounted as the filesystem root with `rmount` kernel command
 - **GFXD**:
   - Window snapping
 - **Desktop**:
