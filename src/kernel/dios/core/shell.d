@@ -53,14 +53,14 @@ import dios.core.xhci;
 enum size_t SHELL_LINE_CAPACITY = 128;
 enum size_t SHELL_HISTORY_CAPACITY = 16;
 
-immutable string[38] SHELL_COMMANDS = [
+immutable string[39] SHELL_COMMANDS = [
     "help", "mem", "clock", "irq", "pci", "history", "poweroff", "shutdown",
     "reboot", "clear", "cpuinfo", "acpi", "irqstat",
     "sleep", "hexdump", "crash", "run", "memmap",
     "programs", "disk", "mount", "cd", "cat", "dmesg", "usb",
     "ps", "kill", "fg", "gfx", "umount",
     "sync", "remount", "rmount",
-    "ptable", "padd", "pdel", "mkfs", "biosinstall"
+    "ptable", "padd", "pdel", "mkfs", "biosinstall", "ramcopy"
 ];
 
 __gshared char[SHELL_LINE_CAPACITY] shellLine;
@@ -1093,6 +1093,7 @@ void shellExecuteStr(char[] shellLine, size_t shellLineLength) @nogc nothrow
         cprintf("  ptable DISK gpt|mbr yes   New empty partition table (erases the disk's partitions)\n");
         cprintf("  padd DISK SIZE|rest [esp|data]  Add a partition (SIZE in MiB);  padd DISK bios: BIOS boot partition\n");
         cprintf("  pdel N yes          Delete partition N\n");
+        cprintf("  ramcopy NAME        Copy the whole RAM file system into the FAT32 volume /mnt/NAME (mounted rw)\n");
         cprintf("  biosinstall DISK [N] yes  Install Limine BIOS boot code (module limine-bios-hdd.bin)\n");
         cprintf("  mkfs N [LABEL] yes  Format partition N as FAT32\n");
         cprintf("  sync                Flush read-write volumes to the disk\n");
@@ -1285,6 +1286,8 @@ void shellExecuteStr(char[] shellLine, size_t shellLineLength) @nogc nothrow
         duMkfs(args);
     else if (shellEquals(shellLine.ptr, "biosinstall"))
         duBiosInstall(args);
+    else if (shellEquals(shellLine.ptr, "ramcopy"))
+        duRamcopy(args);
     else if (shellEquals(shellLine.ptr, "cd"))
     {
         // Built in, not a program: the current directory belongs to the shell, and a program

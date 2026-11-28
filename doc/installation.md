@@ -1,70 +1,76 @@
-# DIOS Installation
+# DIOS Live Installation
 
-DIOS can be installed on a SATA disk. The disk should have a primary system partition formatted to FAT32, and a BIOS boot partition for the second stage of the bootloader. The following step-by-step guide describes the process under Linux, assuming the disk is `/dev/sdb`.
+DIOS can be installed on a SATA disk in live mode (under a system booted from Live CD/USB). This is currently a complex manual task that is not meant for beginners. Don't try it unless you fully understand what you are doing!
+
+If you prefer to install the system in a familiar environment such as Linux, follow the [offline installation guide](offline_installation.md).
 
 **Warning! Install DIOS at your own risk! The system is experimental and unstable.**
 
 ## Part 1. Preparing the Disk
 
-Completely wipe old partition tables and create a new GPT:
+If the disk is already in use, unmount it:
 
 ```
-sudo sgdisk --zap-all /dev/sdb
+umount sata0p1
 ```
 
-Partition 1 (`sata0p1` in DIOS) - primary system partition + ESP in FAT32 (starting at sector 2048):
+Create a new empty partition table (this will **erase the disk's existing partitions**):
 
 ```
-sudo sgdisk -n 1:2048:0 -t 1:ef00 -c 1:"DIOS" /dev/sdb
+ptable sata0 gpt yes
 ```
 
-Partition 2 (`sata0p2` in DIOS) - BIOS Boot Partition in the 34–2047 free gap (1 MB):
+Add two partitions: a BIOS boot partition without a filesystem, and a primary FAT32 partition (that will be seen to the system as `sata0p2`):
 
 ```
-sudo sgdisk -n 2:34:2047 -t 2:ef02 -c 2:"BOOT" /dev/sdb
+padd sata0 bios
+padd sata0 rest esp
+mkfs 1 DIOS yes
 ```
 
-Inform the kernel of partition table changes:
+Install the BIOS bootloader to the boot partition:
 
 ```
-sudo partprobe /dev/sdb
+biosinstall sata0 yes
 ```
 
-Format the first partition to FAT32:
+## Part 2. Copying the System
+
+Mount the primary partition in read/write mode:
 
 ```
-sudo mkfs.fat -F 32 -n "DIOS" /dev/sdb1
+mount 1 sata0p2 rw
 ```
 
-Write the Master Boot Record (source for the `limine` utility is provided):
+Install the system to the primary partition:
 
 ```
-sudo ./limine bios-install /dev/sdb
+ramcopy sata0p2
 ```
 
-Mount the primary system partition:
+You can make it the root and check that the files were copied, just in case:
 
 ```
-sudo mkdir -p /mnt/dios
-sudo mount -o rw,uid=$(id -u),gid=$(id -g),umask=0022 /dev/sdb1 /mnt/dios
+rmount sata0p2 rw
+ls /
 ```
 
-## Part 2. Preparing the OS
-
-Copy DIOS files - contents of both `cdroot` and `rootfs` folders - to the primary partition.
-
-Make sure that the following files exist:
-
-- `/boot/kernel64.bin` - the DIOS kernel
-- `/boot/rootfs.tar` - RAM filesystem image
-- `/boot/limine.conf` - bootloader config
-- `/boot/limine-bios.sys` - bootloader binary for BIOS
-- `/EFI/BOOT/BOOTX64.EFI` - bootloader binary for UEFI.
-
-At startup, DIOS kernel mounts a bootloader-provided RAM FS image to the filesystem root. To use the system installed on disk, it must mount a volume to the root, for example:
+The console should print something like
 
 ```
-rmount /mnt/sata0p1 rw
+2026-11-28     <DIR>  bin
+2026-11-28     <DIR>  etc
+2026-11-28     <DIR>  home
+2026-11-28     <DIR>  kernel
+2026-11-28     <DIR>  lib
+2026-11-28     <DIR>  boot
+2026-11-28     <DIR>  EFI
+1980-00-00     <DIR>  mnt
+0 file(s), 8 dir(s)
 ```
 
-Doing this manually each time is not very convenient, so the kernel allows to automate this process. Add this command to `rootfs/kernel/init.ss`, a kernel shell script that is executed after successful initialization. Then rebuild `rootfs.tar` by running `python build.py rootfs` and put it on the primary partition as `/boot/rootfs.tar`.
+Remove the boot media (CD/USB) and reboot:
+
+```
+reboot
+```

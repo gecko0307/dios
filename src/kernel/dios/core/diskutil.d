@@ -45,6 +45,9 @@ module dios.core.diskutil;
  * cluster size picked by volume size like Windows does. The boot sector is written last,
  * so an interrupted format never leaves a volume that looks valid.
  *
+ *   ramcopy NAME                copy the whole initial RAM file system (all of "/", except /mnt) into
+ *                               the FAT32 volume mounted as /mnt/NAME (mounted with 'rw')
+ *
  *   biosinstall DISK [N] yes    Limine BIOS boot code (what "limine bios-install" does): boot
  *                               sector in sector 0, stage 1.5 in the BIOS boot partition (GPT) or
  *                               in the gap after the MBR. The code is the boot module
@@ -57,8 +60,10 @@ import dios.core.cpu;
 import dios.core.csprng;
 import dios.core.exfat;
 import dios.core.fat32;
+import dios.core.fat32w;
 import dios.core.fs;
 import dios.core.mem;
+import dios.core.ramfs;
 import dios.core.stdio;
 
 enum int DU_OK = 0;
@@ -1073,6 +1078,163 @@ int duInstallBiosBoot(BlockDev* b, int partIndex, const(ubyte)* img, ulong imgSi
 }
 
 // ---------------------------------------------------------------------------
+// copy the RAM file system to a volume
+// ---------------------------------------------------------------------------
+
+enum uint DU_RAM_MAX_DEPTH = 16;
+__gshared ubyte[16384] duCopyBuf;
+
+/// Depth of ramfs node `node` (1 = directly in "/"), 0 when too deep. `underMnt`: inside /mnt.
+uint duRamDepth(uint node, bool* underMnt) @nogc nothrow
+{
+    uint depth = 0;
+    int n = cast(int)node;
+    *underMnt = false;
+    while (n > 0)
+    {
+        if (cast(uint)n == ramMntNode)
+            *underMnt = true;
+        if (++depth > DU_RAM_MAX_DEPTH)
+            return 0;
+        n = ramNodes[n].parent;
+    }
+    return depth;
+}
+
+/// "prefix/dir/name" for a ramfs node. False if it does not fit in `cap` bytes.
+bool duRamPath(uint node, const(char)* prefix, char* out_, uint cap) @nogc nothrow
+{
+    uint[DU_RAM_MAX_DEPTH] chain;
+    uint depth = 0;
+    int n = cast(int)node;
+    while (n > 0)
+    {
+        if (depth >= DU_RAM_MAX_DEPTH)
+            return false;
+        chain[depth++] = cast(uint)n;
+        n = ramNodes[n].parent;
+    }
+    uint len = 0;
+    for (uint i = 0; prefix[i] != 0; i++)
+    {
+        if (len + 1 >= cap)
+            return false;
+        out_[len++] = prefix[i];
+    }
+    while (depth > 0)
+    {
+        depth--;
+        if (len + 1 >= cap)
+            return false;
+        out_[len++] = '/';
+        const(char)* name = ramNodes[chain[depth]].name.ptr;
+        for (uint i = 0; name[i] != 0; i++)
+        {
+            if (len + 1 >= cap)
+                return false;
+            out_[len++] = name[i];
+        }
+    }
+    out_[len] = 0;
+    return true;
+}
+
+/// Copy everything in the initial RAM file system (except /mnt) to the volume mounted in `slot`.
+/// Existing files of the same name are overwritten. Returns the number of failures; the
+/// counters tell what was copied. The first few errors are printed.
+uint duCopyRam(int slot, uint* dirs, uint* files, ulong* bytes) @nogc nothrow
+{
+    char[FS_PATH_MAX] prefix;
+    char[FS_PATH_MAX] path;
+    uint failed = 0;
+    *dirs = 0;
+    *files = 0;
+    *bytes = 0;
+
+    if (slot == fsRootSlot)
+        prefix[0] = 0;                  // the volume is "/" already
+    else
+    {
+        const(char)* head = "/mnt/";
+        uint k = 0;
+        for (; head[k] != 0; k++)
+            prefix[k] = head[k];
+        const(char)* name = mounts[slot].name.ptr;
+        for (uint i = 0; name[i] != 0 && k + 1 < prefix.length; i++)
+            prefix[k++] = name[i];
+        prefix[k] = 0;
+    }
+
+    // parents before children: by depth (a node's parent may have a higher index)
+    for (uint d = 1; d <= DU_RAM_MAX_DEPTH; d++)
+    {
+        for (uint i = 1; i < ramNodeCount; i++)
+        {
+            if (!ramNodes[i].used)
+                continue;
+            bool underMnt;
+            if (duRamDepth(i, &underMnt) != d || underMnt)
+                continue;
+            if (!duRamPath(i, prefix.ptr, path.ptr, FS_PATH_MAX))
+            {
+                failed++;
+                if (failed <= 5)
+                    cprintf("ramcopy: path too long: %s\n", ramNodes[i].name.ptr);
+                continue;
+            }
+
+            int r;
+            if (ramNodes[i].isDir)
+            {
+                r = fsCreate(path.ptr, true);
+                if (r == FW_ERR_EXISTS)
+                    r = FW_OK;
+                if (r == FW_OK)
+                    (*dirs)++;
+            }
+            else
+            {
+                int fslot;
+                ExfatEntry e;
+                FwFile wf;
+                r = fsOpenWrite(path.ptr, FS_O_CREATE | FS_O_TRUNC, &fslot, &e, &wf);
+                ulong off = 0;
+                ulong size = ramNodes[i].size;
+                while (r == FW_OK && off < size)
+                {
+                    ulong got = ramfsRead(i, off, duCopyBuf.ptr, duCopyBuf.length);
+                    if (got == 0)
+                    {
+                        r = FW_ERR_IO;
+                        break;
+                    }
+                    long w = fsWriteFile(fslot, &wf, off, duCopyBuf.ptr, got);
+                    if (w != cast(long)got)
+                        r = w < 0 ? cast(int)w : FW_ERR_NO_SPACE;
+                    else
+                        off += got;
+                }
+                if (r == FW_OK)
+                {
+                    (*files)++;
+                    *bytes += size;
+                }
+            }
+            if (r != FW_OK)
+            {
+                failed++;
+                if (failed <= 5)
+                    cprintf("ramcopy: %s: %s\n", path.ptr, fsErrorText(r));
+                else if (failed == 6)
+                    cprintf("ramcopy: more errors follow, not shown\n");
+            }
+        }
+    }
+    fsSyncAll();
+    return failed;
+}
+
+// ---------------------------------------------------------------------------
 // shell commands
 // ---------------------------------------------------------------------------
 
@@ -1359,4 +1521,35 @@ void duBiosInstall(const(char)* args) @nogc nothrow
     }
     cprintf("Limine BIOS boot code installed on %s, stage 1.5 at byte offset %llu.\n", b.name.ptr, loc);
     cprintf("Boot still needs limine-bios.sys and limine.conf on a partition of the disk.\n");
+}
+
+// ramcopy NAME
+void duRamcopy(const(char)* args) @nogc nothrow
+{
+    char* rest = duCopyArgs(args);
+    char* name = duNextWord(&rest);
+    if (name is null || duNextWord(&rest) !is null)
+    {
+        cprintf("Usage: ramcopy NAME   (NAME: a volume mounted with 'rw', see 'mount'; the RAM file system is copied into it)\n");
+        return;
+    }
+    int slot = fsFindMount(name);
+    if (slot < 0 || !mounts[slot].mounted)
+    {
+        cprintf("ramcopy: /mnt/%s is not mounted ('mount N rw' first)\n", name);
+        return;
+    }
+    if (!mounts[slot].vol.fat32 || !mounts[slot].vol.writable)
+    {
+        cprintf("ramcopy: /mnt/%s is not a FAT32 volume mounted for writing ('remount %s rw')\n", name, name);
+        return;
+    }
+    cprintf("Copying the RAM file system to /mnt/%s...\n", name);
+    uint dirs, files;
+    ulong bytes;
+    uint failed = duCopyRam(slot, &dirs, &files, &bytes);
+    cprintf("%u director%s, %u file(s), %llu KiB copied", dirs, dirs == 1 ? "y".ptr : "ies".ptr, files, bytes >> 10);
+    if (failed != 0)
+        cprintf(", %u FAILED", failed);
+    cprintf(".\n");
 }

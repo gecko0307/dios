@@ -29,11 +29,23 @@ biosinstall sata0 yes
 Mount the primary partition:
 
 ```
-mount 1 sata0p2
+mount 1 sata0p2 rw
 ```
 
 Install the system to the primary partition:
 
-cp 
+```
+ramcopy sata0p2
+```
 
-rmount id=0319-1D1F rw
+Make it the root:
+
+```
+rmount sata0p2 rw
+```
+
+Remove the boot media (CD/USB) and reboot:
+
+```
+reboot
+```
