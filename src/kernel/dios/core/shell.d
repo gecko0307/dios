@@ -523,6 +523,13 @@ void shellDisk() @nogc nothrow
             int ms = fsMountOfPartition(i);
             cprintf("  [%u] partition %u: start %llu, %llu MiB, %s", i, cast(uint)p.number,
                     p.startLba, (p.sectors * b.sectorSize) >> 20, p.kind.ptr);
+            uint volId;
+            if (fsPartitionVolumeId(i, &volId))
+            {
+                char[10] idText;
+                fsFormatVolumeId(volId, idText.ptr);
+                cprintf(", ID %s", idText.ptr);
+            }
             if (ms >= 0)
                 cprintf("   <- mounted as /mnt/%s%s%s", mounts[ms].name.ptr,
                         mounts[ms].vol.writable ? " (read-write)".ptr : "".ptr,
@@ -681,8 +688,10 @@ void shellUmount(const(char)* args) @nogc nothrow
 /*
  * rmount                  show the root
  * rmount ramfs            the initial RAM file system is the root again
- * rmount N|NAME [rw|ro]   N: partition number from 'disk' (mounted first if it is not yet);
- *                         NAME: a volume that is already mounted as /mnt/NAME
+ * rmount N|NAME|id=ID [rw|ro]
+ *                         N: partition number from 'disk' (mounted first if it is not yet);
+ *                         NAME: a volume that is already mounted as /mnt/NAME;
+ *                         id=1A2B-3C4D: the volume with this ID (shown by 'disk'), mounted first if need be
  */
 void shellRmount(const(char)* args) @nogc nothrow
 {
@@ -695,7 +704,7 @@ void shellRmount(const(char)* args) @nogc nothrow
         else
             cprintf("Root: volume '%s' (/mnt/%s)%s\n", mounts[fsRootSlot].vol.label.ptr, mounts[fsRootSlot].name.ptr,
                     mounts[fsRootSlot].vol.writable ? ", read-write".ptr : ", read-only".ptr);
-        cprintf("Usage: rmount N|NAME [rw|ro]   or   rmount ramfs\n");
+        cprintf("Usage: rmount N|NAME|id=ID [rw|ro]   or   rmount ramfs\n");
         return;
     }
 
@@ -710,7 +719,7 @@ void shellRmount(const(char)* args) @nogc nothrow
         }
         else
         {
-            cprintf("Usage: rmount N|NAME [rw|ro]   or   rmount ramfs\n");
+            cprintf("Usage: rmount N|NAME|id=ID [rw|ro]   or   rmount ramfs\n");
             return;
         }
     }
@@ -721,8 +730,37 @@ void shellRmount(const(char)* args) @nogc nothrow
     else
     {
         ulong n;
-        const(char)* end = diagParseNumber(target, &n);
-        if (end !is null && *end == 0)
+        bool byIndex = false;
+        if ((target[0] | 0x20) == 'i' && (target[1] | 0x20) == 'd' && target[2] == '=')
+        {
+            // id=1A2B-3C4D: the volume with this ID, wherever it is now (any disk, any mount name)
+            uint id;
+            if (!fsParseVolumeId(target + 3, &id))
+            {
+                cprintf("Bad volume ID '%s': expected 8 hex digits like 1A2B-3C4D\n", target + 3);
+                return;
+            }
+            uint found;
+            int part = fsFindPartitionByVolumeId(id, &found);
+            if (part < 0)
+            {
+                cprintf("No exFAT/FAT32 volume with ID %s ('disk' lists the IDs)\n", target + 3);
+                return;
+            }
+            if (found > 1)
+            {
+                cprintf("%u volumes have that ID (a cloned disk?): use the partition number instead ('disk').\n", found);
+                return;
+            }
+            n = cast(ulong)part;
+            byIndex = true;
+        }
+        else
+        {
+            const(char)* end = diagParseNumber(target, &n);
+            byIndex = end !is null && *end == 0;
+        }
+        if (byIndex)
         {
             // a partition number, as in 'mount N'; a volume called "5" is reached as /mnt/5
             if (n >= partitionCount)
@@ -1048,7 +1086,7 @@ void shellExecuteStr(char[] shellLine, size_t shellLineLength) @nogc nothrow
         cprintf("                      no args: mount all volumes found (read-only)\n");
         cprintf("  remount NAME rw|ro  Switch a mounted volume between read-write and read-only\n");
         cprintf("  umount NAME         Unmount /mnt/NAME (flushes a read-write volume)\n");
-        cprintf("  rmount N|NAME [rw|ro]  Make partition N (mounted if needed) or /mnt/NAME the root \"/\"\n");
+        cprintf("  rmount N|NAME|id=ID [rw|ro]  Make partition N, /mnt/NAME or the volume with this ID (1A2B-3C4D) the root \"/\"\n");
         cprintf("  rmount ramfs        Back to the initial RAM root;  rmount: show the current root\n");
         cprintf("  sync                Flush read-write volumes to the disk\n");
         cprintf("  cd [DIR]            Change the current directory\n");

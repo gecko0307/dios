@@ -277,6 +277,121 @@ int fsMountPartition(uint index, const(char)* name = null, bool writable = false
     return cast(int)slot;
 }
 
+// ---- Volume ID ----------------------------------------------------------------------------
+// The serial number every exFAT / FAT32 volume has in its boot sector, written like Windows
+// does: "1A2B-3C4D". It stays the same when the volume's mount name, partition number or disk
+// changes, which makes it a stable way to name a volume (rmount id=1A2B-3C4D).
+
+__gshared ubyte[4096] fsProbeBuf;       // boot sector of a volume that is not mounted
+
+int fsHexDigit(char c) @nogc nothrow
+{
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F')
+        return c - 'A' + 10;
+    return -1;
+}
+
+/// "1A2B-3C4D", "1a2b3c4d" or "0x1A2B3C4D" -> 32-bit ID. Exactly 8 hex digits, with at most one '-' after the fourth.
+bool fsParseVolumeId(const(char)* s, uint* id) @nogc nothrow
+{
+    if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X'))
+        s += 2;
+    uint v = 0;
+    uint digits = 0;
+    bool dash = false;
+    for (; *s != 0; s++)
+    {
+        if (*s == '-' && digits == 4 && !dash)
+        {
+            dash = true;
+            continue;
+        }
+        int d = fsHexDigit(*s);
+        if (d < 0 || digits == 8)
+            return false;
+        v = (v << 4) | cast(uint)d;
+        digits++;
+    }
+    if (digits != 8)
+        return false;
+    *id = v;
+    return true;
+}
+
+/// `out_` needs 10 bytes: "1A2B-3C4D" and the NUL.
+void fsFormatVolumeId(uint id, char* out_) @nogc nothrow
+{
+    immutable char[16] hex = "0123456789ABCDEF";
+    uint k = 0;
+    for (int shift = 28; shift >= 0; shift -= 4)
+    {
+        out_[k++] = hex[(id >> shift) & 0xF];
+        if (shift == 16)
+            out_[k++] = '-';
+    }
+    out_[k] = 0;
+}
+
+bool fsBytesAre(const(ubyte)* b, const(char)* text, uint n) @nogc nothrow
+{
+    for (uint i = 0; i < n; i++)
+        if (b[i] != cast(ubyte)text[i])
+            return false;
+    return true;
+}
+
+/// The ID of the exFAT / FAT32 volume in partition `index`. Mounted or not: an unmounted one
+/// is recognised by its boot sector, so nothing has to be mounted just to look.
+bool fsPartitionVolumeId(uint index, uint* id) @nogc nothrow
+{
+    if (index >= partitionCount || !partitions[index].valid)
+        return false;
+    int ms = fsMountOfPartition(index);
+    if (ms >= 0)
+    {
+        *id = mounts[ms].vol.serial;
+        return true;
+    }
+    Partition* p = &partitions[index];
+    BlockDev* b = &blockDevs[p.dev];
+    if (b.sectorSize > fsProbeBuf.length || !blockRead(b, p.startLba, 1, fsProbeBuf.ptr))
+        return false;
+    const(ubyte)* s = fsProbeBuf.ptr;
+    uint at;
+    if (fsBytesAre(s + 3, "EXFAT   ", 8))
+        at = 100;                       // exFAT: VolumeSerialNumber
+    else if (fsBytesAre(s + 82, "FAT32   ", 8))
+        at = 67;                        // FAT32: BS_VolID
+    else
+        return false;
+    *id = cast(uint)s[at] | (cast(uint)s[at + 1] << 8) | (cast(uint)s[at + 2] << 16) | (cast(uint)s[at + 3] << 24);
+    return true;
+}
+
+/// Partition holding the volume with this ID, or -1. `count` = how many volumes have it:
+/// a cloned disk or image repeats an ID, and then the ID names nothing for certain.
+int fsFindPartitionByVolumeId(uint id, uint* count) @nogc nothrow
+{
+    int found = -1;
+    uint n = 0;
+    for (uint i = 0; i < partitionCount; i++)
+    {
+        uint other;
+        if (fsPartitionVolumeId(i, &other) && other == id)
+        {
+            if (found < 0)
+                found = cast(int)i;
+            n++;
+        }
+    }
+    *count = n;
+    return found;
+}
+
 /// Mount slot of an absolute path below /mnt ("/mnt/NAME/..."), or -1. `rest` gets the
 /// part after the mount name.
 int fsMountOfPath(const(char)* full, const(char)** rest) @nogc nothrow
