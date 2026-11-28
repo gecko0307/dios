@@ -8,3 +8,4 @@
 *.img
 *.tar
 OVMF.fd
+disk
